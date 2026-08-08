@@ -1,0 +1,50 @@
+{
+  "_readme": "Caption pool for DuelDirector. Tokens: {ap}/{vp} attacker/victim piece, {ah}/{vh} house display names, {aa}/{va} house sigil animals, {am}/{vm} house mottos, {wh} winning house (checkmate only), {p}/{h}/{a}/{m} piece/house/animal/motto (promotion only). Entries may pin 'attacker' or 'victim' to a piece name (pawn/rook/knight/bishop/queen/king). All lines are original — archetype homage only, no borrowed dialogue or names.",
+  "houses": {
+    "FROST": { "name": "House Frost", "animal": "wolf", "motto": "The Cold Keeps Count", "color": "#9fc6ff" },
+    "EMBER": { "name": "House Ember", "animal": "lion", "motto": "Every Debt Burns", "color": "#ffb347" },
+    "STORM": { "name": "House Stormcrown", "animal": "stag", "motto": "Ours Is the Thunder", "color": "#f2e28a" },
+    "PYRE": { "name": "House Pyrewing", "animal": "dragon", "motto": "Fire Answers Fire", "color": "#ff6a4d" },
+    "TIDE": { "name": "House Saltide", "animal": "kraken", "motto": "The Deep Reclaims", "color": "#7fd0c9" },
+    "BLOOM": { "name": "House Highbloom", "animal": "rose", "motto": "Grow Where They Fall", "color": "#8fd17e" },
+    "DAWN": { "name": "House Dawnspear", "animal": "sun", "motto": "Unbent Beneath the Sun", "color": "#ffd36b" },
+    "GALE": { "name": "House Galecrest", "animal": "falcon", "motto": "The Sky Keeps Its Own", "color": "#cfd8ff" },
+    "FORD": { "name": "House Silverford", "animal": "trout", "motto": "The River Remembers", "color": "#b8c4cc" }
+  },
+  "kill_lines": [
+    { "text": "The {aa} of {ah} remembers, ser {vp}." },
+    { "text": "{ah} sends its regards, {vp}." },
+    { "text": "Every debt is paid in full. Ask the {vp}." },
+    { "text": "Winter marches south, and the {va} marches nowhere." },
+    { "text": "A {ap} of {ah} settles every account." },
+    { "text": "Sing no songs for the {vp} of {vh}." },
+    { "text": "The {va} kneels. The {aa} does not notice." },
+    { "text": "Steel keeps the only oath that matters, {vp}." },
+    { "text": "One less banner over {vh} tonight." },
+    { "text": "The board bends the knee to {ah}." },
+    { "text": "'{vm},' they said. The {aa} disagreed." },
+    { "text": "Crowns rust. The {aa} endures." },
+    { "text": "The {aa} was patient. The {vp} was not." },
+    { "text": "Night falls early for the {va}." },
+    { "text": "What is taken cannot be untaken, ser {vp}." },
+    { "text": "The {aa} dines first tonight." },
+    { "text": "Cold ground makes equals of us all, {vp}." },
+    { "text": "Tell {vh} their {vp} died standing. It will be a kindness." },
+    { "text": "No ransom for a {vp}. The knight rides on.", "attacker": "knight" },
+    { "text": "The tower falls on whom it pleases.", "attacker": "rook" },
+    { "text": "Old stones outlast bold {vp}s.", "attacker": "rook" },
+    { "text": "The queen mourns no one twice.", "attacker": "queen" },
+    { "text": "A pawn dreams, and a {vp} dies.", "attacker": "pawn" },
+    { "text": "The bishop keeps the faith. The {vp} kept nothing.", "attacker": "bishop" },
+    { "text": "Kings bury their own, ser {vp}.", "attacker": "king" },
+    { "text": "So falls the queen of {vh}. The songs will lie about this.", "victim": "queen" }
+  ],
+  "promotion_lines": [
+    "Rise — the {h} banner climbs another rank.",
+    "A {p} no more.",
+    "The {a} sharpens its teeth.",
+    "From mud to glory — {h} makes it so.",
+    "'{m}.' Today the words hold."
+  ],
+  "checkmate_line": "{wh} takes the throne"
+}
