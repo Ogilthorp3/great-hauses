@@ -1,0 +1,61 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://src/game.gd" id="1_game"]
+[ext_resource type="Script" path="res://src/board/board_view.gd" id="2_board"]
+[ext_resource type="Script" path="res://src/camera/orbit_camera.gd" id="3_cam"]
+
+[sub_resource type="Environment" id="Environment_gh"]
+background_mode = 1
+background_color = Color(0.027, 0.024, 0.031, 1)
+ambient_light_source = 2
+ambient_light_color = Color(0.22, 0.22, 0.28, 1)
+ambient_light_energy = 0.4
+tonemap_mode = 2
+tonemap_exposure = 1.05
+glow_enabled = true
+glow_intensity = 0.35
+fog_enabled = true
+fog_light_color = Color(0.05, 0.045, 0.06, 1)
+fog_density = 0.018
+
+[node name="Game" type="Node3D"]
+script = ExtResource("1_game")
+
+[node name="Board" type="Node3D" parent="."]
+script = ExtResource("2_board")
+
+[node name="CameraRig" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.4, 0)
+script = ExtResource("3_cam")
+
+[node name="Camera3D" type="Camera3D" parent="CameraRig"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 11.5)
+current = true
+fov = 50.0
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+transform = Transform3D(-0.70711, -0.24185, 0.66446, 0, 0.93969, 0.34202, -0.70711, 0.24185, -0.66446, 0, 6, 0)
+light_color = Color(0.55, 0.65, 0.8, 1)
+light_energy = 0.5
+shadow_enabled = true
+
+[node name="TorchA" type="OmniLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.4, 1.7, -3.2)
+light_color = Color(1, 0.58, 0.28, 1)
+light_energy = 2.4
+omni_range = 7.0
+
+[node name="TorchB" type="OmniLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3.5, 1.6, 3.1)
+light_color = Color(1, 0.55, 0.26, 1)
+light_energy = 2.2
+omni_range = 7.0
+
+[node name="TorchC" type="OmniLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.4, 1.5, -3.8)
+light_color = Color(1, 0.6, 0.3, 1)
+light_energy = 1.7
+omni_range = 6.0
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_gh")
