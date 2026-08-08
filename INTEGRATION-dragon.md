@@ -1,0 +1,125 @@
+# DRAGON SPECTATOR + ASHFALL — integration notes
+
+Module delivered 2026-08-08. Per the module boundary it touches **no game
+code**: `game.gd` / `game.tscn` / `duel_director.gd` / `piece_view.gd` are
+unmodified. Everything below is what the integrator wires up.
+
+## Files
+
+| File | What |
+|------|------|
+| `src/cinematics/dragon_rig.gd` | `DragonRig` — shared dragon.glb controller (loader + emissive lift + clip helpers + Head-bone mouth mount). `GreatHall.summon_champion_dragon()` now delegates here; **never duplicate the loader again**. |
+| `src/cinematics/dragon_spectator.gd` | `DragonSpectator` — the perched watcher + reactions + `play_ashfall()`. |
+| `src/cinematics/cine_caption.gd` | `CineCaption` — the cinematics caption style as a reusable layer (kept in lock-step with DuelDirector's private copy; this file is canonical if they drift). |
+| `src/cinematics/ashfall_test.gd` + `scenes/cinematics/ashfall_test.tscn` | Standalone self-checking stage (headless + windowed). |
+| `tests/test_dragon.gd` | Headless suite: rate limit, duel-cam gate, time_scale restore on completion/skip/free, loser cleanup, duck-scan, no-Light3D assert. |
+| `src/env/great_hall.gd` | Additions only: `spectator_perch()` anchor; `summon_champion_dragon()` refactored onto `DragonRig` (same behavior/API, e2e showcase asserts unchanged). |
+
+## Wiring (all in `game.gd`, ~10 lines)
+
+### 1. Spawn the spectator (in `_ready`, after `duel_director` exists)
+
+```gdscript
+const DragonSpectatorScript := preload("res://src/cinematics/dragon_spectator.gd")
+var spectator: DragonSpectator
+
+spectator = DragonSpectatorScript.new()
+spectator.name = "DragonSpectator"
+add_child(spectator)
+spectator.duel_director = duel_director   # reactions gate on is_active()
+spectator.board = board                   # lets react_capture take Vector2i squares
+var hall: GreatHall = get_node_or_null("GreatHall")
+if hall != null:
+    spectator.perch_position = hall.spectator_perch()
+```
+
+The perch (default `(0, 4.7, 11.2)`, yaw PI) sits above the far wall: out of
+the default orbit frame (pitch -0.85), visible the moment the player orbits
+upward. Slow `Flying_Idle` + bob + occasional head glance at the last-moved
+piece (LookAtModifier3D on the `Head` bone).
+
+### 2. Feed it moves (end of `_execute_ply`, after `_animate_move`)
+
+```gdscript
+spectator.notice_move(board.square_to_world(sq_of(move.to_square)))
+```
+
+This drives BOTH the rate limiter and the idle glance target. Without it the
+dragon still idles, but reactions stay locked after the first one.
+
+### 3. Reactions — connect YOUR signals to these methods
+
+Each returns `true` only when the reaction actually played. They
+self-enforce the contract: **max 1 reaction per 2 `notice_move` plies, and
+never while `duel_director.is_active()`** — callers just fire.
+
+| Call | Clip | Suggested source signal |
+|------|------|------------------------|
+| `spectator.react_capture(sq_of(move.captured_square))` | HitReact flinch + head snaps to the square | in `_animate_move`'s capture branch, right after `duel_director.play_duel(...)` returns (accepts `Vector2i` via `spectator.board`, or a `Vector3`) |
+| `spectator.react_blunder()` | 'No' head-shake | `oracle.oracle_stumbled` (`func(_r): spectator.react_blunder()`), or your eval-drop detector |
+| `spectator.react_brilliant()` | 'Yes' nod | counsel HEEDS / mate-found / promotion — integrator's judgment |
+
+### 4. ASHFALL — chain at checkmate, BEFORE the existing victory flow
+
+In `_end_sequence`, after the checkmate cinematic (king death) returns:
+
+```gdscript
+await duel_director.play_checkmate(king_view, winner_key,
+    func(): await king_view.die())
+# ── ASHFALL: the execution — king death → ashfall → victory flow ──
+var loser_pieces: Array = []
+for sq in views:
+    var pv: PieceView = views[sq]
+    if is_instance_valid(pv) and pv.side == loser:
+        loser_pieces.append(pv)
+await spectator.play_ashfall(loser,
+    duel_director.resolve_house_name(winner_key), loser_pieces)
+for sq in views.keys():           # ashfall freed those views
+    if not is_instance_valid(views[sq]):
+        views.erase(sq)
+```
+
+- `loser` is the same `PieceView.House` value `_end_sequence` already
+  computes. Passing `loser_pieces` explicitly is preferred; with an empty
+  array the module duck-scans the tree for `side == losing_side`
+  (kings excluded — his death already played).
+- Ordering caveat: `play_checkmate` fires `victory_panel_requested` during
+  its hold, i.e. before ASHFALL. Acceptable as-is; for the strict
+  king-death → ASHFALL → panel order, don't show the panel from that signal
+  — call `_show_match_end(...)` yourself after `await play_ashfall(...)`.
+- The board is already non-interactive here (`game_over == true`), and the
+  module owns click/Esc while active: **click = skip to end state** (all
+  losers removed, `Engine.time_scale == 1.0` — restored on normal end,
+  skip, failsafe overrun, and `_exit_tree`, same hygiene as DuelDirector).
+- Duration ≤ 6 s wall clock (defaults sum ≈ 5.3 s; the suite asserts it).
+- Signals the module EMITS (optional to observe): `ashfall_started`,
+  `ashfall_finished`.
+
+### 5. Championship interplay
+
+`start_championship_tableau()` summons its own throne dragon
+(`hall.summon_champion_dragon()`, now DragonRig-backed, unchanged
+behavior). To avoid two dragons in the throne frame, call
+`spectator.dismiss()` before starting the tableau.
+
+## Constraints honored (and asserted by `tests/test_dragon.gd`)
+
+- **NO `Light3D` on any module path** — the hall's 8-omni budget is full.
+  Fire is GPUParticles3D with emissive/unshaded materials only (additive
+  flame core + ember sparks, alpha smoke). The suite counts tree-wide
+  `Light3D` before/after every path and fails on any delta.
+- Charred pieces get **duplicated** materials — the shared
+  `PieceAssets.tinted_material` cache is never contaminated.
+- All cinematic timing is wall-clock (immune to the time_scale it bends).
+- Headless-safe end to end; headless boot stays clean.
+
+## Verification commands
+
+```bash
+G=/Applications/Godot.app/Contents/MacOS/Godot
+P=~/Projects/godot-lab/great-houses-chess
+$G --headless --path $P -s res://tests/test_dragon.gd            # unit suite
+$G --headless --path $P res://scenes/cinematics/ashfall_test.tscn -- --run-ashfall-test
+$G --path $P res://scenes/cinematics/ashfall_test.tscn -- --run-ashfall-test  # visual + screenshot
+# mid-fire frame lands at test_e2e/artifacts/module-previews/ashfall.png
+```

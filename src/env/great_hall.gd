@@ -30,10 +30,12 @@ const PILLAR_SCENE: PackedScene = preload("res://assets/kaykit-dungeon/pillar.gl
 const TABLE_SCENE: PackedScene = preload("res://assets/kaykit-dungeon/table_long.gltf")
 const CANDLE_SCENE: PackedScene = preload("res://assets/kaykit-dungeon/candle_triple.gltf")
 const THRONE_SCENE: PackedScene = preload("res://assets/custom-props/throne.glb")
-const DRAGON_SCENE: PackedScene = preload("res://assets/custom-props/dragon.glb")
 
 const TorchScript := preload("res://src/env/torch.gd")
 const BannerScript := preload("res://src/env/banner.gd")
+## Shared dragon controller (loader + clips + emissive lift) — the single
+## owner of the dragon.glb staging since the spectator/ashfall module.
+const DragonRigScript := preload("res://src/cinematics/dragon_rig.gd")
 
 const FLOOR_Y := -0.3         # hall floor top (plinth bottom)
 const WALL_HALF := 12.0       # wall centerline distance from board center
@@ -268,31 +270,18 @@ func _build_throne() -> void:
 
 
 ## Championship staging: the dragon appears above the throne on a Flying_Idle
-## loop. Idempotent — returns the live dragon. Adds NO lights.
+## loop. Idempotent — returns the live dragon. Adds NO lights (the rig's
+## emissive lift covers the glow). Loader lives in DragonRig (shared with
+## the spectator/ashfall module) — do not duplicate it here again.
 func summon_champion_dragon() -> Node3D:
 	if dragon != null:
 		return dragon
-	dragon = DRAGON_SCENE.instantiate()
-	dragon.name = "ChampionDragon"
-	dragon.position = DRAGON_HOVER
-	dragon.rotation.y = PI    # face the hall (toward -Z / the camera side)
-	dragon.scale = Vector3.ONE * DRAGON_SCALE
-	add_child(dragon)
-	# The 8-omni budget is FULL — no light for the dragon. Lift it out of
-	# pure black with a faint warm material self-glow instead (no light nodes).
-	for mi: MeshInstance3D in dragon.find_children("*", "MeshInstance3D", true, false):
-		for s in mi.mesh.get_surface_count():
-			var src := mi.get_active_material(s)
-			if src is StandardMaterial3D:
-				var m: StandardMaterial3D = src.duplicate()
-				m.emission_enabled = true
-				m.emission = Color(0.22, 0.17, 0.13)   # dim torch-glow lift
-				mi.set_surface_override_material(s, m)
-	var anims := dragon.find_children("*", "AnimationPlayer", true, false)
-	_dragon_anim = anims[0] if not anims.is_empty() else null
-	if _dragon_anim != null and _dragon_anim.has_animation("Flying_Idle"):
-		_dragon_anim.get_animation("Flying_Idle").loop_mode = Animation.LOOP_LINEAR
-		_dragon_anim.play("Flying_Idle")
+	var rig: DragonRig = DragonRigScript.spawn(
+		self, "ChampionDragon", DRAGON_HOVER, PI, DRAGON_SCALE)
+	# yaw PI: face the hall (toward -Z / the camera side)
+	dragon = rig
+	_dragon_anim = rig.anim
+	rig.play_loop("Flying_Idle")
 	return dragon
 
 
@@ -319,6 +308,15 @@ func throne_focus() -> Vector3:
 ## a step to the side so the blade fan stays unobstructed in the tableau.
 func throne_dais() -> Vector3:
 	return Vector3(0.55, FLOOR_Y, 9.6)
+
+
+## Perch anchor for the DragonSpectator module: high above the far wall,
+## above the default camera's frame (pitch -0.85 keeps it out of shot) but
+## in view the moment the player orbits up. Wall top sits at FLOOR_Y + 4;
+## the rig body floats ~1.6-3.1 u above its root, so the root rides just
+## over the wall line.
+func spectator_perch() -> Vector3:
+	return Vector3(0.0, FLOOR_Y + 5.0, WALL_HALF - 0.8)
 
 
 func _build_fill_lights() -> void:
