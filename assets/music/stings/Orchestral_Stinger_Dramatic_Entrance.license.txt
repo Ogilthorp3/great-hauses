@@ -1,0 +1,17 @@
+Title: Orchestral Stinger - Dramatic Entrance
+Artist: Thor Arisland (tcarisland)
+Category: DUEL STING (10 s orchestral hit, 192 bpm, D minor -> A major)
+File: Orchestral_Stinger_Dramatic_Entrance.mp3
+Duration: 0:10 (10.0 s)
+Source page: https://opengameart.org/content/orchestral-stinger-dramatic-entrance
+Direct download: https://opengameart.org/sites/default/files/orchestral_stinger_dramatic_entrance_0.mp3
+Downloaded: 2026-08-08
+License: Creative Commons Attribution 4.0 International (CC BY 4.0)
+License link: https://creativecommons.org/licenses/by/4.0/
+Full license text: ../licenses/CC-BY-4.0.txt
+Modifications: none
+
+Required attribution (show in-game credits):
+"Orchestral Stinger - Dramatic Entrance" by Thor Arisland (tcarisland), opengameart.org
+Licensed under Creative Commons: By Attribution 4.0 License
+http://creativecommons.org/licenses/by/4.0/

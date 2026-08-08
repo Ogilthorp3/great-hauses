@@ -1,0 +1,17 @@
+Title: Lord of the Land
+Artist: Kevin MacLeod (incompetech.com)
+Category: GAMEPLAY (medieval court underscore, loop-friendly)
+File: Lord_of_the_Land.mp3
+Duration: 3:07 (186.5 s)
+Source page: https://incompetech.com/music/royalty-free/music.html
+Direct download: https://incompetech.com/music/royalty-free/mp3-royaltyfree/Lord%20of%20the%20Land.mp3
+Downloaded: 2026-08-08
+License: Creative Commons Attribution 4.0 International (CC BY 4.0)
+License link: https://creativecommons.org/licenses/by/4.0/
+Full license text: ../licenses/CC-BY-4.0.txt
+Modifications: none
+
+Required attribution (show in-game credits):
+"Lord of the Land" Kevin MacLeod (incompetech.com)
+Licensed under Creative Commons: By Attribution 4.0 License
+http://creativecommons.org/licenses/by/4.0/

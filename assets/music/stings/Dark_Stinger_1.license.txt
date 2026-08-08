@@ -1,0 +1,17 @@
+Title: Dark Stinger 1
+Artist: Kresiek The Furry
+Category: DUEL STING (dark dramatic swell)
+File: Dark_Stinger_1.mp3
+Duration: 0:12 (12.0 s after trim)
+Source page: https://opengameart.org/content/dark-stinger-1
+Direct download: https://opengameart.org/sites/default/files/dark_stinger_0.ogg
+Downloaded: 2026-08-08
+License: CC0 1.0 Universal (Public Domain Dedication) — no attribution required
+License link: https://creativecommons.org/publicdomain/zero/1.0/
+Full license text: ../licenses/CC0-1.0.txt
+Modifications: trimmed from 20.6 s to 12.0 s (removed trailing silence, 0.8 s fade-out
+added at 11.2 s), resampled 96 kHz -> 48 kHz, re-encoded OGG Vorbis -> MP3 (LAME V2).
+CC0 permits modification without conditions.
+
+Attribution (optional, appreciated):
+"Dark Stinger 1" by Kresiek The Furry, opengameart.org (CC0)

@@ -1,0 +1,16 @@
+Title: Medieval: Victory Theme
+Artist: RandomMind
+Category: FANFARE (upbeat medieval victory theme)
+File: Medieval_Victory_Theme.mp3
+Duration: 0:32 (32.4 s)
+Source page: https://opengameart.org/content/medieval-victory-theme
+Direct download: https://opengameart.org/sites/default/files/victory_0.mp3
+Downloaded: 2026-08-08
+License: CC0 1.0 Universal (Public Domain Dedication) — no attribution required
+License link: https://creativecommons.org/publicdomain/zero/1.0/
+Full license text: ../licenses/CC0-1.0.txt
+Modifications: none
+Author note on source page: "Credits are appreciated but not required!"
+
+Attribution (optional, appreciated):
+"Medieval: Victory Theme" by RandomMind, opengameart.org (CC0)
