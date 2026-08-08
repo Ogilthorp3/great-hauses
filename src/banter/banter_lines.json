@@ -1,0 +1,744 @@
+{
+	"_readme": "Canned taunt pools for BanterEngine (src/banter/banter.gd). houses.<id>.<beat> -> array of line templates, keyed by the houses.json house id and the BanterEngine BEAT_* names. The speaker is always the RIVAL house: player_captured = the rival took the player's piece (gloat), rival_captured = the player took the rival's piece (wounded pride), check_given = the rival checks the player, check_received = the rival's king is checked. Token {piece} = lowercase piece name from the beat context; lines carrying it are only picked when the context supplies one. Every line is original, in-archetype homage only, and at most 90 characters AFTER substitution ({piece} is at longest 'knight'/'bishop', 6 chars). No line repeats within a game (engine dedupe).",
+	"version": 1,
+	"houses": {
+		"winterfang": {
+			"game_start": [
+				"Winter has come to your side of the board.",
+				"The pack is patient. Are you?",
+				"Snow hides the trail. It never hides the wolf.",
+				"We buried bolder banners than yours in the drifts.",
+				"Play. The cold will do the rest.",
+				"The wolf remembers every opening. Choose yours.",
+				"Frosthollow sends its regards, and its teeth.",
+				"Speak less. Move. The ice is listening."
+			],
+			"player_captured": [
+				"Meat for the pack, and winter to season it.",
+				"Your {piece} wandered from the fire. Wanderers freeze.",
+				"One less track in the snow.",
+				"The wolf remembers. Your {piece} will not.",
+				"Quietly done. Winter needs no trumpets.",
+				"The cold keeps what it catches.",
+				"No songs. The snow has already covered it.",
+				"Stray from the pack, die like the {piece} did."
+			],
+			"rival_captured": [
+				"Winter spends its wolves and buries its grief.",
+				"A tooth lost. The jaw remains.",
+				"The pack counts its dead once, then hunts.",
+				"You took a {piece}. The snow takes everything back.",
+				"Grief freezes fast in Frosthollow.",
+				"That one hunts ahead of us now. Nothing more.",
+				"Mark it. The wolf marks it too.",
+				"Cold ground holds our dead. The pack holds the line."
+			],
+			"check_given": [
+				"Hear that? The ice is cracking under your king.",
+				"The wolf is at the door, and the door is open.",
+				"Run, little king. Wolves love a running thing.",
+				"Winter touches your throne. Feel your fingers yet?",
+				"The pack circles. Count your exits.",
+				"Your king smells the snow now.",
+				"One howl, and your court scatters.",
+				"The long night starts at your gate."
+			],
+			"check_received": [
+				"You have my attention. Few live to keep it.",
+				"A cold wind. We were born in colder.",
+				"Bare your teeth once more. See what answers.",
+				"The wolf steps back to leap.",
+				"Frost does not fear a single spark.",
+				"Bold. Winter eats the bold last, but it eats them.",
+				"My king has stood in deeper snow than this.",
+				"You knocked. Now the pack knows where you are."
+			],
+			"player_blunder": [
+				"You left the gate open, and winter walked in.",
+				"The herd thanks you for the slow one.",
+				"Even the snow winced at that.",
+				"A gift? The wolf does not refuse meat.",
+				"You dropped your cloak in a blizzard. Brave.",
+				"That move will feed my pack for a week.",
+				"I have seen frozen things move with more purpose.",
+				"Hush. Do not startle it. It is helping us."
+			],
+			"endgame_win": [
+				"The snow settles. Only wolf tracks leave this field.",
+				"Winter came, as promised.",
+				"Tell your hall the cold was courteous, at least.",
+				"The wolf remembers this too.",
+				"Your banners will make fine bedding for the den.",
+				"It was never a fight. It was a season.",
+				"The long night is ours. Sleep poorly.",
+				"Frosthollow adds another pelt to the wall."
+			],
+			"endgame_lose": [
+				"Winter withdraws. Winter always returns.",
+				"You beat one wolf. The pack heard.",
+				"Enjoy the thaw. It is brief.",
+				"The wolf remembers. That is not a comfort to you.",
+				"Well hunted. Now sleep with a fire lit.",
+				"The snow forgets nothing it covers.",
+				"This board thaws. Our grudge does not.",
+				"First blood to you. Winter keeps the last."
+			]
+		},
+		"goldclaw": {
+			"game_start": [
+				"Your account opens today. Goldclaw collects.",
+				"Every move you make accrues interest.",
+				"We paid for this board. Twice.",
+				"A lion settles every account. Shall we begin yours?",
+				"Gildenspire wagered you last twenty moves. I took the under.",
+				"Consider this a loan of my attention.",
+				"Play well. Funerals are an expense.",
+				"The ledger is open. Do try to be worth the ink."
+			],
+			"player_captured": [
+				"The account is settled, and the interest was your {piece}.",
+				"Paid in full. Receipt available upon grief.",
+				"Your {piece} has been repossessed.",
+				"Gold buys patience. Patience buys your {piece}.",
+				"We call that a collection, not a capture.",
+				"Another entry in black ink. Yours, in red.",
+				"The lion thanks you for your custom.",
+				"Debts mature. So did that one."
+			],
+			"rival_captured": [
+				"An expense. Gildenspire budgets for expenses.",
+				"You took a {piece}. I took note. Notes compound.",
+				"Add it to my bill. You will not like the total.",
+				"The lion sheds a coin, never a tear.",
+				"Bold theft. We hang thieves in gilded rope.",
+				"That piece was insured.",
+				"A cost of doing conquest.",
+				"Spend your luck freely. It is not renewable."
+			],
+			"check_given": [
+				"Your king owes me. Kings pay in crowns.",
+				"Final notice, Your Grace.",
+				"The lion is at your treasury door.",
+				"Interest is due, and I have come in person.",
+				"Your throne is collateral now.",
+				"We foreclose on kingdoms, you know.",
+				"Check. Read the fine print of your position.",
+				"Crowns are heavy. Allow me to lighten yours."
+			],
+			"check_received": [
+				"A daring withdrawal. Watch the penalty fee.",
+				"You raise your price. I own the market.",
+				"Threatening a lion is expensive.",
+				"Noted, itemized, and shortly refunded.",
+				"My king has creditors more frightening than you.",
+				"You will pay for the fright. With interest.",
+				"One check does not empty a vault.",
+				"Careful. Ambition is taxed heavily here."
+			],
+			"player_blunder": [
+				"Was that a donation? Goldclaw accepts.",
+				"Generosity! In wartime! Marvelous.",
+				"I shall have that move framed in gold.",
+				"You bankrupted yourself with one signature.",
+				"The ledger says: oh dear.",
+				"Charity is a virtue. Ruinous, but a virtue.",
+				"That blunder appraises higher than your crown.",
+				"Even my counting-men gasped."
+			],
+			"endgame_win": [
+				"The account is closed. The lion is content.",
+				"Your kingdom, itemized, sold, and shelved.",
+				"Balance restored: everything to Goldclaw.",
+				"We shall spend your pride sparingly. It is a small sum.",
+				"Gilded chains still count as chains.",
+				"The final invoice is stamped in checkmate.",
+				"Pleasure doing conquest with you.",
+				"Every account settles. Yours settled cheap."
+			],
+			"endgame_lose": [
+				"A loss. Gildenspire amortizes losses.",
+				"You have won a debt you cannot imagine.",
+				"Keep the board. Consider it a down payment on revenge.",
+				"The lion pays this once. Never twice.",
+				"Audit your victory closely. It will not appraise well.",
+				"My gold remains. Your luck will not.",
+				"We file this under temporary.",
+				"Well played. The rematch carries compound interest."
+			]
+		},
+		"hartcrown": {
+			"game_start": [
+				"Smell the air. That is thunder, not perfume.",
+				"The storm answers to us. You answer to the storm.",
+				"Stormrest empties its sky for you today.",
+				"Antlers up. Clouds in. Begin.",
+				"You brought pieces. We brought weather.",
+				"Lightning drills its aim on lesser crowns.",
+				"The herd stamps once before the gale. Consider this once.",
+				"Pray for calm. It is not coming."
+			],
+			"player_captured": [
+				"Struck, as lightning strikes: once, and enough.",
+				"Your {piece} stood in the open field. Unwise, in our weather.",
+				"Thunder rolls; your {piece} does not rise.",
+				"The storm collects what the proud leave out.",
+				"One bolt, one fewer banner.",
+				"The sky keeps no prisoners.",
+				"Blame the weather. Everyone does.",
+				"The gale took it. The gale was me."
+			],
+			"rival_captured": [
+				"Rain falls. The storm remains.",
+				"You clipped an antler. The crown grows back sharper.",
+				"A {piece} to the wind. The wind repays.",
+				"Storms lose droplets. Count them if it comforts you.",
+				"The thunder mourns loudly, and briefly.",
+				"Struck a stag, have you. Now hear the herd.",
+				"That loss is just weather. Ours is coming.",
+				"The sky darkens when we grieve. Look up."
+			],
+			"check_given": [
+				"Thunder at your king's window.",
+				"The storm has found your throne's address.",
+				"Crowns make excellent lightning rods.",
+				"Hear it, king: the sky clearing its throat.",
+				"Your court runs for shelter. Wise court.",
+				"This is the first rumble. There are worse.",
+				"The stag lowers its antlers. The sky lowers with it.",
+				"Check, and the glass is falling."
+			],
+			"check_received": [
+				"You raise wind against a storm. Charming.",
+				"A drizzle threatens Stormrest. Fetch a cloak.",
+				"My king has stood under real thunder.",
+				"Blow harder. We were born in the gale.",
+				"The storm does not flinch at sparks.",
+				"You knock on the thunderhead. It opens.",
+				"Brief courage. Storm fronts pass through it.",
+				"Noted. The sky is drafting its reply."
+			],
+			"player_blunder": [
+				"You walked into the open field waving iron.",
+				"Even the lightning felt that was too easy.",
+				"The storm thanks you for standing still.",
+				"A gift on the wind, and the wind is mine.",
+				"That move had all the shelter of a bare hill.",
+				"You drop your shield in a hailstorm. Bold.",
+				"Thunder laughed. I heard it.",
+				"The weathervane plays better, and it only spins."
+			],
+			"endgame_win": [
+				"The storm passes. Nothing of yours remains standing.",
+				"Stormrest writes your name in the flood line.",
+				"The sky answered to us today, as always.",
+				"Count your pieces. The gale already has.",
+				"You were a fair sky. We were the season.",
+				"The antlered crown keeps its sky.",
+				"Rebuild. Storms enjoy rebuilt things.",
+				"Thunder has the last word. It usually does."
+			],
+			"endgame_lose": [
+				"The storm withdraws to gather rain.",
+				"You have beaten one squall. The season is long.",
+				"Skies clear. Memories do not.",
+				"Enjoy your sunlight. We are upwind of it.",
+				"The stag retreats uphill. Storms start uphill.",
+				"A calm day. It flatters you.",
+				"The herd remembers where it stumbled.",
+				"Keep the crown dry. We will be back for it wet."
+			]
+		},
+		"ashwyrm": {
+			"game_start": [
+				"My line burned kingdoms before yours learned to knock flint.",
+				"From ash, dominion. You supply the ash.",
+				"Cinderhold's forges are lit in your honor.",
+				"Old blood runs hot. Try to keep yours in.",
+				"Dragons do not wager. We simply collect the ashes.",
+				"You face forty generations of flame.",
+				"Every empire is kindling if you wait.",
+				"Bow now and save us both the smoke."
+			],
+			"player_captured": [
+				"Your {piece} met my ancestors. Briefly.",
+				"Add it to the pyre.",
+				"What the flame takes, the flame keeps.",
+				"One more shadow burned into the board.",
+				"The wyrm eats; the bloodline nods.",
+				"Cinders where your {piece} stood. Poetic.",
+				"Fire is an inheritance. That was a taste.",
+				"It burned quickly. Be proud of that much."
+			],
+			"rival_captured": [
+				"You struck scale. Scale grows back. Grudges too.",
+				"A {piece} of mine, for a feud with all of us.",
+				"My ancestors watched that. They are displeased.",
+				"Embers fall. The fire does not.",
+				"You have made the old blood boil. Well done. Run.",
+				"Wound a dragon and the whole bloodline learns your name.",
+				"That piece has joined the smoke. Smoke rises.",
+				"Forty generations hissed at once."
+			],
+			"check_given": [
+				"Your king stands in the fire's flight path.",
+				"The wyrm circles your throne. Feel the heat yet?",
+				"Kneel, or learn what crowns melt at.",
+				"Check. My ancestors send their warmth.",
+				"The shadow over your king has wings.",
+				"Thrones are flammable. A family observation.",
+				"Breathe in. That is the smell of dominion.",
+				"The old fire has found your door."
+			],
+			"check_received": [
+				"You wave a candle at a wyrm.",
+				"My king sleeps on coals. Your threat is a draft.",
+				"Sparks amuse the fire.",
+				"Bold ember. You will make fine kindling.",
+				"The bloodline has survived worse than you, twice a century.",
+				"Singe a dragon, inherit a war.",
+				"Heat rises. So does the price of my patience.",
+				"You have the fire's attention. Regret is natural."
+			],
+			"player_blunder": [
+				"You basted yourself. The fire is grateful.",
+				"Even the smoke rolled its eyes.",
+				"My ancestors laughed. The dead laughing — think on that.",
+				"You walked into the furnace asking after warmth.",
+				"A move like that deserves its own funeral pyre.",
+				"The wyrm need not hunt what crawls onto the spit.",
+				"From error, dominion. Mine, to be clear.",
+				"Generations of my line waited for a gift like that."
+			],
+			"endgame_win": [
+				"From ash, dominion. You were the ash.",
+				"Another kingdom for the mantel of Cinderhold.",
+				"The fire is fed. The bloodline smiles.",
+				"Your banners burn well. Almost a compliment.",
+				"Tell your heirs what the heat was like.",
+				"History is written in soot tonight.",
+				"The wyrm coils atop one more crown.",
+				"It ends as the old songs end: smoke, and us."
+			],
+			"endgame_lose": [
+				"Fire retreats to the mountain. It does not die there.",
+				"You have won a truce with the flame. Truces expire.",
+				"My ancestors are patient. It is their only virtue.",
+				"Scales dent. Dynasties do not.",
+				"Savor it. Few outlive the telling of it.",
+				"The forge cools tonight, and hungers tomorrow.",
+				"You beat the wyrm, not the bloodline.",
+				"Keep your victory near water. Trust me in this."
+			]
+		},
+		"tidegrip": {
+			"game_start": [
+				"The tide is already around your ankles.",
+				"Brinehold greets you. The deep will greet you later.",
+				"Every board is a seabed if you play long enough.",
+				"Salt preserves. It will preserve your regrets.",
+				"We do not beat foes. We submerge them.",
+				"The kraken counts arms. You will count losses.",
+				"Breathe deep now. Spare breaths are precious later.",
+				"The tide takes what it pleases. It is pleased to meet you."
+			],
+			"player_captured": [
+				"Down it goes. The deep keeps neat records.",
+				"Your {piece} has learned to swim. Poorly.",
+				"The tide was owed. The tide collected.",
+				"One more anchor for my garden.",
+				"Salt closes over your {piece}. Salt closes over everything.",
+				"The deep thanks you for the offering.",
+				"It struggled less than most.",
+				"Another wreck on my reef."
+			],
+			"rival_captured": [
+				"You have splashed the ocean. The ocean noticed.",
+				"A tentacle lost; the grip remains.",
+				"The sea buries its own in silence. Mind the silence.",
+				"Take a {piece} from the tide, owe the tide a fleet.",
+				"The deep does not grieve. It swells.",
+				"Brine stings. It also remembers.",
+				"You have hooked something too large to land.",
+				"The water darkens. That is not weather."
+			],
+			"check_given": [
+				"The water is at your king's chin.",
+				"Feel the undertow, Your Grace?",
+				"Your throne room is flooding from the floor up.",
+				"The kraken's arm is around the castle now.",
+				"Kings float briefly. Crowns never do.",
+				"Check. High tide comes early tonight.",
+				"The deep is drafting a place for your king.",
+				"Hold your breath, majesty. Practice."
+			],
+			"check_received": [
+				"You prod the deep with a rowing oar.",
+				"Rage all you like at the surface; below is mine.",
+				"My king anchors well. Yours will learn how.",
+				"Ripples. The deep answers ripples with waves.",
+				"You cannot drown what lives drowned.",
+				"Prick a kraken, wake eight answers.",
+				"The salt has survived every navy ever built.",
+				"Brave splash. The wake is coming."
+			],
+			"player_blunder": [
+				"You dove headfirst into the shallows.",
+				"The tide did not even have to rise for that.",
+				"You bailed water into your own boat.",
+				"The deep loves a volunteer.",
+				"That move had an anchor tied to it.",
+				"You fed the kraken with your own hands. Both of them.",
+				"Even the gulls jeered.",
+				"Swim toward the maw, then. It saves us the reaching."
+			],
+			"endgame_win": [
+				"The tide went out. You went with it.",
+				"Another kingdom sleeps in my trench.",
+				"Salt water holds no grudges. It holds everything else.",
+				"The deep is pleased. The deep is rarely pleased.",
+				"Your fleet of pieces rests on my seabed now.",
+				"It is quiet down there. You will grow used to it.",
+				"Brinehold marks the waterline where your reign stood.",
+				"The kraken loosens its grip. Nothing falls out."
+			],
+			"endgame_lose": [
+				"The tide withdraws. Study what that means.",
+				"You have beaten the surf, not the sea.",
+				"Ebb today, flood tomorrow.",
+				"The deep forgets nothing it touches, and it touched you.",
+				"Keep to high ground the rest of your days.",
+				"A dry victory. They rot fastest.",
+				"Eight arms, one lesson learned. The next grip holds.",
+				"The salt in your wounds is mine. A keepsake."
+			]
+		},
+		"thornvale": {
+			"game_start": [
+				"What a charming army. It will make lovely mulch.",
+				"Bloomhall sends its warmest regards, and its thorns.",
+				"Do play your best. Wilted opponents depress me.",
+				"Every garden needs pruning. Welcome to mine.",
+				"I adore meeting new people. Briefly.",
+				"Mind the roses as you fall. They mind you.",
+				"We shall be great friends, one of us at the funeral.",
+				"Such brave colors you fly. They will press beautifully."
+			],
+			"player_captured": [
+				"Deadheading. The garden insists.",
+				"Your {piece}? Composted, darling, with full honors.",
+				"How sad. And yet the roses have never looked better.",
+				"Plucked. Do send another; the vase is half empty.",
+				"A thorn is only cruel if you insist on reaching in.",
+				"I clipped it gently. It hardly felt the century end.",
+				"The bouquet grows. My condolences, sincerely arranged.",
+				"It died as it lived: decoratively."
+			],
+			"rival_captured": [
+				"You trampled a bloom. The briar noticed.",
+				"Cut a rose, keep the scent. It follows you home.",
+				"One petal falls. The thorns take attendance.",
+				"How rude. And gardeners wonder why hedges bite.",
+				"That {piece} was dear to me. Note the past tense. Yours is coming.",
+				"Grief, like fertilizer, makes things grow. Sharp things.",
+				"You have picked a flower from a poisoned bed. Bold.",
+				"The garden mourns in green, and repays in red."
+			],
+			"check_given": [
+				"Your king has been invited into the hedge maze.",
+				"Check, dear. Do mind the thorns on your way out.",
+				"The vines have found the throne's legs.",
+				"Royal blood is excellent for the soil, I am told.",
+				"A crown among roses. How briefly picturesque.",
+				"The garden path narrows, majesty.",
+				"One prick, and such important people swoon.",
+				"The maze has one exit. I am standing in it."
+			],
+			"check_received": [
+				"Goodness. Someone has found the garden shears.",
+				"You threaten me in my own arbor. How refreshing.",
+				"Careful, dear. Roses bite back on principle.",
+				"A thorn in my direction? Flattery, almost.",
+				"My king naps beneath the briar. Wake him at your peril.",
+				"Such vigor. It will make the wilting sweeter.",
+				"You have my attention and my sympathy.",
+				"Prune me once, and the whole garden learns your scent."
+			],
+			"player_blunder": [
+				"Oh, darling. Even the weeds are embarrassed.",
+				"You watered my garden with your own blood. Generous.",
+				"A gift! And here I brought only venom.",
+				"That move belongs pressed in a book of warnings.",
+				"I could not have arranged your ruin more beautifully myself.",
+				"The roses applauded. Quietly. With thorns.",
+				"Do that again; the compost is nearly full.",
+				"How courteous, laying yourself upon the trellis."
+			],
+			"endgame_win": [
+				"The garden takes the field. It always does, given time.",
+				"Sleep among the roses. They insisted.",
+				"Your kingdom will make a lovely arrangement.",
+				"Checkmate, darling. Do keep a thorn as a memento.",
+				"Every rose keeps its thorns. Now they keep your crown.",
+				"Bloomhall blooms brightest on occasions like this.",
+				"I shall plant something lovely where your army stood.",
+				"You wilted with such dignity. Almost."
+			],
+			"endgame_lose": [
+				"You have cut the garden back. Gardens adore being cut back.",
+				"Enjoy the bouquet of victory. Smell it closely.",
+				"A rose bows in winter and owns the spring.",
+				"You won, darling. Do check your gloves for thorns.",
+				"The briar retreats underground. Where it grows best.",
+				"Savor this. I will be fertilizing my patience.",
+				"Charming victory. The petals you crushed had sisters.",
+				"The garden concedes the season, never the soil."
+			]
+		},
+		"duskfire": {
+			"game_start": [
+				"The sun kneels for no one. Practice kneeling regardless.",
+				"You stand in Sunspire's light. Try to cast a worthy shadow.",
+				"Dawn broke for my benefit. You may share it.",
+				"Stare at my banners too long and you will go blind.",
+				"The day is mine. The board is merely part of the day.",
+				"Radiance does not negotiate.",
+				"You are welcome to the light. The light knows its owner.",
+				"Begin. The sun does not wait, even for entertainment."
+			],
+			"player_captured": [
+				"Eclipsed. Your {piece}, that is.",
+				"What the light touches, the light may take.",
+				"Your {piece} stood in my glare. Things burn there.",
+				"Noon came early for that one.",
+				"The sun claims its due, and it is always due.",
+				"Brightness has a body count.",
+				"It stood between me and glory. It has stopped.",
+				"One less smudge on my horizon."
+			],
+			"rival_captured": [
+				"You have stolen a sunbeam. See how long you hold it.",
+				"The sun sheds light freely. Not blood. That it counts.",
+				"A flare lost. The blaze remains.",
+				"Even dimmed, I outshine your whole line.",
+				"Clouds pass. That is all you are: a passing cloud.",
+				"The sun has set a thousand times. It has always risen.",
+				"Wound the day, and the day still owns the sky.",
+				"Pride does not bleed. It brightens."
+			],
+			"check_given": [
+				"High noon over your throne, Your Grace.",
+				"Your king squints. He should.",
+				"The light has found every crack in your keep.",
+				"Kneel now and call it sunstroke.",
+				"Check. The shade you seek does not exist.",
+				"Crowns glitter best right before they melt.",
+				"The sun stares down at your king. The sun does not blink.",
+				"Daybreak comes for you, and it is not gentle."
+			],
+			"check_received": [
+				"You dare cast a shadow on Sunspire?",
+				"A candle challenges the noon. Adorable.",
+				"The sun has weathered eclipses grander than you.",
+				"Dim me? Armies of night have tried.",
+				"My king stands in his own light. It does not flicker.",
+				"Insolence! Magnificent, doomed insolence.",
+				"Enjoy your moment of shade. Noon is coming back.",
+				"The horizon is full of those who challenged the dawn."
+			],
+			"player_blunder": [
+				"Staring into the sun, were you?",
+				"The light revealed your plan. There was no plan.",
+				"Glory blinds. So, it seems, does folly.",
+				"The sun saw that. The sun sees everything. Regrettably.",
+				"You have donated your kingdom to the day.",
+				"Even my shadow played better, and it only mimics.",
+				"A blaze of glory requires glory.",
+				"The dawn applauds. Mockingly."
+			],
+			"endgame_win": [
+				"The sun sets on you alone. I keep the sky.",
+				"Sunspire shines. The board is scorched clean.",
+				"A cloud passed. The sky does not recall its name.",
+				"Radiance, vindicated.",
+				"Look upon my noon and despair politely.",
+				"The light wins. This is not news.",
+				"Your shadow was the best of you, and it has fled.",
+				"The sun kneels for no one. You kneel for the sun."
+			],
+			"endgame_lose": [
+				"An eclipse. They are brief, and then the burning.",
+				"You have won the night. The dawn is already dressing for war.",
+				"The sun sets. Consult your histories on what follows.",
+				"Enjoy the dark. It suits you.",
+				"Pride dims. Pride does not die.",
+				"Savor dusk, my friend. I own the other end of it.",
+				"The horizon holds my banner. It will rise.",
+				"One night. You have purchased one night."
+			]
+		},
+		"swiftcrest": {
+			"game_start": [
+				"Honor rides the high wind. Try to keep sight of us.",
+				"Skyloft looks down on your position. Literally, and otherwise.",
+				"The falcon stoops only for worthy prey. Flatter yourself.",
+				"We fight clean, strike fast, and mourn briefly.",
+				"The high wind carries our banners and your doubts.",
+				"Look up. Keep looking up. That is where the war is.",
+				"Wings before crowns. Begin.",
+				"May your play deserve the height of my attention."
+			],
+			"player_captured": [
+				"The stoop was clean. Your {piece} never saw the sky darken.",
+				"Taken on the wing, with honor.",
+				"From this height, your {piece} was already small.",
+				"The talon closes once. It is enough.",
+				"A swift end is the only courtesy war allows.",
+				"It flew too low. Most things do.",
+				"The wind keeps what the falcon drops.",
+				"Struck fair, struck fast, struck first."
+			],
+			"rival_captured": [
+				"A feather lost in a clean fight. So be it.",
+				"You struck one of mine fairly. I will return the favor. Fairly.",
+				"The flock climbs higher when it grieves.",
+				"Honor concedes the strike. The sky concedes nothing.",
+				"That {piece} died on the wing. There are worse deaths.",
+				"Well struck. The sky files no complaint. I do.",
+				"Feathers fall. The bird does not.",
+				"You have earned an honorable enemy. Few are so lucky."
+			],
+			"check_given": [
+				"The shadow of wings crosses your throne.",
+				"Your king is in the open field, and I am in the sun.",
+				"Check, called fairly, from above.",
+				"The falcon has marked your king. Marks fade slowly.",
+				"Height, sight, strike. Your Grace, that is all war is.",
+				"The wind howls at your battlements now.",
+				"Look to your king. The sky already has.",
+				"No walls reach high enough. None ever have."
+			],
+			"check_received": [
+				"A bold cast. Honor acknowledges it. Altitude laughs at it.",
+				"You aim arrows at the wind.",
+				"My king perches high. Climb, if you dare the fall.",
+				"Threat noted, and answered from above.",
+				"The falcon dives through worse than courage.",
+				"You have reached for the sky. Now comes the reaching back.",
+				"Fair strike. The reply will also be fair. And faster.",
+				"Wings do not tremble. They tilt."
+			],
+			"player_blunder": [
+				"You flew into the cliff with your eyes open.",
+				"Even fledglings check the wind first.",
+				"An honorable fight was offered. You brought that instead.",
+				"From up here, we all saw it coming. All of us.",
+				"The wind gasped. The wind never gasps.",
+				"You have grounded yourself, saving me the stoop.",
+				"A wet hen glides better.",
+				"You fell without even the dignity of being pushed."
+			],
+			"endgame_win": [
+				"The sky keeps its own. The field keeps you.",
+				"Checkmate, struck clean from the high wind.",
+				"Honor is satisfied. The falcon is fed. Good day.",
+				"Your banners lie flat. Ours never touched the ground.",
+				"You fought the vertical war and lost it.",
+				"Skyloft adds a crest to the aerie wall.",
+				"It ends where it began: with us above.",
+				"Salute your conqueror. The sun is behind me; squint."
+			],
+			"endgame_lose": [
+				"Well flown. The falcon salutes, and climbs to return.",
+				"You have won the ground. Keep it. We keep the sky.",
+				"Defeat, taken with honor. Returned in time, with talons.",
+				"The wind shifts. It always shifts back.",
+				"Clip one falcon and the whole aerie sharpens.",
+				"Honor in defeat is still honor. Remember I said so.",
+				"The high wind circles. So shall we.",
+				"You beat the bird, never the height."
+			]
+		},
+		"silverbrook": {
+			"game_start": [
+				"The river binds us all. Today it binds you to me.",
+				"Rivergate is patient. The current is not.",
+				"We have outlasted every stone thrown at us. Throw yours.",
+				"Sit by the river long enough, and your king floats past.",
+				"The trout swims against the current for sport. This is sport.",
+				"Slow water wears down mountains. Imagine what it does to you.",
+				"Begin. The river has already begun.",
+				"Every game flows one way in the end. Ours."
+			],
+			"player_captured": [
+				"The current took your {piece}. The current was always going to.",
+				"Swept downstream, with the rest of your plans.",
+				"Patience, cast, catch. Your {piece} took the lure.",
+				"The river collects tolls at Rivergate. That was one.",
+				"Another stone worn smooth.",
+				"It fought the current. The current did not notice.",
+				"Downstream is that way. Your {piece} knows now.",
+				"The net was set three moves ago. You just felt it."
+			],
+			"rival_captured": [
+				"A ripple. Watch how far it travels.",
+				"The river loses a drop and remains the river.",
+				"You have caught one trout. The school dives deeper.",
+				"That loss will flow back to your gate. Water always returns.",
+				"Take from the river; the river takes note downstream.",
+				"One {piece} to the shallows. The deep current holds.",
+				"We mourn like water: quietly, and while moving.",
+				"You have muddied the water. We see fine in mud."
+			],
+			"check_given": [
+				"The water is rising at your king's feet, drop by drop.",
+				"The current has found the crack in your dam.",
+				"Your king swims upstream now. They tire, upstream.",
+				"Check. The river is patient; your position is not.",
+				"The ford is closed, Your Grace. All fords are closed.",
+				"Slowly, then suddenly. This is the suddenly.",
+				"Your throne sits on a floodplain. We drew the maps.",
+				"The river bends. Around your king, just now."
+			],
+			"check_received": [
+				"You have thrown a stone in the river. The river thanks you.",
+				"Splash away. The current does not startle.",
+				"My king has waded deeper waters than your threat.",
+				"The trout has felt hooks before. It grew wise. And large.",
+				"Press on. Rivers love an eager guest.",
+				"A brave current you make. Ours is older.",
+				"We bend, we do not break. Ask the mountains.",
+				"Noted, as the river notes rain."
+			],
+			"player_blunder": [
+				"You have swum ashore to argue with the fisherman.",
+				"The river did not take that from you. You threw it in.",
+				"Even driftwood steers better.",
+				"Patience is a virtue. So, apparently, is waiting for you.",
+				"That move will be taught at Rivergate. As a warning.",
+				"You leapt into the creel of your own accord.",
+				"The current pauses, purely out of embarrassment.",
+				"Upstream, downstream — you managed to drown midstream."
+			],
+			"endgame_win": [
+				"The river binds us all. Today it bound a king.",
+				"Checkmate. Slow water, sure water.",
+				"You dammed and you dammed, and still the river won.",
+				"Rivergate opens for our returning colors.",
+				"The mountain is now sand. The trout is still a trout.",
+				"Every stream met the sea today. As drawn.",
+				"We were never in a hurry. Note where hurry got you.",
+				"The current carries our banner past your keep. Wave."
+			],
+			"endgame_lose": [
+				"The river yields the field, and keeps flowing.",
+				"You have beaten water with a sword. Look at your sword.",
+				"We will be back with the spring melt.",
+				"A dry season. There are no dry centuries.",
+				"The trout slips the hook wiser. Always wiser.",
+				"You won against a current. It is behind you now.",
+				"Patience lost a battle. Patience does not lose wars.",
+				"Mark the water line. It will rise past it."
+			]
+		}
+	}
+}
