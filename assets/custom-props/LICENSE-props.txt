@@ -18,3 +18,25 @@ GLBs bit-for-bit equivalent geometry.
 
 License: these assets belong to the Great Houses project (Bertrand Nepveu).
 Internal project use; relicense as the project owner sees fit.
+
+cape.glb, watchtower.glb, crests/*.glb, glyph-rings/*.glb — provenance
+======================================================================
+
+Added 2026-08-08 (HOUSE COSTUMES + PIECE READABILITY + BANNER-ROOK module):
+ORIGINAL procedural geometry, headless Blender 4.0.2, committed scripts in
+tools/props/ (all deterministic, seeded RNG):
+
+  cape.glb                     <- tools/props/make_cape.py        (seed 4114)
+  watchtower.glb               <- tools/props/make_watchtower.py  (seed 1453)
+  crests/crest_<house>.glb x9  <- tools/props/make_crests.py      (seed 9917
+                                  + per-house salt; colors read from
+                                  src/houses/houses.json)
+  glyph-rings/glyph_ring_<type>.glb x6
+                               <- tools/props/make_glyph_rings.py
+                                  (deterministic, no RNG)
+
+The glyph rings extrude the Unicode chess glyphs U+265A-U+265F as text
+geometry using a system font (Apple Symbols / Arial Unicode, with Blender's
+bundled Noto Sans Symbols 2 as fallback) — font OUTLINES used as mesh input
+only, no font files are distributed. All other geometry is primitive-built;
+materials are plain Principled BSDF constants.

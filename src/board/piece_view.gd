@@ -1,12 +1,22 @@
 class_name PieceView
 extends Node3D
-## A Great Houses combatant on the board — a real KayKit character (or a
-## Kenney castle tower for the rook), tinted per house, animated from the
-## shared Rig_Medium animation libraries.
+## A Great Houses combatant on the board — a real KayKit character (or the
+## banner watchtower for the rook), tinted per house, animated from the
+## shared Rig_Medium animation libraries, and COSTUMED in two layers:
+##
+##   TYPE layer (identical across houses — instant readability):
+##     strict height grading (PieceAssets.TYPE_HEIGHT) · signature gear
+##     (pawn sword+round shield · knight sword+kite shield · bishop
+##     staff+tome · queen bow+quiver · king crown+cape) · an engraved
+##     type-glyph ring under every piece (brightens on set_selected).
+##   HOUSE layer (flourish — never changes the type silhouette):
+##     palette tints · helmet crests on knight/queen/king · sigil decals
+##     on shields · the rook's banner + fluttering pennant · Tidegrip
+##     fields the skeleton cast (same rig, same anims).
 ##
 ## Model-agnostic API (callers touch nothing else):
 ##   setup(type, side, house_id="") · move_to(world_pos, walk_time) ·
-##   play_capture(victim) · die() · spawn_flourish()
+##   play_capture(victim) · die() · spawn_flourish() · set_selected(on)
 ## house_id skins the piece with HouseRegistry tints; "" keeps the legacy
 ## FROST/EMBER consts (fully backward compatible).
 
@@ -29,16 +39,6 @@ const HOUSE_TINT_TOWER := {
 }
 const TINT_SATURATION := 0.25
 
-const CHARACTER_SCENES := {
-	Type.PAWN: preload("res://assets/kaykit-adventurers/Barbarian.glb"),
-	Type.KNIGHT: preload("res://assets/kaykit-adventurers/Knight.glb"),
-	Type.BISHOP: preload("res://assets/kaykit-adventurers/Mage.glb"),
-	Type.QUEEN: preload("res://assets/kaykit-adventurers/Ranger.glb"),
-	Type.KING: preload("res://assets/kaykit-adventurers/Rogue_Hooded.glb"),
-}
-const TOWER_BASE := preload("res://assets/kenney-castle-kit/tower-square-base.glb")
-const TOWER_TOP := preload("res://assets/kenney-castle-kit/tower-square-top.glb")
-
 const ANIM_IDLE := "Idle_A"
 const ANIM_WALK := "Walking_A"
 const ANIM_THROW := "Throw"
@@ -46,9 +46,11 @@ const ANIM_HIT := "Hit_A"
 const ANIM_DEATH := "Death_A"
 const ANIM_SPAWN := "Spawn_Ground"
 
-const CHARACTER_SCALE := 0.46
-const KING_SCALE := 0.56       # bigger than the ranks + a crown (custom prop, _attach_crown)
-const TOWER_SCALE := 0.78      # imported tower base is 1.0u tall + 0.3u crenellated top
+## Head-bone mount for house crests (crown-attach pattern): sits above the
+## crown line so king crest + crown coexist.
+const CREST_MOUNT_POS := Vector3(0.0, 1.04, 0.0)
+## Chest-bone mount for the king's cape (Skeleton_Rogue cape convention).
+const CAPE_MOUNT_POS := Vector3(0.0, 0.04, -0.08)
 
 var piece_type: Type = Type.PAWN
 var side: House = House.FROST
@@ -60,6 +62,9 @@ var death_anim := ""
 var _model: Node3D
 var _anim: AnimationPlayer  # null for the rook (static tower)
 var _home_yaw := 0.0
+var _glyph_ring: Node3D
+var _glyph_mat: StandardMaterial3D  # per-piece duplicate; brightened on select
+var _glyph_tween: Tween
 
 
 func setup(new_type: Type, new_side: House, new_house_id: String = "") -> void:
@@ -69,13 +74,37 @@ func setup(new_type: Type, new_side: House, new_house_id: String = "") -> void:
 	for child in get_children():
 		child.queue_free()
 	_anim = null
+	_glyph_ring = null
+	_glyph_mat = null
 	if piece_type == Type.ROOK:
 		_build_tower()
 	else:
 		_build_character()
+	_build_glyph_ring()
 	# Face the enemy line: Frost looks +Z (toward Ember), Ember looks -Z.
 	_home_yaw = 0.0 if side == House.FROST else PI
 	rotation.y = _home_yaw
+	# Counter-rotate the ring so the engraved glyph reads upright from the
+	# default camera (behind the player at -Z) for BOTH armies.
+	if _glyph_ring != null:
+		_glyph_ring.rotation.y = -_home_yaw
+		if piece_type == Type.ROOK:
+			# the watchtower plinth is wider than a character's feet — slide
+			# the ring along its own forward axis so the medallion clears it
+			_glyph_ring.translate_object_local(Vector3(0.0, 0.0, -0.14))
+
+
+## Selection feedback: the type-glyph ring warms from engraving to beacon.
+func set_selected(selected: bool) -> void:
+	if _glyph_mat == null:
+		return
+	if _glyph_tween != null:
+		_glyph_tween.kill()
+	var target := PieceAssets.GLYPH_ENERGY_SELECTED if selected \
+			else PieceAssets.GLYPH_ENERGY_REST
+	_glyph_tween = create_tween()
+	_glyph_tween.tween_property(_glyph_mat, "emission_energy_multiplier",
+			target, 0.15).set_trans(Tween.TRANS_SINE)
 
 
 # -- movement --------------------------------------------------------------
@@ -144,6 +173,7 @@ func die() -> void:
 		await get_tree().create_timer(PieceAssets.anim_length(ANIM_DEATH)).timeout
 	else:
 		death_anim = "Tower_Crumble"
+		_drop_banner()   # the banner tears free and falls with the tower
 		var fall := create_tween()
 		fall.tween_property(self, "rotation:z", rotation.z + PI * 0.28, 0.4) \
 			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
@@ -247,22 +277,104 @@ func _strike_flash(victim_pos: Vector3) -> void:
 
 
 func _build_character() -> void:
-	_model = CHARACTER_SCENES[piece_type].instantiate()
+	_model = PieceAssets.character_scene(piece_type, house_id).instantiate()
 	_model.name = "Model"
-	var s := KING_SCALE if piece_type == Type.KING else CHARACTER_SCALE
-	_model.scale = Vector3.ONE * s
+	# Strict height grading: normalize each model's raw height to the type's
+	# design height, so pawn<knight<bishop<rook<queen<king holds no matter
+	# which cast (adventurer or skeleton) a house fields.
+	var raw_h := _raw_model_height(_model)
+	_model.scale = Vector3.ONE * (PieceAssets.piece_height(piece_type) / maxf(raw_h, 0.01))
 	add_child(_model)
 	_anim = AnimationPlayer.new()
 	_anim.name = "Anim"
 	_model.add_child(_anim)  # root_node ".." = the character scene root
 	_anim.add_animation_library("", PieceAssets.shared_anims())
 	_tint_meshes(_model, _tint_for("piece"), _saturation_for())
+	# Gear/crest/crown attach AFTER _tint_meshes so they keep their own colors.
+	_attach_gear()
+	if PieceAssets.wants_crest(piece_type):
+		_attach_crest()
 	if piece_type == Type.KING:
 		_attach_crown()
+		_attach_cape()
 	_anim.play(ANIM_IDLE)
 	# Desynchronize the armies' idles.
 	_anim.seek(randf() * PieceAssets.anim_length(ANIM_IDLE))
 	_anim.speed_scale = randf_range(0.94, 1.06)
+
+
+## Raw (unscaled) model height: top of the skinned meshes parented directly
+## to the Skeleton3D. BoneAttachment3D accessories (hats, hoods) are
+## excluded — their mesh AABBs live in bone space, not model space.
+func _raw_model_height(model: Node3D) -> float:
+	var top := 0.0
+	for mi: MeshInstance3D in model.find_children("*", "MeshInstance3D", true, false):
+		if mi.get_parent() is BoneAttachment3D:
+			continue
+		top = maxf(top, mi.mesh.get_aabb().end.y)
+	return top
+
+
+func _skeleton() -> Skeleton3D:
+	var skels := _model.find_children("*", "Skeleton3D", true, false)
+	return null if skels.is_empty() else skels[0]
+
+
+## Rigid mount on a rig bone (the crown-attach pattern, generalized).
+func _bone_mount(bone: String, mount_name: String) -> BoneAttachment3D:
+	var skel := _skeleton()
+	if skel == null or skel.find_bone(bone) == -1:
+		return null
+	var att := BoneAttachment3D.new()
+	att.name = mount_name
+	att.bone_name = bone
+	skel.add_child(att)
+	return att
+
+
+## TYPE signature gear: rigid props on the rig's handslot/chest bones.
+## Same gear for every house — the type IS the gear.
+func _attach_gear() -> void:
+	for spec: Dictionary in PieceAssets.gear_specs(piece_type):
+		var att := _bone_mount(spec["bone"], "GearMount_%s" % spec["key"])
+		if att == null:
+			continue
+		var prop: Node3D = (spec["scene"] as PackedScene).instantiate()
+		prop.name = "Gear_%s" % spec["key"]
+		prop.position = spec["pos"]
+		prop.rotation_degrees = spec["rot_deg"]
+		prop.scale = Vector3.ONE * float(spec["scl"])
+		att.add_child(prop)
+		if bool(spec["decal"]) and HouseRegistry.has_house(house_id):
+			_attach_sigil_decal(prop, spec)
+
+
+## HOUSE flourish: the house sigil painted on the shield face.
+func _attach_sigil_decal(shield: Node3D, spec: Dictionary) -> void:
+	var decal := MeshInstance3D.new()
+	decal.name = "SigilDecal"
+	var quad := QuadMesh.new()
+	var s := float(spec.get("decal_size", 0.5))
+	quad.size = Vector2(s, s)
+	decal.mesh = quad
+	decal.material_override = PieceAssets.sigil_material(house_id)
+	decal.position = spec.get("decal_pos", Vector3(0.0, 0.0, 0.2))
+	decal.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	shield.add_child(decal)
+
+
+## HOUSE flourish: helmet crest on the head bone (knight/queen/king).
+func _attach_crest() -> void:
+	var packed: PackedScene = PieceAssets.crest_scene(house_id)
+	if packed == null:
+		return
+	var att := _bone_mount("head", "CrestMount")
+	if att == null:
+		return
+	var crest: Node3D = packed.instantiate()
+	crest.name = "Crest"
+	crest.position = CREST_MOUNT_POS
+	att.add_child(crest)
 
 
 func _attach_crown() -> void:
@@ -270,16 +382,9 @@ func _attach_crown() -> void:
 	## INTEGRATION.md): a BoneAttachment3D on the Rig_Medium `head` bone so
 	## the crown tracks idle, walk, and death animations for free. Attached
 	## AFTER _tint_meshes so the crown keeps its own gold/frost materials.
-	var skels := _model.find_children("*", "Skeleton3D", true, false)
-	if skels.is_empty():
+	var att := _bone_mount("head", "CrownMount")
+	if att == null:
 		return
-	var skel: Skeleton3D = skels[0]
-	if skel.find_bone("head") == -1:
-		return
-	var att := BoneAttachment3D.new()
-	att.name = "CrownMount"
-	att.bone_name = "head"
-	skel.add_child(att)
 	var crown: Node3D = PieceAssets.crown_scene(_tint_for("piece")).instantiate()
 	crown.name = "Crown"
 	crown.position = Vector3(0.0, 0.80, 0.0)   # ring at the brow line
@@ -288,17 +393,106 @@ func _attach_crown() -> void:
 	att.add_child(crown)
 
 
+## TYPE signature gear (king): the cape, draped from the chest bone.
+## Neutral cloth in the GLB; tinted here with the house secondary color
+## (palette flourish only — the cape shape is the same for every house).
+func _attach_cape() -> void:
+	var att := _bone_mount("chest", "CapeMount")
+	if att == null:
+		return
+	var cape: Node3D = PieceAssets.CAPE.instantiate()
+	cape.name = "Cape"
+	cape.position = CAPE_MOUNT_POS
+	att.add_child(cape)
+	var cape_tint: Color = HOUSE_TINT[side]
+	if HouseRegistry.has_house(house_id):
+		cape_tint = HouseRegistry.get_colors(house_id)["secondary"]
+	_tint_meshes(cape, cape_tint, _saturation_for())
+
+
+## TYPE readability: the engraved glyph ring under the piece. Child of the
+## PieceView root (not the model) so height grading never rescales it.
+func _build_glyph_ring() -> void:
+	_glyph_ring = PieceAssets.glyph_ring_scene(piece_type).instantiate()
+	_glyph_ring.name = "GlyphRing"
+	_glyph_ring.position = Vector3(0.0, 0.002, 0.0)
+	add_child(_glyph_ring)
+	# Per-piece duplicate of the emissive glyph material so selection can
+	# brighten THIS ring only.
+	for mi: MeshInstance3D in _glyph_ring.find_children("*", "MeshInstance3D", true, false):
+		for s in mi.mesh.get_surface_count():
+			var src := mi.get_active_material(s)
+			if src is StandardMaterial3D \
+					and src.resource_name == PieceAssets.GLYPH_MATERIAL_NAME:
+				_glyph_mat = (src as StandardMaterial3D).duplicate()
+				_glyph_mat.emission_energy_multiplier = PieceAssets.GLYPH_ENERGY_REST
+				mi.set_surface_override_material(s, _glyph_mat)
+
+
 func _build_tower() -> void:
-	_model = Node3D.new()
+	## The BANNER-ROOK: battle-worn watchtower, house banner down the face,
+	## fluttering pennant on top (assets/custom-props/watchtower.glb).
+	_model = PieceAssets.WATCHTOWER.instantiate()
 	_model.name = "Model"
-	var base := TOWER_BASE.instantiate()
-	var top := TOWER_TOP.instantiate()
-	top.position.y = 1.0  # stack the crenellated top on the 1u-tall base
-	_model.add_child(base)
-	_model.add_child(top)
-	_model.scale = Vector3.ONE * TOWER_SCALE
+	var body := _model.find_child("TowerBody", true, false) as MeshInstance3D
+	var raw_h := body.mesh.get_aabb().end.y if body != null else 1.35
+	_model.scale = Vector3.ONE * (PieceAssets.piece_height(piece_type) / maxf(raw_h, 0.01))
 	add_child(_model)
-	_tint_meshes(_model, _tint_for("tower"), _saturation_for())
+	# House tint on the masonry/wood only — banner and pennant carry the
+	# house colors directly and are re-skinned below.
+	_tint_meshes(_model, _tint_for("tower"), _saturation_for(),
+			["BannerCloth", "Pennant"])
+	_dress_banner()
+	_dress_pennant()
+
+
+func _dress_banner() -> void:
+	var banner := _model.find_child("BannerCloth", true, false) as MeshInstance3D
+	if banner == null:
+		return
+	var mat := StandardMaterial3D.new()
+	mat.albedo_texture = PieceAssets.banner_texture(house_id)
+	mat.roughness = 0.92
+	mat.metallic = 0.0
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	banner.material_override = mat
+
+
+func _dress_pennant() -> void:
+	var pennant := _model.find_child("Pennant", true, false) as MeshInstance3D
+	if pennant == null:
+		return
+	var cloth: Color = HOUSE_TINT[side]
+	if HouseRegistry.has_house(house_id):
+		cloth = HouseRegistry.get_colors(house_id)["accent"]
+	var mat := ShaderMaterial.new()
+	mat.shader = PieceAssets.PENNANT_SHADER
+	mat.set_shader_parameter("cloth_color", cloth)
+	pennant.material_override = mat
+
+
+func _drop_banner() -> void:
+	## Crumble flourish: the banner tears off and falls with the tower.
+	if _model == null:
+		return
+	var banner := _model.find_child("BannerCloth", true, false) as MeshInstance3D
+	var holder := get_parent()
+	if banner == null or holder == null:
+		return
+	var xform := banner.global_transform
+	banner.get_parent().remove_child(banner)
+	holder.add_child(banner)
+	banner.global_transform = xform
+	var mat := banner.material_override as StandardMaterial3D
+	if mat != null:
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	var tw := banner.create_tween().set_parallel(true)
+	tw.tween_property(banner, "position:y", banner.position.y - 0.55, 0.7) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tw.tween_property(banner, "rotation:x", banner.rotation.x - 0.9, 0.7)
+	if mat != null:
+		tw.tween_property(mat, "albedo_color:a", 0.0, 0.7)
+	tw.chain().tween_callback(banner.queue_free)
 
 
 ## The multiply tint for this piece: HouseRegistry colors when a house id was
@@ -315,10 +509,14 @@ func _saturation_for() -> float:
 	return HouseRegistry.get_tint_saturation(house_id)
 
 
-func _tint_meshes(root: Node, tint: Color, saturation: float) -> void:
+func _tint_meshes(root: Node, tint: Color, saturation: float,
+		skip_names: Array = []) -> void:
 	## Per-side material overlay: multiply the pack's albedo texture by the
 	## house tint, push roughness up. Tinted materials are cached and shared.
+	## skip_names: MeshInstance3D names left untouched (banner, pennant).
 	for mi: MeshInstance3D in root.find_children("*", "MeshInstance3D", true, false):
+		if mi.name in skip_names:
+			continue
 		for s in mi.mesh.get_surface_count():
 			var src := mi.get_active_material(s)
 			if src == null or not src is StandardMaterial3D:
