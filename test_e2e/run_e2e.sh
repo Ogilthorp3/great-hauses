@@ -8,6 +8,11 @@
 #               time-restore, DS4 opponent (mock+live, 3 modes),
 #               UciEngine/stockfish client                      — Gate A
 #   boot        windowed: select flows to game, 32 pieces, banners+HUD dyed
+#   board-truth windowed: startpos board vs engine truth — a1 dark bottom-
+#               left, 64-tile stone parity, queen on her color, crowned
+#               king on e1/e8                                    — Gate B
+#   board-moves windowed: crowned piece surfaces exactly the engine KING
+#               moves (adjacent+castles), Ranger the queen rays  — Gate B
 #   move        windowed: click e2->e4, AI replies within 30 s  — Gate B
 #   duel        windowed: scripted capture duel via clicks      — Gate B
 #   castle      windowed: O-O by clicks, king+rook views land   — Gate B
@@ -62,6 +67,10 @@ FULLGAME_FEN="8/8/8/4k3/8/8/8/RR2K3 w - - 0 1"
 # trades queen for pawn — the scripted blunder counsel must catch — while
 # d8d7 is sound (verified: d8d2 ≈ -522 cp vs best 0 cp at depth 12).
 COUNSEL_FEN="3qk3/8/8/8/8/8/3P4/3QK3 b - - 0 1"
+# Board-moves scenario: White to move with Qd1+Ke1, O-O legal (O-O-O is
+# blocked by the queen herself on d1 — asserted as such); d2/e2 pawns block
+# the short rays; the queen keeps the long a4 diagonal.
+BOARD_FEN="r3k2r/8/8/8/8/8/3PP3/R2QK2R w KQkq - 0 1"
 
 mkdir -p "$RUN_DIR" "$ART_ROOT"
 
@@ -183,8 +192,9 @@ run_scenario() {  # <name> [extra user args...]
 # ── Main ───────────────────────────────────────────────────────────────────
 if [ ! -x "$GODOT" ]; then note "Godot binary missing: $GODOT"; exit 2; fi
 STEPS=("$@")
-[ ${#STEPS[@]} -eq 0 ] && STEPS=(preflight tests boot move duel castle promote \
-  slowmo tournament oracle-mock oracle-modes fullgame showcase)
+[ ${#STEPS[@]} -eq 0 ] && STEPS=(preflight tests boot board-truth board-moves \
+  move duel castle promote slowmo tournament oracle-mock oracle-modes \
+  fullgame showcase)
 
 SUITE_RC=0
 for step in "${STEPS[@]}"; do
@@ -198,6 +208,8 @@ for step in "${STEPS[@]}"; do
       run_suite uci-suite res://tests/test_uci_engine.gd || SUITE_RC=1
       ;;
     boot)      run_scenario boot || SUITE_RC=1 ;;
+    board-truth) run_scenario board-truth || SUITE_RC=1 ;;
+    board-moves) run_scenario board-moves "--e2e-fen=$BOARD_FEN" || SUITE_RC=1 ;;
     move)      run_scenario move || SUITE_RC=1 ;;
     duel)      run_scenario duel "--e2e-fen=$DUEL_FEN" || SUITE_RC=1 ;;
     castle)    run_scenario castle "--e2e-fen=$CASTLE_FEN" || SUITE_RC=1 ;;
@@ -210,9 +222,12 @@ for step in "${STEPS[@]}"; do
                    "--e2e-timeout=90" || SUITE_RC=1 ;;
     fullgame)  SCENARIO_TIMEOUT=230 run_scenario fullgame \
                  "--e2e-fen=$FULLGAME_FEN" "--e2e-timeout=210" || SUITE_RC=1 ;;
-    showcase)  run_scenario showcase "--e2e-fen=$DUEL_FEN" "--e2e-timeout=90" \
-                 || SUITE_RC=1 ;;
-    *) note "unknown step '$step' (use preflight|tests|boot|move|duel|castle|promote|slowmo|tournament|oracle-mock|oracle-modes|fullgame|showcase)"; SUITE_RC=1 ;;
+    showcase)  SCENARIO_TIMEOUT=170 run_scenario showcase "--e2e-fen=$DUEL_FEN" \
+                 "--e2e-timeout=150" || SUITE_RC=1 ;;
+                 # 45 s soak + tableau is ~56 s alone but needs headroom at
+                 # the tail of a full sequential run (watchdogged at 90 s
+                 # under end-of-suite load, 2026-08-08)
+    *) note "unknown step '$step' (use preflight|tests|boot|board-truth|board-moves|move|duel|castle|promote|slowmo|tournament|oracle-mock|oracle-modes|fullgame|showcase)"; SUITE_RC=1 ;;
   esac
 done
 

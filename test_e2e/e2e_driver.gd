@@ -16,6 +16,16 @@
 ## Scenarios:
 ##   boot        select flows into the game, 32 pieces standing, banners
 ##               dyed to the chosen house, HUD carries the house names
+##   board-truth startpos ground truth: a1 dark bottom-LEFT of the default
+##               camera, every tile's stone matches the engine's square
+##               color, Ranger queen on d1/d8 (her color), crowned king on
+##               e1/e8 — the earned check for the 2026-08-08 tile-parity
+##               inversion ("queen not on her color" read as a mirrored board)
+##   board-moves (needs --e2e-fen with castling legal) clicks the crowned
+##               piece and asserts the surfaced highlights are exactly the
+##               engine's KING moves (adjacent + castling), then clicks the
+##               Ranger and demands a long queen ray — the royal movesets
+##               through the real click → highlight pipeline
 ##   move        click e2 pawn -> e4 via real clicks, AI replies within 30 s
 ##   duel        (needs --e2e-fen with an immediate white capture) executes
 ##               the capture by clicks; slow-mo duel plays out untouched;
@@ -125,6 +135,10 @@ func _run() -> void:
 	match scenario:
 		"boot":
 			await _scenario_boot()
+		"board-truth":
+			await _scenario_board_truth()
+		"board-moves":
+			await _scenario_board_moves()
 		"move":
 			await _scenario_move()
 		"duel":
@@ -424,6 +438,197 @@ func _scenario_boot() -> void:
 	await _sleep(1.0)   # let idles and torchlight settle for the screenshot
 	await _shot("boot_lineup")
 	_finish(0)
+
+# ── Scenario: board-truth ──────────────────────────────────────────────────
+## The rendered board must BE the engine's board. Every check derives its
+## expectation from ChessState (square_is_dark / square_index_from_name), so
+## the view is audited against engine truth, never against itself.
+func _scenario_board_truth() -> void:
+	if not await _navigate_select(DEFAULT_HOUSE, "Casual", "Single Match"):
+		return
+	var game := await _boot_game(32)
+	if game == null:
+		return
+	var board: Node = game.get("board")
+	var cam := get_viewport().get_camera_3d()
+	if cam == null:
+		await _fail("board-camera", "no active Camera3D")
+		return
+	# 1) Orientation from the player's default camera: a1 bottom-left,
+	#    h1 bottom-right, rank 8 receding to the top of the frame.
+	var a1 := _square_screen(game, cam, "a1")
+	var h1 := _square_screen(game, cam, "h1")
+	var a8 := _square_screen(game, cam, "a8")
+	if not (a1.x < h1.x and a1.y > a8.y):
+		await _fail("board-orientation",
+			"a1=%s h1=%s a8=%s — a1 must sit left of h1 and nearer the bottom than a8"
+			% [str(a1), str(h1), str(a8)])
+		return
+	_pass("board-orientation (a1 bottom-left, h1 bottom-right)")
+	# 2) Tile parity: all 64 tiles wear the engine's stone for their square.
+	var wrong: Array[String] = []
+	for idx in 64:
+		var sq: Vector2i = game.sq_of(idx)
+		var tile: MeshInstance3D = board.get_node_or_null(
+			"Tiles/Tile_%d_%d" % [sq.x, sq.y])
+		if tile == null:
+			await _fail("board-tile-parity", "no tile node for %s (view sq %s)"
+				% [ChessState.square_get_name(idx), str(sq)])
+			return
+		var want: Color = board.DARK_STONE if ChessState.square_is_dark(idx) \
+			else board.LIGHT_STONE
+		var got: Color = (tile.material_override as StandardMaterial3D).albedo_color
+		if not _colors_close(got, want):
+			wrong.append(ChessState.square_get_name(idx))
+	if not wrong.is_empty():
+		await _fail("board-tile-parity", "%d/64 tiles wear the wrong stone (first: %s)"
+			% [wrong.size(), ",".join(wrong.slice(0, 8))])
+		return
+	_pass("board-tile-parity (64/64 tiles match engine square colors)")
+	# 3) Royal identity both sides: Ranger queen on d (her color), crowned
+	#    king on e. Startpos: d1 light, e1 dark, d8 dark, e8 light.
+	for check in [["d1", PieceView.Type.QUEEN, false], ["e1", PieceView.Type.KING, true],
+			["d8", PieceView.Type.QUEEN, false], ["e8", PieceView.Type.KING, true]]:
+		if not await _assert_royal(game, str(check[0]), int(check[1]), bool(check[2])):
+			return
+	_pass("board-royals (queen d1/d8 uncrowned · king e1/e8 crowned)")
+	await _sleep(1.0)   # let idles settle for the screenshot
+	await _shot("board_truth_startpos")
+	_finish(0)
+
+func _square_screen(game: Node, cam: Camera3D, square_name: String) -> Vector2:
+	var board: Node = game.get("board")
+	return cam.unproject_position(board.square_to_world(
+		game.sq_of(ChessState.square_index_from_name(square_name))))
+
+func _assert_royal(game: Node, square_name: String, want_type: int,
+		want_crown: bool) -> bool:
+	var views: Dictionary = game.get("views")
+	var pv = views.get(game.sq_of(ChessState.square_index_from_name(square_name)))
+	if pv == null or not is_instance_valid(pv):
+		await _fail("royal-%s" % square_name, "no piece view standing on %s" % square_name)
+		return false
+	if int(pv.piece_type) != want_type:
+		await _fail("royal-%s" % square_name, "piece_type %d on %s, expected %d"
+			% [int(pv.piece_type), square_name, want_type])
+		return false
+	var crowned: bool = not pv.find_children("Crown", "", true, false).is_empty()
+	if crowned != want_crown:
+		await _fail("royal-%s" % square_name, "crown %s on %s, expected %s"
+			% [str(crowned), square_name, str(want_crown)])
+		return false
+	return true
+
+# ── Scenario: board-moves ──────────────────────────────────────────────────
+## FEN contract (run_e2e.sh BOARD_FEN): White to move, Qd1 + Ke1, O-O legal
+## (O-O-O is truthfully blocked — the queen herself holds d1). The crowned
+## view must surface exactly the engine's KING moves (all adjacent, plus the
+## two-file castling hop); the Ranger view must surface the queen's rays, at
+## least one of them long.
+func _scenario_board_moves() -> void:
+	if not await _navigate_select(DEFAULT_HOUSE, "Casual", "Single Match"):
+		return
+	var game := await _boot_game(0)
+	if game == null:
+		return
+	var state: Object = game.get("state")
+	var board: Node = game.get("board")
+	if not await _wait_until(func():
+		return game.get("busy") == false and state.turn == false, 15.0):
+		await _fail("board-moves-turn", "never became the player's turn")
+		return
+	if not await _assert_royal(game, "d1", PieceView.Type.QUEEN, false) \
+			or not await _assert_royal(game, "e1", PieceView.Type.KING, true):
+		return
+	_pass("board-moves-royals (Ranger d1 · crowned king e1)")
+	# The crowned piece: exactly the king's moves, king-shaped.
+	var e1 := ChessState.square_index_from_name("e1")
+	if not await _select_square(game, game.sq_of(e1)):
+		await _fail("board-moves-select-king", "e1 never became the selected square")
+		return
+	var king_targets := _engine_targets(game, e1)
+	var shown := _visible_marker_squares(board)
+	if not _same_squares(shown, king_targets):
+		await _fail("board-moves-king-set", "crowned piece highlights %s, engine king moves %s"
+			% [str(shown), str(king_targets)])
+		return
+	var castles := 0
+	for m in game.get("_turn_moves"):
+		if m.from_square != e1:
+			continue
+		var span := _move_span(e1, m.to_square)
+		if m.is_castling:
+			castles += 1
+			if span != Vector2i(2, 0):
+				await _fail("board-moves-castle-shape", "castling hop %s spans %s files/ranks"
+					% [m.to_uci(), str(span)])
+				return
+		elif maxi(span.x, span.y) != 1:
+			await _fail("board-moves-king-shape", "king move %s is not adjacent (span %s)"
+				% [m.to_uci(), str(span)])
+			return
+	if castles != 1:
+		await _fail("board-moves-castling",
+			"expected exactly O-O legal (O-O-O blocked by Qd1), found %d" % castles)
+		return
+	await _shot("king_highlights")
+	_pass("board-moves-king (crowned piece shows %d king moves incl. O-O)"
+		% king_targets.size())
+	# The Ranger: exactly the queen's moves, with a long ray.
+	var d1 := ChessState.square_index_from_name("d1")
+	if not await _select_square(game, game.sq_of(d1)):
+		await _fail("board-moves-select-queen", "d1 never became the selected square")
+		return
+	var queen_targets := _engine_targets(game, d1)
+	shown = _visible_marker_squares(board)
+	if not _same_squares(shown, queen_targets):
+		await _fail("board-moves-queen-set", "queen highlights %s, engine queen moves %s"
+			% [str(shown), str(queen_targets)])
+		return
+	var longest := 0
+	for m in game.get("_turn_moves"):
+		if m.from_square == d1:
+			var span := _move_span(d1, m.to_square)
+			longest = maxi(longest, maxi(span.x, span.y))
+	if longest < 2:
+		await _fail("board-moves-queen-ray", "no queen ray longer than 1 (longest %d)" % longest)
+		return
+	await _shot("queen_highlights")
+	_pass("board-moves-queen (Ranger shows %d queen moves, longest ray %d)"
+		% [queen_targets.size(), longest])
+	_finish(0)
+
+## |file delta|, |rank delta| between two engine squares, in TRUE board space.
+func _move_span(from_idx: int, to_idx: int) -> Vector2i:
+	return Vector2i(
+		absi(ChessState.square_get_file(to_idx) - ChessState.square_get_file(from_idx)),
+		absi(ChessState.square_get_rank(to_idx) - ChessState.square_get_rank(from_idx)))
+
+func _engine_targets(game: Node, from_idx: int) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	for m in game.get("_turn_moves"):
+		if m.from_square == from_idx:
+			var sq: Vector2i = game.sq_of(m.to_square)
+			if not out.has(sq):
+				out.append(sq)
+	return out
+
+func _visible_marker_squares(board: Node) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	for q in board.get_node("MoveMarkers").get_children():
+		if q.visible:
+			var sq: Vector2i = board.world_to_square(q.position)
+			if not out.has(sq):
+				out.append(sq)
+	return out
+
+func _same_squares(a: Array[Vector2i], b: Array[Vector2i]) -> bool:
+	if a.size() != b.size():
+		return false
+	for sq in a:
+		if not b.has(sq):
+			return false
+	return true
 
 # ── Scenario: move ─────────────────────────────────────────────────────────
 func _scenario_move() -> void:

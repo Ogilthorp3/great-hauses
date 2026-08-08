@@ -3,7 +3,15 @@ extends Node3D
 ## The 8x8 stone board. Owns the tile meshes, square<->world mapping, mouse
 ## picking (physics-less: camera ray vs the board-top plane), and the
 ## selection / legal-move highlight quads. Emits square_clicked(sq) on
-## left click; sq.x = file (a..h -> 0..7), sq.y = rank (1..8 -> 0..7).
+## left click.
+##
+## Board-space convention (set by game.sq_of, the only producer):
+##   sq.x = 7 - (file-1)  — h..a -> 0..7, so file h sits at world -X and
+##          file a at +X; the default camera (orbit yaw = PI, behind the
+##          player) flips screen X back, so files READ a..h left-to-right.
+##   sq.y = rank-1        — 1..8 -> 0..7, rank 1 nearest the player (-Z).
+## Anything deriving true file/rank from sq must un-mirror x (see
+## _build_board's tile parity — the 2026-08-08 "queen not on her color" scar).
 
 signal square_clicked(sq: Vector2i)
 
@@ -120,14 +128,18 @@ func _build_board() -> void:
 	var tiles := Node3D.new()
 	tiles.name = "Tiles"
 	add_child(tiles)
-	for rank in BOARD_SIZE:
-		for file in BOARD_SIZE:
+	for row in BOARD_SIZE:      # sq.y: rank-1
+		for col in BOARD_SIZE:  # sq.x: 7-(file-1) — MIRRORED file (header note)
 			var mi := MeshInstance3D.new()
 			mi.mesh = tile_mesh
-			mi.material_override = dark if (file + rank) % 2 == 0 else light
-			var top := square_to_world(Vector2i(file, rank))
+			# Engine truth: a1 is DARK ⇔ (file0+rank0) even. col mirrors the
+			# file (col = 7-file0), which flips parity — so in board space the
+			# dark squares are the ODD (col+row) ones. Coloring by even
+			# (col+row) painted every tile inverted: a1 light, queen on dark.
+			mi.material_override = dark if (col + row) % 2 == 1 else light
+			var top := square_to_world(Vector2i(col, row))
 			mi.position = Vector3(top.x, TILE_HEIGHT * 0.5, top.z)
-			mi.name = "Tile_%d_%d" % [file, rank]
+			mi.name = "Tile_%d_%d" % [col, row]
 			tiles.add_child(mi)
 	var plinth := MeshInstance3D.new()
 	var plinth_mesh := BoxMesh.new()
