@@ -9,6 +9,11 @@ config/name="Great Houses"
 run/main_scene="res://scenes/game.tscn"
 config/features=PackedStringArray("4.7", "Mobile")
 
+[autoload]
+
+PieceAssets="*res://src/board/piece_assets.gd"
+E2EDriver="*res://test_e2e/e2e_driver.gd"
+
 [display]
 
 window/size/viewport_width=1920

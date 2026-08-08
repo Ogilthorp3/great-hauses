@@ -1,2 +1,4 @@
 # Godot 4 cache
 .godot/
+# E2E screenshots + run logs (regenerated every run)
+test_e2e/artifacts/
