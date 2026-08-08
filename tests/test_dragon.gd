@@ -14,6 +14,7 @@ extends SceneTree
 
 const Spectator := preload("res://src/cinematics/dragon_spectator.gd")
 const DD := preload("res://src/cinematics/duel_director.gd")
+const GH := preload("res://src/env/great_hall.gd")
 
 var failures := 0
 var checks_run := 0
@@ -21,19 +22,21 @@ var checks_run := 0
 ## A hard-erroring test function aborts silently at the error and its await
 ## resumes as if it finished — the floor turns silent aborts into a loud
 ## failure (same guard as test_cinematics.gd).
-const MIN_EXPECTED_CHECKS := 34
+const MIN_EXPECTED_CHECKS := 105
 
 
 class Duck:
 	extends Node3D
 	## Minimal PieceView-shaped piece (the duck fields the module reads),
-	## with a real material so the char path executes.
+	## with a real material so the char/incineration path executes.
 	var piece_type := 0
 	var side := 0
+	var house_id := ""
 
-	func _init(pt: int = 0, s: int = 0) -> void:
+	func _init(pt: int = 0, s: int = 0, house: String = "") -> void:
 		piece_type = pt
 		side = s
+		house_id = house
 		var mi := MeshInstance3D.new()
 		mi.mesh = CapsuleMesh.new()
 		var mat := StandardMaterial3D.new()
@@ -60,11 +63,17 @@ func _main() -> void:
 	Engine.time_scale = 1.0
 	var lights_before := _light_count()
 	_test_kill_lines()
+	_test_ceremony_budgets()
 	await _test_rate_limit_and_gate()
 	await _test_ashfall_completion()
 	await _test_ashfall_duck_scan()
 	await _test_ashfall_skip()
 	await _test_ashfall_free_restore()
+	await _test_skeleton_swap()
+	await _test_tidegrip_chars_in_place()
+	await _test_skip_every_phase()
+	await _test_championship_tier()
+	await _test_match_defaults_budget()
 	check("final: time_scale is 1.0", true, is_equal_approx(Engine.time_scale, 1.0))
 	check("final: no Light3D added by any module path", lights_before, _light_count())
 	check("final: no test silently aborted (checks >= %d)" % MIN_EXPECTED_CHECKS,
@@ -95,12 +104,20 @@ func _light_count() -> int:
 func _fast_spectator() -> DragonSpectator:
 	var s: DragonSpectator = Spectator.new()
 	s.ash_ramp_wall = 0.05
+	s.ash_bank_wall = 0.2
+	s.ash_flare_wall = 0.08
+	s.ash_inhale_wall = 0.06
 	s.ash_swoop_wall = 0.15
 	s.ash_breath_wall = 0.3
+	s.ash_linger_wall = 0.12
 	s.ash_return_wall = 0.1
+	s.ash_settle_wall = 0.1
+	s.ash_flash_wall = 0.03
+	s.ash_smolder_wall = 0.08
+	s.ash_collapse_wall = 0.08
 	s.ash_char_wall = 0.05
 	s.ash_crumble_wall = 0.05
-	s.failsafe_wall_sec = 5.0
+	s.failsafe_wall_sec = 6.0
 	root.add_child(s)
 	return s
 
@@ -256,6 +273,177 @@ func _test_ashfall_skip() -> void:
 	var finished: bool = await _wait_until(func() -> bool: return done["v"], 3.0)
 	check("skip: awaited sequence completes", true, finished)
 	s.free()
+
+
+func _perched(s: DragonSpectator, home: Vector3) -> bool:
+	## The roost bob moves y each frame — compare xz exactly, y within bob.
+	var dp: Vector3 = s.position - home
+	return absf(dp.x) < 0.01 and absf(dp.z) < 0.01 \
+		and absf(dp.y) <= s.bob_amplitude + 0.02
+
+
+func _test_ceremony_budgets() -> void:
+	## Static arithmetic on the DEFAULT exported phase walls; worst case
+	## includes the linger's bounded +2.2 s wait and both caption beats.
+	var s: DragonSpectator = Spectator.new()   # never enters the tree
+	var match_worst: float = s.ash_ramp_wall + s.ash_bank_wall + s.ash_flare_wall \
+		+ s.ash_inhale_wall + s.ash_breath_wall + s.ash_linger_wall + 2.2 \
+		+ s.ash_return_wall
+	check("budget: match ceremony defaults <= 12 s", true, match_worst <= 12.0)
+	var champ_worst: float = match_worst - s.ash_return_wall + s.ash_swoop_wall \
+		+ s.ash_settle_wall + 0.4 + 1.3
+	check("budget: championship defaults <= 16 s", true, champ_worst <= 16.0)
+	check("budget: throne perch synced with the hall", true,
+			Spectator.THRONE_PERCH == GH.DRAGON_HOVER)
+	check("budget: champ scale matches the hall dragon", true,
+			is_equal_approx(s.champ_scale, GH.DRAGON_SCALE))
+	s.free()
+
+
+func _test_skeleton_swap() -> void:
+	## MORTAL-KOMBAT incineration: mid-sequence a charred skeleton stands
+	## in for each burned warrior; the field is fully cleaned by the end.
+	var s := _fast_spectator()
+	s.ash_smolder_wall = 0.5   # widen the smolder window for the probe
+	await process_frame
+	var losers := _spawn_army(1, 3, 1.5)
+	var runner := func() -> void:
+		await s.play_ashfall(1, "House Winterfang", losers)
+	runner.call()
+	var seen: bool = await _wait_until(func() -> bool: return s.remains_count() > 0, 4.0)
+	check("mk: skeletons stand in mid-sequence", true, seen)
+	check("mk: remains nodes live in the tree", true,
+			root.find_children("AshRemains", "", true, false).size() > 0)
+	var done: bool = await _wait_until(func() -> bool: return not s.is_ashfall_active(), 8.0)
+	check("mk: ceremony completed", true, done)
+	await process_frame
+	await process_frame
+	check("mk: field fully cleaned (remains_count 0)", 0, s.remains_count())
+	check("mk: no AshRemains left in the tree", 0,
+			root.find_children("AshRemains", "", true, false).size())
+	check("mk: all losers removed", 0, _alive(losers))
+	check("mk: time_scale restored", true, is_equal_approx(Engine.time_scale, 1.0))
+	s.free()
+	await process_frame
+
+
+func _test_tidegrip_chars_in_place() -> void:
+	## The Drowned Legion is already bones: no skeleton swap — they just
+	## char darker and crumble (the intended joke).
+	var s := _fast_spectator()
+	await process_frame
+	var losers: Array = []
+	for i in 2:
+		var d := Duck.new(i, 1, "tidegrip")
+		root.add_child(d)
+		d.position = Vector3(-1.0 + i * 1.2, 0.0, 1.8)
+		losers.append(d)
+	var runner := func() -> void:
+		await s.play_ashfall(1, "House Tidegrip", losers)
+	runner.call()
+	var started: bool = await _wait_until(func() -> bool: return s.is_ashfall_active(), 2.0)
+	check("tidegrip: ceremony started", true, started)
+	var max_remains := 0
+	var deadline := Time.get_ticks_msec() + 8000
+	while s.is_ashfall_active() and Time.get_ticks_msec() < deadline:
+		max_remains = maxi(max_remains, s.remains_count())
+		await process_frame
+	await process_frame
+	await process_frame
+	check("tidegrip: no skeleton swap for the bone cast", 0, max_remains)
+	check("tidegrip: the legion still burns away", 0, _alive(losers))
+	check("tidegrip: time_scale restored", true, is_equal_approx(Engine.time_scale, 1.0))
+	s.free()
+	await process_frame
+
+
+func _test_skip_every_phase() -> void:
+	## Click-skip from EVERY phase of both tiers: clock restored, field
+	## clean (smoking skeletons included), tier end pose and scale.
+	for delay: float in [0.02, 0.15, 0.35, 0.55, 0.8]:
+		var s := _fast_spectator()
+		s.ash_smolder_wall = 0.5   # keep skeletons alive into the skip window
+		await process_frame
+		var losers := _spawn_army(1, 3, 1.5)
+		var runner := func() -> void:
+			await s.play_ashfall(1, "House Winterfang", losers)
+		runner.call()
+		await _wait_wall(delay)
+		s.skip()
+		await process_frame
+		await process_frame
+		check("skip@%.2f: time_scale restored" % delay, true,
+				is_equal_approx(Engine.time_scale, 1.0))
+		check("skip@%.2f: losers removed" % delay, 0, _alive(losers))
+		check("skip@%.2f: remains cleaned" % delay, 0, s.remains_count())
+		check("skip@%.2f: match end scale" % delay, true,
+				is_equal_approx(s.rig.scale.x, s.dragon_scale))
+		check("skip@%.2f: back on the wall perch" % delay, true,
+				_perched(s, s.perch_position))
+		check("skip@%.2f: inactive" % delay, false, s.is_ashfall_active())
+		s.free()
+		await process_frame
+	for delay: float in [0.3, 0.7, 1.1, 1.9]:
+		var s2 := _fast_spectator()
+		await process_frame
+		var losers2 := _spawn_army(1, 2, 1.5)
+		var runner2 := func() -> void:
+			await s2.play_ashfall(1, "House Winterfang", losers2, true)
+		runner2.call()
+		await _wait_wall(delay)
+		s2.skip()
+		await process_frame
+		await process_frame
+		check("champ-skip@%.1f: time_scale restored" % delay, true,
+				is_equal_approx(Engine.time_scale, 1.0))
+		check("champ-skip@%.1f: losers removed" % delay, 0, _alive(losers2))
+		check("champ-skip@%.1f: remains cleaned" % delay, 0, s2.remains_count())
+		check("champ-skip@%.1f: throne end pose" % delay, true,
+				_perched(s2, Spectator.THRONE_PERCH))
+		check("champ-skip@%.1f: champ scale 1.6" % delay, true,
+				is_equal_approx(s2.rig.scale.x, s2.champ_scale))
+		s2.free()
+		await process_frame
+
+
+func _test_championship_tier() -> void:
+	var s := _fast_spectator()
+	await process_frame
+	var losers := _spawn_army(1, 3, 1.5)
+	var t0 := Time.get_ticks_msec()
+	await s.play_ashfall(1, "House Winterfang", losers, true)
+	var wall := float(Time.get_ticks_msec() - t0) / 1000.0
+	await process_frame
+	await process_frame
+	check("champ: completed under 6 s at test speeds", true, wall < 6.0)
+	check("champ: throne perch pose", true, _perched(s, Spectator.THRONE_PERCH))
+	check("champ: settles at scale 1.6", true, is_equal_approx(s.rig.scale.x, s.champ_scale))
+	check("champ: ember drift over the tableau", true,
+			s.rig.get_node_or_null("TableauEmberDrift") != null)
+	check("champ: losers removed", 0, _alive(losers))
+	check("champ: time_scale restored", true, is_equal_approx(Engine.time_scale, 1.0))
+	s.free()
+	await process_frame
+
+
+func _test_match_defaults_budget() -> void:
+	## The honest wall-clock gate: one full MATCH ceremony at DEFAULT
+	## timings (headless — the camera phases no-op, the clock is the same).
+	var s: DragonSpectator = Spectator.new()
+	s.failsafe_wall_sec = 20.0
+	root.add_child(s)
+	await process_frame
+	var losers := _spawn_army(1, 5, 1.5)
+	var t0 := Time.get_ticks_msec()
+	await s.play_ashfall(1, "House Winterfang", losers)
+	var wall := float(Time.get_ticks_msec() - t0) / 1000.0
+	print("  (default-timing match ceremony wall=%.2fs)" % wall)
+	check("defaults: match ceremony <= 12 s wall", true, wall <= 12.0)
+	check("defaults: scale returns to perch size", true,
+			is_equal_approx(s.rig.scale.x, s.dragon_scale))
+	check("defaults: time_scale restored", true, is_equal_approx(Engine.time_scale, 1.0))
+	s.free()
+	await process_frame
 
 
 func _test_ashfall_free_restore() -> void:

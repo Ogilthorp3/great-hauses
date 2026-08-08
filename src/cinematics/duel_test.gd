@@ -12,9 +12,12 @@ extends Node3D
 
 const DuelDirectorScript := preload("res://src/cinematics/duel_director.gd")
 
+const SHOT_FACING := "res://test_e2e/artifacts/module-previews/facing.png"
+
 var _director: DuelDirector
 var _fails := 0
 var _victory_house := ""
+var _facing_shot_taken := false
 
 
 class MockPiece:
@@ -95,18 +98,29 @@ func _run() -> void:
 
 
 func _run_acts() -> void:
-	# Act I — the capture duel, full cam takeover, ≤5 s wall clock.
+	# Act I — the capture duel, full cam takeover, ≤5.5 s wall clock.
+	# Both mocks spawn facing +Z (NOT facing each other) — the director's
+	# face-off must have them eye-to-eye by the time the strike lands.
 	var attacker := _spawn_mock(2, 0, Vector3(-0.8, 0.0, 0.0))   # Frost knight
 	var victim := _spawn_mock(4, 1, Vector3(0.8, 0.0, 0.2))      # Ember queen
 	var t0 := Time.get_ticks_msec()
+	if not _facing_shot_taken and DisplayServer.get_name() != "headless":
+		_schedule_facing_shot(1.5)   # mid slow-mo hold: the faced-off frame
 	var strike := func() -> void:
+		var dir := (victim.global_position - attacker.global_position).normalized()
+		var fa := attacker.global_transform.basis.z.normalized()
+		var fv := victim.global_transform.basis.z.normalized()
+		_check("duel-face-to-face-at-strike",
+			fa.dot(fv) < -0.95 and fa.dot(dir) > 0.95)
 		await attacker.mock_strike(victim)
 	await _director.play_duel(attacker, victim, {}, strike)
 	var wall := float(Time.get_ticks_msec() - t0) / 1000.0
 	_check("duel-restores-timescale", is_equal_approx(Engine.time_scale, 1.0))
 	_check("duel-victim-died", victim.died_flag)
+	_check("duel-resting-yaw-restored",
+		absf(wrapf(attacker.rotation.y, -PI, PI)) < 0.06)   # FROST rest = 0.0
 	_check("duel-inactive-after", not _director.is_active())
-	_check("duel-wall-under-6s", wall < 6.0)   # 5 s budget + skip/frame slack
+	_check("duel-wall-under-6s", wall < 6.0)   # 5.5 s budget + skip/frame slack
 	print("DUELTEST duel wall=%.2fs" % wall)
 	await _pause(0.4)
 
@@ -130,6 +144,21 @@ func _run_acts() -> void:
 	for m in [attacker, victim, king]:
 		if is_instance_valid(m):
 			m.queue_free()
+
+
+func _schedule_facing_shot(delay_sec: float) -> void:
+	var runner := func() -> void:
+		await _pause(delay_sec)
+		if _facing_shot_taken or not is_inside_tree():
+			return
+		_facing_shot_taken = true
+		var img := get_viewport().get_texture().get_image()
+		DirAccess.make_dir_recursive_absolute(
+			ProjectSettings.globalize_path(SHOT_FACING.get_base_dir()))
+		var err := img.save_png(ProjectSettings.globalize_path(SHOT_FACING))
+		print("DUELTEST SHOT_SAVED path=%s err=%d" % [
+			ProjectSettings.globalize_path(SHOT_FACING), err])
+	runner.call()
 
 
 func _spawn_mock(pt: int, house: int, pos: Vector3) -> MockPiece:

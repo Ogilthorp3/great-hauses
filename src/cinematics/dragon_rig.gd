@@ -100,6 +100,71 @@ func play_once(clip: String, speed: float = 1.0, blend: float = 0.15) -> float:
 	return clip_length(clip) / maxf(speed, 0.01)
 
 
+# -- emissive particle builder (shared: ashfall flame, ember drift) --------
+
+
+## GPUParticles3D factory for every dragon effect — EMISSIVE MATERIALS ONLY
+## (the hall's 8-omni budget is FULL: this helper never creates a Light3D).
+## cfg keys: amount, lifetime, size, velocity(Vector2 min/max), spread,
+## gravity, grow, ramp([[offset, Color], ...]), blend, emission_energy;
+## optional: direction (default +Z out of the jaws), emission_radius.
+static func spawn_emitter(parent: Node3D, node_name: String, cfg: Dictionary) -> GPUParticles3D:
+	var p := GPUParticles3D.new()
+	p.name = node_name
+	p.amount = cfg["amount"]
+	p.lifetime = cfg["lifetime"]
+	p.emitting = false
+	p.speed_scale = 1.5   # reads fierce under the ashfall slow-mo
+	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+
+	var pm := ParticleProcessMaterial.new()
+	pm.direction = cfg.get("direction", Vector3(0.0, 0.0, 1.0))
+	pm.spread = cfg["spread"]
+	pm.initial_velocity_min = (cfg["velocity"] as Vector2).x
+	pm.initial_velocity_max = (cfg["velocity"] as Vector2).y
+	pm.gravity = cfg["gravity"]
+	pm.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
+	pm.emission_sphere_radius = cfg.get("emission_radius", 0.09)
+	pm.scale_min = 0.7
+	pm.scale_max = 1.25
+	var curve := Curve.new()
+	curve.add_point(Vector2(0.0, 0.35))
+	curve.add_point(Vector2(0.4, 1.0))
+	curve.add_point(Vector2(1.0, cfg["grow"] / 2.6))
+	var ct := CurveTexture.new()
+	ct.curve = curve
+	pm.scale_curve = ct
+	var grad := Gradient.new()
+	var offs := PackedFloat32Array()
+	var cols := PackedColorArray()
+	for stop in cfg["ramp"]:
+		offs.append(stop[0])
+		cols.append(stop[1])
+	grad.offsets = offs
+	grad.colors = cols
+	var gt := GradientTexture1D.new()
+	gt.gradient = grad
+	pm.color_ramp = gt
+	p.process_material = pm
+
+	var quad := QuadMesh.new()
+	quad.size = Vector2(cfg["size"], cfg["size"])
+	var mat := StandardMaterial3D.new()
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.blend_mode = cfg["blend"]
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.vertex_color_use_as_albedo = true
+	mat.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+	if float(cfg["emission_energy"]) > 0.0:
+		mat.emission_enabled = true
+		mat.emission = Color(1.0, 0.45, 0.12)
+		mat.emission_energy_multiplier = cfg["emission_energy"]
+	quad.material = mat
+	p.draw_pass_1 = quad
+	parent.add_child(p)
+	return p
+
+
 # -- head-bone mount (ashfall flame origin) --------------------------------
 
 

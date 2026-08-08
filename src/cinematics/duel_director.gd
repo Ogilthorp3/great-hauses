@@ -26,7 +26,13 @@ extends Node3D
 ##   - a wall-clock failsafe timer force-restores if a sequence overruns
 ##   - _exit_tree() restores if the director is freed mid-cinematic
 ## All cinematic timing runs on wall-clock ticks (immune to the very
-## time_scale it manipulates), so total duel wall time stays <= ~5 s.
+## time_scale it manipulates), so total duel wall time stays <= ~5.5 s
+## (face-off + rest-yaw beats add ~0.5 s to the old ~5 s budget).
+##
+## FACE TO FACE (2026-08-08): play_duel turns both combatants to meet
+## before the strike and holds the lock through it; the survivor eases
+## back to his side's resting yaw afterward. play_checkmate does the same
+## for the king and his killer (nearest enemy, meta "attacker" override).
 
 signal cinematic_started(kind: String)
 signal cinematic_finished(kind: String)
@@ -65,6 +71,9 @@ const HOUSE_KEYS: Array[String] = ["FROST", "EMBER"]
 @export var failsafe_wall_sec := 8.0    ## force-restore if a sequence overruns
 @export var handheld_amp := 0.035       ## handheld noise amplitude (world units)
 @export var duel_fov := 42.0
+@export var face_off_wall := 0.22       ## combatants turn to meet (ease-out)
+@export var face_rest_wall := 0.25      ## survivor eases back to his rest yaw
+@export var tableau_caption_beat := 1.25  ## championship caption beat length
 
 var _active := false
 var _kind := ""
@@ -88,6 +97,7 @@ var _caption_layer: CanvasLayer
 var _caption: Label
 var _lines: Dictionary = {}
 var _canon: Dictionary = {}   # lowercase id/name/archetype -> house info dict
+var _champion_house := ""     # remembered by play_checkmate for the tableau captions
 
 
 func _ready() -> void:
@@ -132,13 +142,19 @@ func play_duel(attacker: Node3D, victim: Node3D, meta: Dictionary = {},
 	_arm_failsafe(seq, failsafe_wall_sec)
 	_audio_capture()
 	var line := pick_kill_line(duel_context(attacker, victim, meta))
+	_cam_enter_duel(attacker, victim, seq)   # concurrent swoop
+	# FACE TO FACE: both combatants turn to meet BEFORE the strike begins,
+	# then a per-frame yaw hold keeps them locked through it — a stale
+	# _face_home tween left by the preceding walk can never again leave a
+	# duel fought back-to-back.
+	await _face_off_pair(seq, attacker, victim)
 	var strike_done := {"done": not strike.is_valid()}
 	if strike.is_valid():
 		var runner := func() -> void:
 			await strike.call()
 			strike_done["done"] = true
 		runner.call()
-	_cam_enter_duel(attacker, victim, seq)   # concurrent swoop
+	_face_hold(seq, attacker, victim, strike_done)   # concurrent yaw lock
 	await _wall_lerp(seq, _set_ts, Engine.time_scale, duel_slow_scale, duel_ramp_down_wall)
 	_show_caption(line, seq)
 	await _wall_wait(seq, duel_slow_hold_wall)
@@ -151,6 +167,7 @@ func play_duel(attacker: Node3D, victim: Node3D, meta: Dictionary = {},
 			break
 		await tree.process_frame
 	_hide_caption()
+	await _face_rest(attacker)   # survivor resumes his side's resting yaw
 	await _cam_exit(seq)
 	_finish(seq, "duel")
 
@@ -186,7 +203,7 @@ func play_promotion(piece: Node3D, meta: Dictionary = {}) -> void:
 ## "<winning house> takes the throne", 3 s hold, then the victory panel hook
 ## fires. The death choreography finishes at normal speed after the hold.
 func play_checkmate(losing_king: Node3D, winning_house: String,
-		death: Callable = Callable(), _meta: Dictionary = {}) -> void:
+		death: Callable = Callable(), meta: Dictionary = {}) -> void:
 	if _active or not is_inside_tree():
 		if death.is_valid():
 			await death.call()
@@ -195,9 +212,16 @@ func play_checkmate(losing_king: Node3D, winning_house: String,
 	_arm_failsafe(seq, maxf(failsafe_wall_sec, checkmate_hold_wall + 5.0))
 	_audio_capture()
 	var house_name := resolve_house_name(winning_house)
+	_champion_house = house_name   # the tableau caption beat reads this later
 	var caption := format_line(
 		str(_lines.get("checkmate_line", "{wh} takes the throne")), {"wh": house_name})
+	# The king dies facing his killer (meta "attacker" override, else the
+	# nearest enemy piece) — and the killer faces the king he fells.
+	var killer := _checkmate_killer(losing_king, meta)
 	var death_done := {"done": not death.is_valid()}
+	if killer != null:
+		await _face_off_pair(seq, losing_king, killer)
+		_face_hold(seq, losing_king, killer, death_done)
 	if death.is_valid():
 		var runner := func() -> void:
 			await death.call()
@@ -217,6 +241,7 @@ func play_checkmate(losing_king: Node3D, winning_house: String,
 		if tree == null:
 			break
 		await tree.process_frame
+	await _face_rest(killer)   # the killer resumes his rest yaw over the fallen
 	_finish(seq, "checkmate")
 
 
@@ -238,7 +263,21 @@ func play_championship_tableau(throne_focus: Vector3, _meta: Dictionary = {}) ->
 		var target := Transform3D(
 			Basis.looking_at(throne_focus - cam_pos, Vector3.UP), cam_pos)
 		await _cam_glide(seq, target, championship_fov, championship_glide_wall, 0.3)
-	await _wall_wait(seq, championship_hold_wall)
+	# The caption beat over the tableau — the ceremony's mark, then the
+	# crown. Strictly sequential (the two lines never overlap), padded so
+	# the whole beat still spends exactly the championship hold.
+	var hold0 := Time.get_ticks_msec()
+	_show_caption("ASHFALL.", seq)
+	await _wall_wait(seq, tableau_caption_beat)
+	_hide_caption()
+	await _wall_wait(seq, 0.2)
+	if not _champion_house.is_empty():
+		_show_caption(format_line(
+			str(_lines.get("checkmate_line", "{wh} takes the throne")),
+			{"wh": _champion_house}), seq)
+		await _wall_wait(seq, tableau_caption_beat)
+	var spent := float(Time.get_ticks_msec() - hold0) / 1000.0
+	await _wall_wait(seq, maxf(0.0, championship_hold_wall - spent))
 	if _cam_on and not _skip and _seq == seq:
 		_cam_park()
 	_finish(seq, "championship")
@@ -293,6 +332,141 @@ static func format_line(text: String, ctx: Dictionary) -> String:
 
 func resolve_house_name(key_or_name: String) -> String:
 	return str(_house_info(key_or_name)["name"])
+
+
+# ── face-to-face choreography (2026-08-08) ─────────────────────────────────
+# Battle doctrine: no duel is fought back-to-back. The director rotates the
+# fighters' root Node3Ds directly (PieceView internals are never touched);
+# towers (piece_type 1) are exempt — a watchtower has no face. Fighters'
+# native forward is +Z; resting yaw is the piece's own spawn orientation
+# (duck-read _home_yaw) or the side convention (FROST +Z, EMBER -Z).
+
+const TYPE_TOWER := 1
+
+
+static func _has_facing(n: Node3D) -> bool:
+	if not is_instance_valid(n):
+		return false
+	var pt = n.get("piece_type")
+	return not (typeof(pt) == TYPE_INT and int(pt) == TYPE_TOWER)
+
+
+static func _yaw_from_to(from: Node3D, to_pos: Vector3) -> float:
+	var d := to_pos - from.global_position
+	return atan2(d.x, d.z)
+
+
+static func _rest_yaw(n: Node3D, fallback: float) -> float:
+	var hy = n.get("_home_yaw")
+	if typeof(hy) == TYPE_FLOAT:
+		return float(hy)
+	var s = n.get("side")
+	if typeof(s) == TYPE_INT:
+		return 0.0 if int(s) == 0 else PI
+	return fallback
+
+
+## Both fighters turn to meet: ~0.2 s wall-clock ease-out on rotation.y.
+## Aborts (leaving yaw wherever it is) on skip/supersede — the wrapped
+## choreography still runs and settles its own pose.
+func _face_off_pair(seq: int, a: Node3D, b: Node3D) -> void:
+	if not (is_instance_valid(a) and is_instance_valid(b)):
+		return
+	var turn_a := _has_facing(a)
+	var turn_b := _has_facing(b)
+	if not turn_a and not turn_b:
+		return
+	var ya0 := a.rotation.y
+	var yb0 := b.rotation.y
+	var t0 := Time.get_ticks_msec()
+	while true:
+		if _seq != seq or _skip:
+			return
+		if not (is_instance_valid(a) and is_instance_valid(b)):
+			return
+		var u := clampf(float(Time.get_ticks_msec() - t0) / (face_off_wall * 1000.0), 0.0, 1.0)
+		var e := 1.0 - pow(1.0 - u, 3.0)   # ease-out: the snap of meeting eyes
+		if turn_a:
+			a.rotation.y = lerp_angle(ya0, _yaw_from_to(a, b.global_position), e)
+		if turn_b:
+			b.rotation.y = lerp_angle(yb0, _yaw_from_to(b, a.global_position), e)
+		if u >= 1.0:
+			return
+		var tree := get_tree()
+		if tree == null:
+			return
+		await tree.process_frame
+
+
+## Concurrent per-frame yaw lock while `done["done"]` is false: keeps the
+## pair meeting eye-to-eye through lunges and death throes, and outlives
+## any stale fire-and-forget rotation tween from earlier gameplay.
+func _face_hold(seq: int, a: Node3D, b: Node3D, done: Dictionary) -> void:
+	var runner := func() -> void:
+		while _seq == seq and not _skip and not bool(done.get("done", true)):
+			if is_instance_valid(a) and is_instance_valid(b):
+				if _has_facing(a):
+					a.rotation.y = _yaw_from_to(a, b.global_position)
+				if _has_facing(b):
+					b.rotation.y = _yaw_from_to(b, a.global_position)
+			var tree := get_tree()
+			if tree == null:
+				return
+			await tree.process_frame
+	runner.call()
+
+
+## Survivor eases back to his side's resting yaw. Runs on the skip path too
+## (instant snap there) — a duel may not leave a stray facing behind.
+func _face_rest(survivor: Node3D) -> void:
+	if survivor == null or not is_instance_valid(survivor) or not _has_facing(survivor):
+		return
+	var rest := _rest_yaw(survivor, survivor.rotation.y)
+	if _skip:
+		survivor.rotation.y = rest
+		return
+	var y0 := survivor.rotation.y
+	var t0 := Time.get_ticks_msec()
+	while is_instance_valid(survivor):
+		var u := clampf(float(Time.get_ticks_msec() - t0) / (face_rest_wall * 1000.0), 0.0, 1.0)
+		survivor.rotation.y = lerp_angle(y0, rest, 1.0 - pow(1.0 - u, 3.0))
+		if u >= 1.0:
+			return
+		var tree := get_tree()
+		if tree == null:
+			return
+		await tree.process_frame
+
+
+## The piece the king dies facing: meta["attacker"] when the integrator
+## passes one, else the nearest enemy piece on the board (duck-typed side/
+## piece_type ints — the checkmating piece is almost always the closest).
+func _checkmate_killer(king: Node3D, meta: Dictionary) -> Node3D:
+	var m = meta.get("attacker")
+	if m is Node3D and is_instance_valid(m):
+		return m
+	if not is_instance_valid(king):
+		return null
+	var ks = king.get("side")
+	if typeof(ks) != TYPE_INT:
+		return null
+	var tree := get_tree()
+	if tree == null:
+		return null
+	var best: Node3D = null
+	var best_d := INF
+	for n in tree.root.find_children("*", "Node3D", true, false):
+		if n == king or n.is_queued_for_deletion():
+			continue
+		var s = n.get("side")
+		var pt = n.get("piece_type")
+		if typeof(s) != TYPE_INT or typeof(pt) != TYPE_INT or int(s) == int(ks):
+			continue
+		var d := (n as Node3D).global_position.distance_squared_to(king.global_position)
+		if d < best_d:
+			best_d = d
+			best = n
+	return best
 
 
 # ── skip input: any click or Esc while active ──────────────────────────────

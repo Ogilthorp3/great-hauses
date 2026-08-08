@@ -49,7 +49,11 @@ const THRONE_POS := Vector3(0.0, FLOOR_Y, 10.7)
 ## rig ships mid-flight: the body floats ~1.5-2 u above the armature root,
 ## so the root sits low and the beast reads at ~y 4.
 const DRAGON_HOVER := Vector3(0.0, 2.2, 9.9)
-const DRAGON_SCALE := 1.15    # ~5 m wingspan next to ~1 m warriors
+## Ceremony sizing (2026-08-08): the tableau dragon reads at 1.6 — the same
+## scale the DragonSpectator championship ceremony settles at, so the
+## hand-off from ashfall to tableau never pops. (test_dragon.gd asserts
+## both the scale and DRAGON_HOVER stay in sync with the spectator.)
+const DRAGON_SCALE := 1.6
 
 var banners: Array[HallBanner] = []
 var throne: Node3D = null
@@ -269,19 +273,47 @@ func _build_throne() -> void:
 	add_child(throne)
 
 
-## Championship staging: the dragon appears above the throne on a Flying_Idle
-## loop. Idempotent — returns the live dragon. Adds NO lights (the rig's
-## emissive lift covers the glow). Loader lives in DragonRig (shared with
-## the spectator/ashfall module) — do not duplicate it here again.
+## Championship staging: the dragon takes its perch above the throne with a
+## slow wing-settle (spawned slightly high and large-of-motion, easing onto
+## DRAGON_HOVER at scale 1.6 — a tween, never a pop) and a gentle ember
+## drift over the tableau. Idempotent — returns the live dragon. Adds NO
+## lights (the rig's emissive lift + emissive particles cover the glow; the
+## 8-omni budget stays full). Loader lives in DragonRig (shared with the
+## spectator/ashfall module) — do not duplicate it here again.
 func summon_champion_dragon() -> Node3D:
 	if dragon != null:
 		return dragon
 	var rig: DragonRig = DragonRigScript.spawn(
-		self, "ChampionDragon", DRAGON_HOVER, PI, DRAGON_SCALE)
+		self, "ChampionDragon", DRAGON_HOVER + Vector3.UP * 0.55, PI,
+		DRAGON_SCALE * 0.92)
 	# yaw PI: face the hall (toward -Z / the camera side)
 	dragon = rig
 	_dragon_anim = rig.anim
-	rig.play_loop("Flying_Idle")
+	rig.play_loop("Flying_Idle", 0.5, 0.8)   # slow flap: the wing-settle
+	var settle := create_tween().set_parallel(true)
+	settle.tween_property(rig, "position", DRAGON_HOVER, 1.3) \
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	settle.tween_property(rig, "scale", Vector3.ONE * DRAGON_SCALE, 1.3) \
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	settle.chain().tween_callback(func() -> void:
+		if is_instance_valid(rig):
+			rig.play_loop("Flying_Idle", 0.6, 0.6))   # the mighty hover
+	# Gentle ember drift over the throne — emissive billboards, no lights.
+	var drift := DragonRigScript.spawn_emitter(rig, "ThroneEmberDrift", {
+		"amount": 26, "lifetime": 3.2, "size": 0.06,
+		"velocity": Vector2(0.2, 0.7), "spread": 70.0,
+		"direction": Vector3(0.0, -1.0, 0.0),
+		"gravity": Vector3(0.0, -0.35, 0.0), "grow": 0.8,
+		"emission_radius": 1.7,
+		"ramp": [
+			[0.0, Color(1.0, 0.7, 0.3, 0.0)],
+			[0.2, Color(1.0, 0.55, 0.15, 0.9)],
+			[1.0, Color(0.5, 0.12, 0.03, 0.0)],
+		],
+		"blend": BaseMaterial3D.BLEND_MODE_ADD, "emission_energy": 2.2,
+	})
+	drift.position = Vector3.UP * 3.2
+	drift.emitting = true
 	return dragon
 
 
@@ -294,7 +326,7 @@ func dragon_wink() -> void:
 	await get_tree().create_timer(_dragon_anim.get_animation("Yes").length / 0.55).timeout
 	if not is_instance_valid(_dragon_anim):
 		return
-	_dragon_anim.speed_scale = 1.0
+	_dragon_anim.speed_scale = 0.6   # settle back into the mighty hover
 	if _dragon_anim.has_animation("Flying_Idle"):
 		_dragon_anim.play("Flying_Idle", 0.4)
 

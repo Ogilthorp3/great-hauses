@@ -6,9 +6,12 @@ extends Node3D
 ## and the full ASHFALL execution.
 ##
 ## Run windowed (visual verification; click/Esc skips the running ashfall;
-## saves a mid-fire frame to test_e2e/artifacts/module-previews/ashfall.png):
+## saves the mid-fire frame to test_e2e/artifacts/module-previews/ashfall.png
+## and the CEREMONY frames — mid-bank, wing-spread hover, smolder, and (with
+## --champ) the throne crowning/tableau — to module-previews/finale/):
 ##   Godot --path <proj> res://scenes/cinematics/ashfall_test.tscn -- --run-ashfall-test
-## Run headless (self-checking, exits 0/1):
+##   Godot --path <proj> res://scenes/cinematics/ashfall_test.tscn -- --run-ashfall-test --champ
+## Run headless (self-checking, exits 0/1; --champ selects the throne tier):
 ##   Godot --headless --path <proj> res://scenes/cinematics/ashfall_test.tscn -- --run-ashfall-test
 ## Without the arg the stage idles with an instructions label (headless-safe).
 
@@ -16,10 +19,10 @@ const SpectatorScript := preload("res://src/cinematics/dragon_spectator.gd")
 
 const SHOT_DIR := "res://test_e2e/artifacts/module-previews"
 const SHOT_PATH := SHOT_DIR + "/ashfall.png"
+const FINALE_DIR := SHOT_DIR + "/finale"
 
 var _spectator: DragonSpectator
 var _fails := 0
-var _shot_taken := false
 
 
 class MockDuelDirector:
@@ -95,31 +98,52 @@ func _run() -> void:
 	_check("react-anim-is-hitreact", _anim_now() == "HitReact")
 	await _pause(1.2)
 
-	# ── Act II: full ASHFALL over the losing army ──
+	# ── Act II: THE CEREMONY — full ashfall over the losing army ──
+	var champ := OS.get_cmdline_user_args().has("--champ")
 	var finished := {"v": false}
 	_spectator.ashfall_finished.connect(func() -> void: finished["v"] = true)
 	var t0 := Time.get_ticks_msec()
 	if not headless:
-		_schedule_shot(2.4)   # mid-breath frame
-	await _spectator.play_ashfall(1, "House Winterfang", losers)
+		# Default-timing phase map: ramp .25 | bank -> 2.85 | flare -> 3.55
+		# | inhale -> 4.15 | breath -> 6.95 | linger/smolder | champ: crown
+		# bank ~8.6-9.9, settle -> ~11.3, captions -> ~13.
+		_schedule_shot(1.15, FINALE_DIR + "/bank.png")     # profile crossing, west
+		_schedule_shot(1.95, FINALE_DIR + "/bank2.png")    # profile crossing, east
+		_schedule_shot(3.7, FINALE_DIR + "/hover.png")     # wing-spread + inhale
+		_schedule_shot(5.6, SHOT_PATH)                     # mid-breath (legacy frame)
+		_schedule_shot(7.9, FINALE_DIR + "/smolder.png")   # jet cut — skeletons smolder
+		if champ:
+			_schedule_shot(10.7, FINALE_DIR + "/crowning.png")  # wing-settle, throne
+			_schedule_shot(12.6, FINALE_DIR + "/tableau.png")   # the caption beat
+	await _spectator.play_ashfall(1, "House Winterfang", losers, champ)
 	var wall := float(Time.get_ticks_msec() - t0) / 1000.0
 	await _pause(0.1)   # let queue_free flush
 	_check("ashfall-finished-signal", finished["v"])
 	_check("ashfall-timescale-restored", is_equal_approx(Engine.time_scale, 1.0))
-	_check("ashfall-under-7s", wall < 7.0)   # 6 s budget + frame slack
+	if champ:
+		_check("ashfall-under-17s", wall < 17.0)   # 16 s budget + frame slack
+		_check("champ-throne-perch",
+			(_spectator.position - SpectatorScript.THRONE_PERCH).length() < 0.3)
+		_check("champ-scale-1p6",
+			is_equal_approx(_spectator.rig.scale.x, _spectator.champ_scale))
+	else:
+		_check("ashfall-under-13s", wall < 13.0)   # 12 s budget + frame slack
+		_check("match-scale-restored",
+			is_equal_approx(_spectator.rig.scale.x, _spectator.dragon_scale))
 	var survivors := 0
 	for l in losers:
 		if is_instance_valid(l):
 			survivors += 1
 	_check("ashfall-losers-removed", survivors == 0)
+	_check("ashfall-remains-cleaned", _spectator.remains_count() == 0)
 	var winners_alive := true
 	for w in winners:
 		winners_alive = winners_alive and is_instance_valid(w)
 	_check("ashfall-winners-untouched", winners_alive)
 	_check("ashfall-inactive-after", not _spectator.is_ashfall_active())
 	_check("no-light3d-added", _light_count() == lights_before)
-	print("ASHFALLTEST ashfall wall=%.2fs suite=%.1fs" % [
-		wall, float(Time.get_ticks_msec() - t_suite) / 1000.0])
+	print("ASHFALLTEST ashfall wall=%.2fs champ=%s suite=%.1fs" % [
+		wall, champ, float(Time.get_ticks_msec() - t_suite) / 1000.0])
 
 	print("ASHFALLTEST DONE fails=%d" % _fails)
 	if headless:
@@ -133,18 +157,21 @@ func _run() -> void:
 # ── screenshot (windowed only) ─────────────────────────────────────────────
 
 
-func _schedule_shot(delay_sec: float) -> void:
+func _schedule_shot(delay_sec: float, path: String) -> void:
 	var runner := func() -> void:
 		await _pause(delay_sec)
-		if _shot_taken or not is_inside_tree():
+		if not is_inside_tree():
 			return
-		_shot_taken = true
 		var img := get_viewport().get_texture().get_image()
-		DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(SHOT_DIR))
-		var err := img.save_png(ProjectSettings.globalize_path(SHOT_PATH))
-		print("ASHFALLTEST SHOT_SAVED path=%s err=%d size=%dx%d" % [
-			ProjectSettings.globalize_path(SHOT_PATH), err,
-			img.get_width(), img.get_height()])
+		DirAccess.make_dir_recursive_absolute(
+			ProjectSettings.globalize_path(path.get_base_dir()))
+		var err := img.save_png(ProjectSettings.globalize_path(path))
+		var cam := get_viewport().get_camera_3d()
+		print("ASHFALLTEST SHOT_SAVED path=%s err=%d size=%dx%d dragon=%v cam=%v" % [
+			ProjectSettings.globalize_path(path), err,
+			img.get_width(), img.get_height(),
+			_spectator.global_position,
+			cam.global_position if cam != null else Vector3.INF])
 	runner.call()
 
 
@@ -197,13 +224,29 @@ func _wait_until(pred: Callable, timeout_sec: float) -> bool:
 func _build_stage() -> void:
 	var floor_mesh := MeshInstance3D.new()
 	var plane := PlaneMesh.new()
-	plane.size = Vector2(16.0, 16.0)
+	plane.size = Vector2(26.0, 26.0)
 	floor_mesh.mesh = plane
 	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.14, 0.13, 0.15)
+	mat.albedo_color = Color(0.12, 0.11, 0.13)
 	mat.roughness = 1.0
 	floor_mesh.material_override = mat
 	add_child(floor_mesh)
+
+	# A ring of stand-in pillars at hall radius — scale cues so the
+	# ceremony's bank/hover silhouettes can be judged by eye (the real
+	# hall provides walls/pillars/torches; the void provides nothing).
+	var pillar_mat := StandardMaterial3D.new()
+	pillar_mat.albedo_color = Color(0.2, 0.19, 0.22)
+	pillar_mat.roughness = 1.0
+	for i in 8:
+		var ang := float(i) * TAU / 8.0
+		var col := MeshInstance3D.new()
+		var box := BoxMesh.new()
+		box.size = Vector3(0.8, 4.5, 0.8)
+		col.mesh = box
+		col.material_override = pillar_mat
+		col.position = Vector3(sin(ang) * 10.5, 2.25, cos(ang) * 10.5)
+		add_child(col)
 
 	# Stage lights are scene furniture — the no-Light3D check counts the
 	# DELTA across module calls, so these two are fine.
