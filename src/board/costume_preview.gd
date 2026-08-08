@@ -80,6 +80,11 @@ static func validate_piece(pv: PieceView, piece_type: int, house_id: String) -> 
 	var caped := pv.find_child("Cape", true, false) != null
 	if (piece_type == PieceView.Type.KING) != caped:
 		errs.append("%s: cape presence wrong (%s)" % [tag, caped])
+	# TYPE: queen wears the slim Tiara (royal swap 2026-08-08); nobody else,
+	# and never a node named Crown — e2e proves queens uncrowned by that name.
+	var tiaraed := pv.find_child("Tiara", true, false) != null
+	if (piece_type == PieceView.Type.QUEEN) != tiaraed:
+		errs.append("%s: tiara presence wrong (%s)" % [tag, tiaraed])
 	# HOUSE: Tidegrip fields skeletons; everyone else fields adventurers.
 	if piece_type != PieceView.Type.ROOK:
 		var skeletal := false

@@ -95,6 +95,23 @@ func _ready() -> void:
 	_apply_bus_state()
 
 
+func _exit_tree() -> void:
+	# Release AudioServer playbacks before engine teardown: a deck still
+	# playing at quit leaks its AudioStreamPlaybackMP3 + AudioStreamMP3 pair
+	# (ObjectDB warning on every boot log). Streams are also dropped so the
+	# resource itself can be reclaimed.
+	var was_playing := false
+	for p in [_sting_player, _fanfare_player] + Array(_decks):
+		if p != null and is_instance_valid(p):
+			was_playing = was_playing or p.playing
+			p.stop()
+			p.stream = null
+	if was_playing:
+		# stop() only MARKS the playback for deletion; the audio thread frees
+		# it on its next mix pass. Give it one beat, or exit wins the race.
+		OS.delay_msec(120)
+
+
 ## ── Public API ─────────────────────────────────────────────────────────────
 
 func play_menu() -> void:

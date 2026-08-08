@@ -393,7 +393,15 @@ func _llm_taunt(beat: String, ctx: Dictionary) -> String:
 			or not ((choices as Array)[0] is Dictionary):
 		last_error = "response has no choices"
 		return ""
-	var msg: Variant = ((choices as Array)[0] as Dictionary).get("message")
+	var choice: Dictionary = (choices as Array)[0]
+	# A reply cut off by the token cap is never a usable taunt: reasoning
+	# models burn the budget on chain-of-thought and the "last line" is then
+	# truncated meta-text, not a line (seen live 2026-08-08: the caption
+	# read "1. The user wants me to act as House Goldclaw…"). Fall back.
+	if str(choice.get("finish_reason", "")) == "length":
+		last_error = "reply truncated (finish_reason=length)"
+		return ""
+	var msg: Variant = choice.get("message")
 	if not (msg is Dictionary):
 		last_error = "choice has no message"
 		return ""

@@ -534,3 +534,13 @@ func _build_footer() -> void:
 	_footer.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	_footer.position.y = -34
 	add_child(_footer)
+	# CC BY attribution (7 of 10 tracks legally require display) — a second
+	# dim label; _footer itself is rewritten per phase.
+	var credits := Label.new()
+	credits.name = "MusicCredits"
+	credits.text = MusicCredits.get_credits_short()
+	credits.add_theme_font_size_override("font_size", 11)
+	credits.add_theme_color_override("font_color", TEXT_DIM)
+	credits.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	credits.position = Vector2(10, -22)
+	add_child(credits)

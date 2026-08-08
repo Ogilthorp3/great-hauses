@@ -27,7 +27,11 @@ compatible (`house_id == ""` = legacy FROST/EMBER). Every existing flow
   (`PieceAssets.TYPE_HEIGHT`, world units; models are AABB-normalized at
   build so the law holds for every cast).
 - Signature gear per type: pawn sword+round shield · knight sword+kite
-  shield · bishop staff+tome · queen bow+quiver · king crown+cape.
+  shield · bishop staff+tome · queen tiara+bow+quiver · king
+  crown+cape+sword. (Royal swap 2026-08-08: the goateed Ranger is the KING,
+  the clean-faced Rogue_Hooded is the QUEEN with a slim tiara — the crown
+  prop scaled slimmer/flatter, node named `Tiara` so queens stay
+  "uncrowned" for the e2e Crown-node check.)
 - Type-glyph ring under every piece (front medallion, engraved emissive
   chess glyph).
 - House crests on knight/queen/king; sigil decals on shields; the rook is
@@ -74,6 +78,7 @@ elsewhere): `CHARACTER_SCALE`, `KING_SCALE`, `TOWER_SCALE`,
 - `Crown` under `CrownMount` — kings only (existing e2e board-truth check;
   crests are named `Crest` precisely so queens stay "uncrowned").
 - New names: `GlyphRing`, `Crest`/`CrestMount`, `Cape`/`CapeMount`,
+  `Tiara`/`TiaraMount` (queens only — deliberately NOT `Crown`),
   `GearMount_<key>`/`Gear_<key>` (keys: sword, shield, staff, tome, bow,
   quiver), `SigilDecal`; watchtower meshes `TowerBody`, `BannerCloth`,
   `BannerRod`, `PennantPole`, `Pennant`.

@@ -6,7 +6,8 @@
 #               headless boot with zero SCRIPT ERROR/Parse Error
 #   tests       ALL headless suites — engine (79), tournament, cinematics
 #               time-restore, DS4 opponent (mock+live, 3 modes),
-#               UciEngine/stockfish client                      — Gate A
+#               UciEngine/stockfish client, music (104), banter (93),
+#               dragon spectator/ASHFALL, costumes (84)          — Gate A
 #   boot        windowed: select flows to game, 32 pieces, banners+HUD dyed
 #   orientation windowed: --debug-coords labeled overlay from the default
 #               player camera, saved as labeled.png — the permanent
@@ -31,6 +32,14 @@
 #   oracle-mock windowed: DS4-Oracle (Pure) vs in-driver canned HTTP mock
 #   oracle-modes windowed: Counseled Oracle — mock proposes a blunder, real
 #               stockfish counsel rejects it, revised move plays
+#   music       windowed: menu/game playlists, M mute on the Music bus,
+#               duel duck −8 dB + stinger, unduck on settle
+#   banter      windowed: rival taunts in the HUD — accent color, first-blood
+#               capture beat, 2-fullmove rate limit held (pool path, dead
+#               LLM port)
+#   dragon-live windowed: spectator perched + fed, reactions gated under the
+#               duel cam, scripted mate → ASHFALL burns the losers, clock +
+#               views restored, victory flow reached
 #   fullgame    windowed: complete two-rook-ladder game, sync + time_scale
 #               hygiene every ply                                — Gate D
 #   showcase    windowed 45 s zero-error soak + beauty shots + the
@@ -83,6 +92,14 @@ COUNSEL_FEN="3qk3/8/8/8/8/8/3P4/3QK3 b - - 0 1"
 # blocked by the queen herself on d1 — asserted as such); d2/e2 pawns block
 # the short rays; the queen keeps the long a4 diagonal.
 BOARD_FEN="r3k2r/8/8/8/8/8/3PP3/R2QK2R w KQkq - 0 1"
+# Banter scenario: White captures NOW (exd5/Qxd5) and again two plies later
+# (Qxh5 — the black h-pawn is wedged behind h4, the black king can never
+# defend it): first-blood taunt at fullmove 1, rate-limited gloat at 2.
+BANTER_FEN="k7/8/8/3p3p/4P2P/8/8/3QK3 w - - 0 1"
+# Dragon-live scenario: Ra8# is mate-in-1 (back rank, f7/g7/h7 lock the
+# king's own escape) and the mated house leaves three pawns standing —
+# fuel for the ASHFALL pyre.
+DRAGON_FEN="6k1/5ppp/8/8/8/8/8/R3K3 w - - 0 1"
 
 mkdir -p "$RUN_DIR" "$ART_ROOT"
 
@@ -205,8 +222,8 @@ run_scenario() {  # <name> [extra user args...]
 if [ ! -x "$GODOT" ]; then note "Godot binary missing: $GODOT"; exit 2; fi
 STEPS=("$@")
 [ ${#STEPS[@]} -eq 0 ] && STEPS=(preflight tests boot orientation board-truth \
-  board-moves move duel castle enpassant promote slowmo tournament \
-  oracle-mock oracle-modes fullgame showcase)
+  board-moves move duel castle enpassant promote slowmo music banter \
+  dragon-live tournament oracle-mock oracle-modes fullgame showcase)
 
 SUITE_RC=0
 for step in "${STEPS[@]}"; do
@@ -218,6 +235,10 @@ for step in "${STEPS[@]}"; do
       run_suite cinematics-suite res://tests/test_cinematics.gd || SUITE_RC=1
       run_suite ds4-suite res://tests/test_ds4_opponent.gd || SUITE_RC=1
       run_suite uci-suite res://tests/test_uci_engine.gd || SUITE_RC=1
+      run_suite music-suite res://tests/test_music.gd || SUITE_RC=1
+      run_suite banter-suite res://tests/test_banter.gd || SUITE_RC=1
+      run_suite dragon-suite res://tests/test_dragon.gd || SUITE_RC=1
+      run_suite costumes-suite res://tests/test_costumes.gd || SUITE_RC=1
       ;;
     boot)      run_scenario boot || SUITE_RC=1 ;;
     orientation) run_scenario orientation "--debug-coords" || SUITE_RC=1 ;;
@@ -229,6 +250,10 @@ for step in "${STEPS[@]}"; do
     enpassant) run_scenario enpassant "--e2e-fen=$EP_FEN" || SUITE_RC=1 ;;
     promote)   run_scenario promote "--e2e-fen=$PROMOTE_FEN" || SUITE_RC=1 ;;
     slowmo)    run_scenario slowmo "--e2e-fen=$DUEL_FEN" || SUITE_RC=1 ;;
+    music)     run_scenario music "--e2e-fen=$DUEL_FEN" || SUITE_RC=1 ;;
+    banter)    run_scenario banter "--e2e-fen=$BANTER_FEN" || SUITE_RC=1 ;;
+    dragon-live) run_scenario dragon-live "--e2e-fen=$DRAGON_FEN" \
+                   "--e2e-timeout=90" || SUITE_RC=1 ;;
     tournament) SCENARIO_TIMEOUT=170 run_scenario tournament \
                   "--e2e-fen=$TOURN_FEN" "--e2e-timeout=150" || SUITE_RC=1 ;;
     oracle-mock) run_scenario oracle-mock "--e2e-timeout=80" || SUITE_RC=1 ;;
@@ -241,7 +266,7 @@ for step in "${STEPS[@]}"; do
                  # 45 s soak + tableau is ~56 s alone but needs headroom at
                  # the tail of a full sequential run (watchdogged at 90 s
                  # under end-of-suite load, 2026-08-08)
-    *) note "unknown step '$step' (use preflight|tests|boot|orientation|board-truth|board-moves|move|duel|castle|enpassant|promote|slowmo|tournament|oracle-mock|oracle-modes|fullgame|showcase)"; SUITE_RC=1 ;;
+    *) note "unknown step '$step' (use preflight|tests|boot|orientation|board-truth|board-moves|move|duel|castle|enpassant|promote|slowmo|music|banter|dragon-live|tournament|oracle-mock|oracle-modes|fullgame|showcase)"; SUITE_RC=1 ;;
   esac
 done
 

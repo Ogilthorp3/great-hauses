@@ -58,6 +58,7 @@ func _main() -> void:
 	await process_frame
 	_test_skeleton_rig_compat()
 	_test_assembly_every_combo()
+	_test_royal_casting()
 	_test_shield_types()
 	_test_height_grading()
 	_test_glyph_orientation()
@@ -129,6 +130,38 @@ func _test_assembly_every_combo() -> void:
 		var label: String = combo[0] if not str(combo[0]).is_empty() \
 				else "legacy-%d" % combo[1]
 		check("assembly: %s full set" % label, "[]", str(errs_total))
+
+
+## The royal swap (2026-08-08, user-verified in the previews): the goateed
+## Ranger reads as a bearded MONARCH — he is the KING (crown + cape + sword);
+## the clean-faced hooded rogue is the QUEEN (slim tiara + bow + quiver).
+func _test_royal_casting() -> void:
+	check("casting: king base model is the Ranger", true,
+			str((assets.CHARACTER_SCENES[T_KING] as PackedScene).resource_path)
+			.ends_with("Ranger.glb"))
+	check("casting: queen base model is the hooded rogue", true,
+			str((assets.CHARACTER_SCENES[T_QUEEN] as PackedScene).resource_path)
+			.ends_with("Rogue_Hooded.glb"))
+	var king := _spawn(T_KING, FROST, "winterfang")
+	var queen := _spawn(T_QUEEN, FROST, "winterfang")
+	check("casting: king bears a sword", true,
+			king.find_child("Gear_sword", true, false) != null)
+	check("casting: king wears no tiara", true,
+			king.find_child("Tiara", true, false) == null)
+	check("casting: queen wears the tiara, never a Crown node", true,
+			queen.find_child("Tiara", true, false) != null
+			and queen.find_child("Crown", true, false) == null)
+	check("casting: queen keeps bow + quiver", true,
+			queen.find_child("Gear_bow", true, false) != null
+			and queen.find_child("Gear_quiver", true, false) != null)
+	var crown := king.find_child("Crown", true, false) as Node3D
+	var tiara := queen.find_child("Tiara", true, false) as Node3D
+	check("casting: tiara visibly slimmer + flatter than the crown", true,
+			crown != null and tiara != null
+			and tiara.scale.x < crown.scale.x * 0.8
+			and tiara.scale.y < crown.scale.y * 0.5)
+	king.free()
+	queen.free()
 
 
 ## Right shield per rank: pawn round, knight kite (shield_badge).

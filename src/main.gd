@@ -26,6 +26,7 @@ func _ready() -> void:
 	_select = SELECT_SCENE.instantiate()
 	_select.name = "HouseSelect"
 	add_child(_select)
+	Music.play_menu()   # after the probe-flag early return — CI boots stay silent
 	_select.selection_complete.connect(_on_selection_complete)
 	_probe_oracle()
 	_probe_maester()

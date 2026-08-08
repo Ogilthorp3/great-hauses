@@ -27,6 +27,13 @@ const CHAR_TO_TYPE := {
 	"b": PieceView.Type.BISHOP, "q": PieceView.Type.QUEEN, "k": PieceView.Type.KING,
 }
 
+const PIECE_NAME := {
+	"p": "pawn", "r": "rook", "n": "knight", "b": "bishop", "q": "queen", "k": "king",
+}
+
+const BLUNDER_CP := 150.0            # eval swing that counts as a player blunder
+const BLUNDER_DEPTH := 8             # shallow probe — a signal, not counsel
+
 const RESULT_TEXT := {
 	ChessState.RESULT.STALEMATE: "Stalemate — the war ends in a draw",
 	ChessState.RESULT.INSUFFICIENT: "Draw — neither house can force mate",
@@ -41,6 +48,8 @@ var ai := ChessAI.new()
 var ai_difficulty := ChessAI.Difficulty.MEDIUM
 
 var duel_director: DuelDirector
+var banter: BanterEngine = null      # non-null only with a registry rival (legacy skin skipped)
+var spectator: DragonSpectator = null
 var oracle: Ds4Opponent = null       # non-null only vs DS4-Oracle
 var oracle_thinking := false
 var oracle_think_count := 0          # e2e evidence: thinking HUD fired
@@ -65,6 +74,13 @@ var _turn_label: Label
 var _move_list: RichTextLabel
 var _oracle_flash: Label
 var _oracle_caption: Label
+var _banter_caption: Label
+
+# shared blunder probe (one shallow Stockfish sample feeds banter + dragon)
+var _blunder_engine: UciEngine = null
+var _blunder_failed := false
+var _blunder_busy := false
+var blunder_count := 0               # e2e evidence: the blunder hook fired
 var _victory_panel: PanelContainer
 var _victory_label: Label
 var _continue_btn: Button
@@ -91,6 +107,12 @@ func _ready() -> void:
 	duel_director.name = "DuelDirector"
 	add_child(duel_director)
 	duel_director.victory_panel_requested.connect(_on_victory_panel_requested)
+	# Music rides the director's own cinematic signals: every cinematic ducks
+	# the playlist −8 dB; only the duel also fires a stinger at the slow-mo.
+	duel_director.cinematic_started.connect(_on_cinematic_started)
+	duel_director.cinematic_finished.connect(func(_kind: String) -> void:
+		Music.unduck())
+	_setup_spectator()
 	if Session.configured and str(Session.opponent.get("kind", "")) == "ds4_oracle":
 		oracle = Ds4Opponent.new()
 		oracle.name = "Oracle"
@@ -103,6 +125,8 @@ func _ready() -> void:
 		oracle.oracle_reason.connect(_on_oracle_reason)
 	_build_hud()
 	_dress_hall()
+	Music.play_game()   # idempotent; crossfades out whatever the menu left playing
+	_setup_banter()     # after the HUD — the opening pool line arrives synchronously
 	_spawn_from_state()
 	_refresh_turn_moves()
 	_update_turn_label()
@@ -116,6 +140,43 @@ func _ready() -> void:
 		_dump_tree()
 	if state.turn and not game_over:
 		_kick_ai_opening()
+
+
+# -- wave-3 module setup (spectator dragon + rival banter) ------------------
+
+
+func _setup_spectator() -> void:
+	## The perched watcher: reactions gate on the duel cam, ASHFALL fires at
+	## checkmate. Configure BEFORE add_child — _ready parks it on the perch.
+	spectator = DragonSpectator.new()
+	spectator.name = "DragonSpectator"
+	spectator.duel_director = duel_director   # reactions gate on is_active()
+	spectator.board = board                   # lets react_capture take Vector2i squares
+	var hall: GreatHall = get_node_or_null("GreatHall")
+	if hall != null:
+		spectator.perch_position = hall.spectator_perch()
+	add_child(spectator)
+
+
+func _setup_banter() -> void:
+	## The rival's voice. Legacy Frost/Ember matches have no registry id —
+	## skip entirely; the registry houses are the only voices.
+	if rival_house_id.is_empty() or not HouseRegistry.has_house(rival_house_id):
+		return
+	banter = BanterEngine.new()
+	banter.name = "Banter"
+	banter.house_id = rival_house_id          # the rival speaks
+	add_child(banter)                          # BEFORE the first beat (HTTP needs the tree)
+	banter.banter_line.connect(_on_banter_line)
+	# The opening taunt fires on the pre-game clock (fullmove -1) so it never
+	# consumes the in-game rate limit — first blood at move 1-2 still taunts.
+	banter.on_beat(BanterEngine.BEAT_GAME_START, {"fullmove": -1})
+
+
+func _on_cinematic_started(kind: String) -> void:
+	Music.duck()
+	if kind == "duel":
+		Music.sting_duel()
 
 
 # -- identity / hall dressing ----------------------------------------------
@@ -253,8 +314,10 @@ func _on_square_clicked(sq: Vector2i) -> void:
 
 
 func _select(sq: Vector2i) -> void:
+	_set_selected_glow(false)
 	selected = sq
 	board.set_selected(sq)
+	_set_selected_glow(true)
 	var targets: Array[Vector2i] = []
 	var from_idx := idx_of(sq)
 	for m in _turn_moves:
@@ -264,8 +327,18 @@ func _select(sq: Vector2i) -> void:
 
 
 func _clear_selection() -> void:
+	_set_selected_glow(false)
 	selected = null
 	board.clear_highlights()
+
+
+func _set_selected_glow(on: bool) -> void:
+	## Costumes hook: the glyph medallion warms beside the tile highlight.
+	if selected == null:
+		return
+	var pv: PieceView = views.get(selected)
+	if pv != null and is_instance_valid(pv):
+		pv.set_selected(on)
 
 
 func _move_for(from_idx: int, to_idx: int) -> Variant:
@@ -308,10 +381,19 @@ func _ai_ply() -> void:
 func _execute_ply(move) -> void:
 	## Engine first (authoritative), then the choreography catches up.
 	var mover_is_ember: bool = state.turn
+	var fen_before := "" if mover_is_ember else str(state.get_fen())
 	_record_san(move)
 	state.apply_move(move)
+	if banter != null:
+		banter.note_ply()                      # the rate limiter's clock
+	var fen_after := "" if mover_is_ember else str(state.get_fen())
 	_refresh_turn_moves()
 	await _animate_move(move, mover_is_ember)
+	if spectator != null and is_instance_valid(spectator):
+		spectator.notice_move(sq_of(move.to_square))   # glance target + rate limiter
+	_fire_banter_beats(move, mover_is_ember)
+	if not mover_is_ember and not fen_before.is_empty():
+		_sample_blunder(fen_before, fen_after)   # detached: one probe feeds banter + dragon
 	if state.get_result() != ChessState.RESULT.ONGOING:
 		_finish_game()
 
@@ -369,6 +451,8 @@ func _animate_move(move, mover_is_ember: bool) -> void:
 			# now running under the director's time curve and battle cam.
 			await duel_director.play_duel(mover, victim, _duel_meta(mover_is_ember),
 				func(): await mover.play_capture(victim))
+			if spectator != null and is_instance_valid(spectator):
+				spectator.react_capture(sq_of(move.captured_square))  # flinch, self-rate-limited
 	await mover.move_to(target, _walk_time(mover.position, target))
 	views[to_sq] = mover
 	if move.promotion != null:
@@ -383,6 +467,91 @@ func _refresh_turn_moves() -> void:
 	_turn_moves = state.legal_moves(true)
 
 
+# -- banter beats + the shared blunder probe --------------------------------
+
+
+func _fire_banter_beats(move, mover_is_ember: bool) -> void:
+	## After the animation, so the caption never fights the duel's kill line.
+	if banter == null or game_over:
+		return
+	var san: String = str(move.notation_san) if move.notation_san != null else ""
+	if move.is_capture():
+		# captured_piece is null for en passant — the victim is always a pawn.
+		var piece := "pawn" if move.en_passant \
+			else str(PIECE_NAME.get(str(move.captured_piece).to_lower(), ""))
+		var beat: String = BanterEngine.BEAT_PLAYER_CAPTURED if mover_is_ember \
+			else BanterEngine.BEAT_RIVAL_CAPTURED
+		banter.on_beat(beat, {"piece": piece})
+		return   # capture outranks check; the module would drop the 2nd anyway
+	if san.ends_with("+"):
+		var beat := BanterEngine.BEAT_CHECK_GIVEN if mover_is_ember \
+			else BanterEngine.BEAT_CHECK_RECEIVED
+		banter.on_beat(beat)
+
+
+func _sample_blunder(fen_before: String, fen_after: String) -> void:
+	## Detached coroutine (never awaited by the turn flow): one shallow
+	## Stockfish probe around the PLAYER's ply feeds BOTH the banter blunder
+	## taunt and the dragon's head-shake. Evals read from the player's
+	## perspective: before = side-to-move (the player), after = sign-flipped.
+	if _blunder_busy or (banter == null and spectator == null):
+		return
+	_blunder_busy = true
+	var before := await _blunder_eval(fen_before)
+	var after_raw := await _blunder_eval(fen_after)
+	_blunder_busy = false
+	if is_nan(before) or is_nan(after_raw) or game_over:
+		return   # no engine / mated position (empty lines) / game already over
+	var swing := before + after_raw   # before − (−after_raw)
+	if swing < BLUNDER_CP:
+		return
+	blunder_count += 1
+	if banter != null:
+		banter.on_beat(BanterEngine.BEAT_PLAYER_BLUNDER, {"eval_swing_cp": swing})
+	if spectator != null and is_instance_valid(spectator):
+		spectator.react_blunder()
+
+
+func _blunder_eval(fen: String) -> float:
+	## cp from the side-to-move's perspective; NAN when no engine/answer.
+	## Mate scores dominate every cp swing (the _score_value convention).
+	var eng := await _ensure_blunder_engine()
+	if eng == null:
+		return NAN
+	var res := await eng.search(fen, {"depth": BLUNDER_DEPTH})
+	var lines: Array = res.get("lines", [])
+	if lines.is_empty():
+		return NAN
+	var line: Dictionary = lines[0]
+	if line.get("mate") != null:
+		var m := int(line["mate"])
+		return 100000.0 - m if m > 0 else -100000.0 - m
+	return float(line.get("cp") if line.get("cp") != null else 0)
+
+
+func _ensure_blunder_engine() -> UciEngine:
+	if _blunder_engine != null and _blunder_engine.is_ready():
+		return _blunder_engine
+	if _blunder_engine != null:
+		_blunder_engine.queue_free()
+		_blunder_engine = null
+	if _blunder_failed:
+		return null
+	var path := UciEngine.find_stockfish()
+	if path.is_empty():
+		_blunder_failed = true
+		return null
+	var eng := UciEngine.new()
+	eng.name = "BlunderScout"
+	add_child(eng)
+	if not eng.start(path) or not await eng.init(8.0):
+		eng.queue_free()
+		_blunder_failed = true
+		return null
+	_blunder_engine = eng
+	return eng
+
+
 # -- endgame ---------------------------------------------------------------
 
 
@@ -393,6 +562,11 @@ func _finish_game() -> void:
 	var player_won := result == ChessState.RESULT.CHECKMATE and state.turn
 	if Session.configured and Session.mode == "tournament" and Session.tournament != null:
 		Session.tournament.report_result(player_won)  # a draw eliminates the player
+	if banter != null and result == ChessState.RESULT.CHECKMATE:
+		# Perspective flip: the module speaks for the rival. Draws stay silent
+		# (no draw pools — silence beats a wrong-register line).
+		banter.on_beat(BanterEngine.BEAT_ENDGAME_LOSE if player_won \
+			else BanterEngine.BEAT_ENDGAME_WIN)
 	_update_turn_label()
 	_end_sequence.call_deferred(result, player_won)
 
@@ -422,6 +596,19 @@ func _end_sequence(result: int, player_won: bool) -> void:
 	views.erase(king_sq)
 	await duel_director.play_checkmate(king_view, winner_key,
 		func(): await king_view.die())
+	# ── ASHFALL: king death → the wyrm burns the beaten army → victory flow ──
+	if spectator != null and is_instance_valid(spectator):
+		var loser_pieces: Array = []
+		for lsq in views:
+			var lpv: PieceView = views[lsq]
+			if is_instance_valid(lpv) and lpv.side == loser:
+				loser_pieces.append(lpv)
+		if not loser_pieces.is_empty():   # a bare king leaves nothing to burn
+			await spectator.play_ashfall(loser,
+				duel_director.resolve_house_name(winner_key), loser_pieces)
+			for lsq in views.keys():      # ashfall freed those views
+				if not is_instance_valid(views[lsq]):
+					views.erase(lsq)
 
 
 ## The championship ending (the real champion branch fires this, and the e2e
@@ -430,6 +617,10 @@ func _end_sequence(result: int, player_won: bool) -> void:
 ## toward the camera, the crowned champion king walks to the dais, and the
 ## camera move ends parked framing the throne.
 func start_championship_tableau() -> void:
+	if spectator != null and is_instance_valid(spectator):
+		spectator.skip()      # snap any running ashfall to its end state
+		spectator.dismiss()   # one dragon in the throne frame
+		spectator = null
 	_dress_hall_championship()
 	var hall: GreatHall = get_node_or_null("GreatHall")
 	if hall == null or hall.throne == null:
@@ -465,6 +656,14 @@ func _on_victory_panel_requested(winning_house: String) -> void:
 
 
 func _show_match_end(player_won: bool, base_text: String) -> void:
+	# The verdict music: the single spot where win/loss AND the champion
+	# branch are both known. Playlists fade out under the fanfare.
+	var throne_won := Session.configured and Session.mode == "tournament" \
+			and Session.tournament != null and Session.tournament.is_champion()
+	if throne_won:
+		Music.championship()          # Fanfare for Space — the throne is won
+	else:
+		Music.game_over(player_won)   # Medieval Victory Theme / Agnus Dei X
 	var lines: Array[String] = [base_text]
 	_next_action = "rematch"
 	var btn_text := "Rematch"
@@ -559,6 +758,8 @@ func _on_oracle_thinking_finished(_elapsed_s: float) -> void:
 
 func _on_oracle_stumbled(reason: String) -> void:
 	oracle_stumble_count += 1
+	if spectator != null and is_instance_valid(spectator):
+		spectator.react_blunder()   # the wyrm disapproves (self-rate-limited)
 	# Counseled saves are strong moves — soften the HUD line for them.
 	var line := Ds4Opponent.HEEDS_TEXT if reason.contains(Ds4Opponent.HEEDS_TEXT) \
 		else Ds4Opponent.STUMBLE_TEXT
@@ -579,6 +780,22 @@ func _on_oracle_reason(text: String) -> void:
 	get_tree().create_timer(6.0).timeout.connect(func() -> void:
 		if is_instance_valid(_oracle_caption) and _oracle_caption.text == "“%s”" % text:
 			_oracle_caption.visible = false)
+
+
+func _on_banter_line(house_id: String, text: String, _beat: String) -> void:
+	## The rival's taunt: bottom-LEFT caption in the rival's accent color,
+	## mirroring _oracle_caption (bottom-right) so the two voices never
+	## overlap. Show-for-6s + only-hide-if-unchanged, per _on_oracle_reason.
+	if _banter_caption == null:
+		return
+	var accent: Color = HouseRegistry.get_colors(house_id)["accent"]
+	_banter_caption.add_theme_color_override("font_color", accent)
+	_banter_caption.text = "%s: “%s”" % [_house_name(house_id), text]
+	_banter_caption.visible = true
+	get_tree().create_timer(6.0).timeout.connect(func() -> void:
+		if is_instance_valid(_banter_caption) \
+				and _banter_caption.text.ends_with("“%s”" % text):
+			_banter_caption.visible = false)
 
 
 func _flash_oracle(text: String, sec: float) -> void:
@@ -709,6 +926,18 @@ func _build_hud() -> void:
 	_oracle_caption.offset_right = -16
 	_oracle_caption.offset_bottom = -10
 	hud.add_child(_oracle_caption)
+
+	_banter_caption = Label.new()
+	_banter_caption.name = "BanterCaption"
+	_banter_caption.visible = false
+	_banter_caption.add_theme_font_size_override("font_size", 14)
+	_banter_caption.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_banter_caption.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	_banter_caption.offset_left = 16
+	_banter_caption.offset_top = -64
+	_banter_caption.offset_right = 420
+	_banter_caption.offset_bottom = -10
+	hud.add_child(_banter_caption)
 
 	_victory_panel = PanelContainer.new()
 	_victory_panel.name = "VictoryPanel"

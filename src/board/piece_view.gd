@@ -7,8 +7,8 @@ extends Node3D
 ##   TYPE layer (identical across houses — instant readability):
 ##     strict height grading (PieceAssets.TYPE_HEIGHT) · signature gear
 ##     (pawn sword+round shield · knight sword+kite shield · bishop
-##     staff+tome · queen bow+quiver · king crown+cape) · an engraved
-##     type-glyph ring under every piece (brightens on set_selected).
+##     staff+tome · queen tiara+bow+quiver · king crown+cape+sword) · an
+##     engraved type-glyph ring under every piece (brightens on set_selected).
 ##   HOUSE layer (flourish — never changes the type silhouette):
 ##     palette tints · helmet crests on knight/queen/king · sigil decals
 ##     on shields · the rook's banner + fluttering pennant · Tidegrip
@@ -297,6 +297,8 @@ func _build_character() -> void:
 	if piece_type == Type.KING:
 		_attach_crown()
 		_attach_cape()
+	elif piece_type == Type.QUEEN:
+		_attach_tiara()
 	_anim.play(ANIM_IDLE)
 	# Desynchronize the armies' idles.
 	_anim.seek(randf() * PieceAssets.anim_length(ANIM_IDLE))
@@ -391,6 +393,28 @@ func _attach_crown() -> void:
 	crown.rotation.y = deg_to_rad(-20.0)       # battle-bent point toward the camera
 	crown.scale = Vector3.ONE * 5.3            # 0.18 m prop on the stylized skull
 	att.add_child(crown)
+
+
+func _attach_tiara() -> void:
+	## The queen's circlet (royal swap 2026-08-08): the same gold/frost crown
+	## prop, scaled visibly slimmer and flatter — a light tiara band, never
+	## mistakable for the king's full crown at gameplay distance. Named
+	## "Tiara" (NOT "Crown") — e2e board-truth proves queens uncrowned by
+	## grepping for a node named Crown.
+	var att := _bone_mount("head", "TiaraMount")
+	if att == null:
+		return
+	var tiara: Node3D = PieceAssets.crown_scene(_tint_for("piece")).instantiate()
+	tiara.name = "Tiara"
+	tiara.position = Vector3(0.0, 0.84, 0.0)   # band at the brow line
+	tiara.scale = Vector3(3.9, 2.1, 3.9)       # slim ring, points flattened
+	# The crown GLB's INTERNAL nodes are also named Crown* — rename them or
+	# the queen reads "crowned" to every Crown-node check (e2e board-truth,
+	# the costume validator). The name IS the contract.
+	for child in tiara.find_children("*", "", true, false):
+		if str(child.name).containsn("crown"):
+			child.name = str(child.name).replacen("crown", "TiaraBand")
+	att.add_child(tiara)
 
 
 ## TYPE signature gear (king): the cape, draped from the chest bone.

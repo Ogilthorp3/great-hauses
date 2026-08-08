@@ -45,12 +45,16 @@ const TYPE_HEIGHT := {
 }
 
 ## TYPE layer — the adventurer cast (all houses except Tidegrip).
+## Royal swap 2026-08-08 (user-verified in the previews): the Ranger model
+## has a goatee — it reads as a bearded MONARCH, not a queen — while the
+## hooded rogue's clean face reads queenly. King = Ranger (crown + cape +
+## sword), queen = Rogue_Hooded (tiara + bow + quiver).
 const CHARACTER_SCENES := {
 	0: preload("res://assets/kaykit-adventurers/Barbarian.glb"),     # PAWN
 	2: preload("res://assets/kaykit-adventurers/Knight.glb"),        # KNIGHT
 	3: preload("res://assets/kaykit-adventurers/Mage.glb"),          # BISHOP
-	4: preload("res://assets/kaykit-adventurers/Ranger.glb"),        # QUEEN
-	5: preload("res://assets/kaykit-adventurers/Rogue_Hooded.glb"),  # KING
+	4: preload("res://assets/kaykit-adventurers/Rogue_Hooded.glb"),  # QUEEN
+	5: preload("res://assets/kaykit-adventurers/Ranger.glb"),        # KING
 }
 
 ## HOUSE layer — the Tidegrip Drowned Legion: same rig (Rig_Medium, same
@@ -105,7 +109,10 @@ const GEAR_SPECS := {
 			"pos": Vector3(0.0, 0.55, -0.35), "rot_deg": Vector3(10.0, 0.0, 12.0),
 			"scl": 1.0, "decal": false},
 	],
-	5: [],  # KING — crown + cape (attached separately, not hand gear)
+	5: [   # KING — sword in hand; crown + cape attach separately
+		{"key": "sword", "scene": GEAR_SWORD, "bone": "handslot.r",
+			"pos": Vector3.ZERO, "rot_deg": Vector3.ZERO, "scl": 1.0, "decal": false},
+	],
 }
 
 ## TYPE layer — engraved glyph rings (assets from tools/props/make_glyph_rings.py).

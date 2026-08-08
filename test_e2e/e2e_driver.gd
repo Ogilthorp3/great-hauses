@@ -55,12 +55,26 @@
 ##               proposal is a deliberate blunder; asserts the counsel's
 ##               reconsideration prompt was issued, the blunder was not
 ##               played, the revised move landed, and the HUD mode label
+##   music       Music autoload wiring: menu playlist on the select screen,
+##               gameplay playlist in the hall, M mute toggle on the real
+##               input path (asserted on the Music bus), duel duck −8 dB +
+##               stinger, unduck after the cinematics settle
+##   banter      (needs BANTER_FEN) rival smack talk through the real HUD:
+##               opening + first-blood captions in the rival's accent color,
+##               then the 2-fullmove rate limit holds across 2 more plies
+##               (banter_skipped rate_limited evidence). DS4_CHESS_URL points
+##               at a dead port so the canned pools answer deterministically.
+##   dragon-live (needs DRAGON_FEN — mate-in-1 with three loser pawns left
+##               standing) the spectator wyrm: perched from the hall anchor,
+##               notice_move wired, reactions locked under the duel cam, then
+##               the scripted mate → ASHFALL (time dip, mid-fire frame,
+##               time_scale restored, loser views purged, victory flow)
 ##   fullgame    complete scripted game (two-rook ladder mate) vs the engine;
 ##               asserts board/view sync every ply and time_scale hygiene
 ##   showcase    beauty run for Gate C: hall wide shot, select screen,
-##               mid-duel caption frame, idles to the 45 s mark, then the
-##               championship throne-room tableau (crowned king + throne +
-##               dragon, camera parked on the frame — 09_throne_room.png)
+##               mid-duel caption frame, a BanterCaption frame, idles to the
+##               45 s mark, then the championship throne-room tableau
+##               (crowned king + throne + dragon, camera parked on the frame)
 ##
 ## Output contract (consumed by run_e2e.sh):
 ##     "E2E PASS <step>" / "E2E FAIL <step> — <reason>" lines,
@@ -117,6 +131,11 @@ func _ready() -> void:
 		# autoload _ready runs before the main scene loads, so this is early
 		# enough — and each e2e launch is its own process, nothing leaks.
 		_start_mock_oracle()
+	elif scenario in ["music", "banter", "dragon-live"]:
+		# Deterministic offline: BanterEngine shares the Oracle's endpoint
+		# family — a dead port makes its LLM path fail instantly so the
+		# canned pools answer synchronously.
+		OS.set_environment("DS4_CHESS_URL", "http://127.0.0.1:9")
 	print("E2E driver active — scenario=%s timeout=%.0fs artifacts=%s"
 		% [scenario, timeout_sec, artifacts_dir])
 	_watchdog()
@@ -169,6 +188,12 @@ func _run() -> void:
 			await _scenario_oracle_mock()
 		"oracle-modes":
 			await _scenario_oracle_modes()
+		"music":
+			await _scenario_music()
+		"banter":
+			await _scenario_banter()
+		"dragon-live":
+			await _scenario_dragon_live()
 		"fullgame":
 			await _scenario_fullgame()
 		"showcase":
@@ -207,8 +232,21 @@ func _wait_until(pred: Callable, timeout: float) -> bool:
 func _sleep(sec: float) -> void:
 	await get_tree().create_timer(sec).timeout
 
+## Wait for a genuinely drawn frame — BOUNDED. Under full window occlusion
+## macOS stops drawing while process frames continue, so an unbounded
+## `await RenderingServer.frame_post_draw` wedges the scenario until the
+## watchdog (seen 2026-08-08 with another Godot window covering the e2e
+## window). On timeout the caller proceeds with the last drawn frame.
+func _await_drawn(timeout_s := 3.0) -> void:
+	var drawn := [false]
+	RenderingServer.frame_post_draw.connect(func() -> void: drawn[0] = true,
+		CONNECT_ONE_SHOT)
+	var deadline := Time.get_ticks_msec() + int(timeout_s * 1000.0)
+	while not drawn[0] and Time.get_ticks_msec() < deadline:
+		await get_tree().process_frame
+
 func _shot(step_name: String) -> void:
-	await RenderingServer.frame_post_draw
+	await _await_drawn()
 	var img := get_viewport().get_texture().get_image()
 	if img == null:
 		print("E2E WARN no viewport image for screenshot '%s'" % step_name)
@@ -274,6 +312,22 @@ func _click_at(canvas_pos: Vector2) -> void:
 
 func _click_control(c: Control) -> void:
 	await _click_at(c.get_global_rect().get_center())
+
+func _press_key(keycode: Key) -> void:
+	## One key tap through the real input pipeline (parse_input_event).
+	var down := InputEventKey.new()
+	down.keycode = keycode
+	down.physical_keycode = keycode
+	down.pressed = true
+	Input.parse_input_event(down)
+	await get_tree().process_frame
+	var up := InputEventKey.new()
+	up.keycode = keycode
+	up.physical_keycode = keycode
+	up.pressed = false
+	Input.parse_input_event(up)
+	await get_tree().process_frame
+	await get_tree().process_frame
 
 # ── Game accessors ─────────────────────────────────────────────────────────
 func _game() -> Node:
@@ -503,18 +557,18 @@ func _navigate_select(house_id: String, opponent_needle: String, mode_needle: St
 	if crest == null:
 		await _fail("select-crest", "no crest for house '%s'" % house_id)
 		return false
-	await _click_control(crest.get_node("Sigil"))
-	if not await _wait_until(func(): return int(sel.get("phase")) == 1, 3.0):
-		await _fail("select-house", "crest click did not advance to the opponent phase")
+	if not await _click_until(crest.get_node("Sigil"),
+			func(): return int(sel.get("phase")) == 1, "crest"):
+		await _fail("select-house", "crest clicks never advanced to the opponent phase")
 		return false
 	_pass("select-house (%s)" % house_id)
 	var opp_btn := _find_button(sel, opponent_needle)
 	if opp_btn == null:
 		await _fail("select-opponent", "no opponent button matching '%s'" % opponent_needle)
 		return false
-	await _click_control(opp_btn)
-	if not await _wait_until(func(): return int(sel.get("phase")) == 2, 3.0):
-		await _fail("select-opponent", "opponent click did not advance to the mode phase")
+	if not await _click_until(opp_btn,
+			func(): return int(sel.get("phase")) == 2, "opponent"):
+		await _fail("select-opponent", "opponent clicks never advanced to the mode phase")
 		return false
 	_pass("select-opponent (%s)" % opponent_needle)
 	var mode_btn := _find_button(sel, mode_needle)
@@ -527,6 +581,18 @@ func _navigate_select(house_id: String, opponent_needle: String, mode_needle: St
 		return false
 	_pass("select-into-game")
 	return true
+
+## Click a control until pred holds (the _select_square retry philosophy —
+## a human would re-click a missed button too; select-screen clicks flaked
+## one-off under environment focus churn, 2026-08-08).
+func _click_until(c: Control, pred: Callable, what: String, attempts := 3) -> bool:
+	for i in attempts:
+		await _click_control(c)
+		if await _wait_until(pred, 3.0):
+			return true
+		print("E2E WARN %s click %d/%d did not land — retrying" % [what, i + 1, attempts])
+		await _sleep(0.5)
+	return false
 
 # ── Shared boot steps ──────────────────────────────────────────────────────
 func _boot_game(expected_pieces: int) -> Node:
@@ -633,7 +699,7 @@ func _scenario_orientation() -> void:
 		return
 	_pass("orientation-overlay-present")
 	await _sleep(1.2)   # idles + label render settle
-	await RenderingServer.frame_post_draw
+	await _await_drawn()
 	var img := get_viewport().get_texture().get_image()
 	if img == null:
 		await _fail("orientation-shot", "no viewport image for labeled.png")
@@ -692,7 +758,7 @@ func _scenario_board_truth() -> void:
 	# 2) VISUAL: rendered-pixel checkerboard. Sample the empty middle (visual
 	#    ranks 3-6) from the actual frame: with a1 dark, a tile at (i,j) is
 	#    dark iff (i+j) is even, so every adjacent pair must alternate luminance.
-	await RenderingServer.frame_post_draw
+	await _await_drawn()
 	var img := get_viewport().get_texture().get_image()
 	if img == null:
 		await _fail("board-pixel-parity", "no viewport image to sample")
@@ -729,7 +795,7 @@ func _scenario_board_truth() -> void:
 		return
 	_pass("board-a1-dark · board-queen-on-her-color (rendered strips)")
 	# 4) VISUAL royals both sides, located by rendered position: uncrowned
-	#    Ranger queen on visual d1/d8, crowned king on visual e1/e8.
+	#    (tiara-only) queen on visual d1/d8, crowned king on visual e1/e8.
 	for check in [["d1", PieceView.Type.QUEEN, false], ["e1", PieceView.Type.KING, true],
 			["d8", PieceView.Type.QUEEN, false], ["e8", PieceView.Type.KING, true]]:
 		if not await _assert_visual_royal(game, str(check[0]), int(check[1]), bool(check[2])):
@@ -788,7 +854,7 @@ func _scenario_board_moves() -> void:
 	if not await _assert_visual_royal(game, "d1", PieceView.Type.QUEEN, false) \
 			or not await _assert_visual_royal(game, "e1", PieceView.Type.KING, true):
 		return
-	_pass("board-moves-royals (visual: Ranger d1 · crowned king e1)")
+	_pass("board-moves-royals (visual: tiara'd queen d1 · crowned king e1)")
 	# The crowned piece, clicked where a human sees it: exactly the king's
 	# moves, including the two-file O-O hop to visual g1.
 	if not await _select_visual(game, "e1"):
@@ -803,7 +869,7 @@ func _scenario_board_moves() -> void:
 		return
 	await _shot("king_highlights")
 	_pass("board-moves-king (visual e1 shows exactly %s)" % ",".join(KING_E1_VISUAL))
-	# The Ranger on visual d1: exactly the queen's moves, with the long
+	# The hooded queen on visual d1: exactly the queen's moves, with the long
 	# a4 diagonal proving queen-range rays.
 	if not await _select_visual(game, "d1"):
 		await _fail("board-moves-select-queen",
@@ -1160,6 +1226,13 @@ func _scenario_duel(showcase: bool) -> void:
 		await _fail("duel-attacker-occupies", "attacker view never registered on %s" % str(to_sq))
 		return
 	_pass("duel-attacker-occupies")
+	if showcase:
+		# Gate C hero: the rival's taunt caption (fires after the duel
+		# resolves; LLM path may take up to 8 s before the pool answers).
+		var bc: Label = game.find_child("BanterCaption", true, false)
+		if bc != null and await _wait_until(func(): return bc.visible, 12.0):
+			await _shot("banter_caption")
+			_pass("showcase-banter-caption")
 	await _shot("post_duel")
 	# Let the rival's reply (WorkerThreadPool search + animation + possibly
 	# its own duel) finish before quitting — tearing the engine down mid-task
@@ -1529,6 +1602,315 @@ func _scenario_oracle_modes() -> void:
 	await _shot("after_counseled_move")
 	_finish(0)
 
+# ── Scenario: music (playlists, mute, duck + sting through real signals) ───
+func _scenario_music() -> void:
+	var music: Node = get_node_or_null("/root/Music")
+	if music == null:
+		await _fail("music-autoload", "no /root/Music autoload registered")
+		return
+	_pass("music-autoload")
+	if not await _wait_until(func(): return _select_screen() != null, 15.0):
+		await _fail("music-select-screen", "the Hall of Banners never appeared")
+		return
+	if not await _wait_until(func():
+		return str(music.current_mode()) == "menu" and music.live_deck() != null \
+			and music.live_deck().playing, 8.0):
+		await _fail("music-menu-track", "menu playlist never started (mode='%s')"
+			% str(music.current_mode()))
+		return
+	_pass("music-menu-track (%s)"
+		% str(music.live_deck().stream.resource_path).get_file())
+	# The CC BY attribution label rides the select screen.
+	if _select_screen().find_child("MusicCredits", true, false) == null:
+		await _fail("music-credits-label", "no MusicCredits label on the select screen")
+		return
+	_pass("music-credits-label")
+	# M toggles mute — real input path, asserted on the Music bus itself.
+	var bus := AudioServer.get_bus_index("Music")
+	await _press_key(KEY_M)
+	if not await _wait_until(func():
+		return bool(music.is_muted()) and AudioServer.is_bus_mute(bus), 3.0):
+		await _fail("music-mute", "M did not mute the Music bus")
+		return
+	await _press_key(KEY_M)
+	if not await _wait_until(func():
+		return not bool(music.is_muted()) and not AudioServer.is_bus_mute(bus), 3.0):
+		await _fail("music-unmute", "second M did not unmute the Music bus")
+		return
+	_pass("music-mute-toggle (M, bus-verified)")
+	if not await _navigate_select(DEFAULT_HOUSE, "Casual", "Single Match"):
+		return
+	var game := await _boot_game(0)
+	if game == null:
+		return
+	if not await _wait_until(func(): return str(music.current_mode()) == "game", 8.0):
+		await _fail("music-game-track", "gameplay playlist never started (mode='%s')"
+			% str(music.current_mode()))
+		return
+	_pass("music-game-track")
+	# The scripted duel: sting + duck on the way in, unduck once settled.
+	var state: Object = game.get("state")
+	if not await _wait_until(func():
+		return game.get("busy") == false and state.turn == false, 15.0):
+		await _fail("music-player-turn", "never became the player's turn")
+		return
+	var capture = await _click_first_matching(game,
+		func(m): return m.is_capture(), "music-capture")
+	if capture == null:
+		return
+	var dd: Node = game.get("duel_director")
+	if not await _wait_until(func(): return dd.is_active(), 8.0):
+		await _fail("music-duel-started", "duel director never became active")
+		return
+	if not await _wait_until(func(): return bool(music.is_ducked()), 3.0):
+		await _fail("music-duel-duck", "playlist never ducked for the duel")
+		return
+	if not await _wait_until(func(): return music.sting_player().playing, 3.0):
+		await _fail("music-duel-sting", "no stinger fired at the duel start")
+		return
+	_pass("music-duel-duck+sting")
+	# The deck's actual volume follows the duck target (−8 dB, 0.35 s ramp).
+	if not await _wait_until(func():
+		return music.live_deck().volume_db < -7.0, 3.0):
+		await _fail("music-duck-volume",
+			"live deck never reached the duck level (%.1f dB)"
+			% music.live_deck().volume_db)
+		return
+	_pass("music-duck-volume (%.1f dB)" % music.live_deck().volume_db)
+	await _shot("mid_duel_ducked")
+	# Full settle (the rival's reply may duel too) — then the duck must lift.
+	if not await _wait_until(func():
+		return game.get("busy") == false and not dd.is_active(), 40.0):
+		await _fail("music-settled", "board never settled after the duel")
+		return
+	if not await _wait_until(func():
+		return not bool(music.is_ducked()) and music.live_deck().volume_db > -1.0, 5.0):
+		await _fail("music-unduck", "playlist never unducked after the cinematics (%.1f dB)"
+			% music.live_deck().volume_db)
+		return
+	_pass("music-unduck (%.1f dB)" % music.live_deck().volume_db)
+	if not is_equal_approx(Engine.time_scale, 1.0):
+		await _fail("music-timescale", "time_scale=%f after settle" % Engine.time_scale)
+		return
+	_pass("music-timescale-1.0")
+	await _shot("post_duel_music")
+	_finish(0)
+
+# ── Scenario: banter (rival smack talk through the real HUD) ───────────────
+## FEN contract (run_e2e.sh BANTER_FEN): White Qd1 Ke1 Pe4 Ph4 · Black Ka8
+## Pd5 Ph5 — a capture NOW (first blood, fullmove 1) and a guaranteed second
+## capture (Qxh5) two plies later; the wedged h-pawn and the far king make
+## both deterministic. DS4_CHESS_URL points at a dead port (set in _ready)
+## so every line is a synchronous canned-pool line.
+var _banter_skips: Array = []   # [beat, why] pairs recorded off banter_skipped
+
+func _scenario_banter() -> void:
+	if not await _navigate_select(DEFAULT_HOUSE, "Casual", "Single Match"):
+		return
+	var game := await _boot_game(0)
+	if game == null:
+		return
+	var banter: Node = game.get("banter")
+	if banter == null:
+		await _fail("banter-node", "game did not create the BanterEngine node")
+		return
+	_pass("banter-node (rival: %s)" % str(banter.get("house_id")))
+	banter.banter_skipped.connect(func(beat: String, why: String) -> void:
+		_banter_skips.append([beat, why]))
+	var caption: Label = game.find_child("BanterCaption", true, false)
+	if caption == null:
+		await _fail("banter-caption-node", "no BanterCaption label in the HUD")
+		return
+	# The opening taunt (game_start, pool path) in the rival's accent color.
+	if not await _wait_until(func(): return caption.visible, 10.0):
+		await _fail("banter-opening-line", "no opening caption (taunts=%d skips=%d)"
+			% [int(banter.get("taunt_count")), int(banter.get("skip_count"))])
+		return
+	var rival := str(game.get("rival_house_id"))
+	var accent: Color = HouseRegistry.get_colors(rival)["accent"]
+	var got: Color = caption.get_theme_color("font_color")
+	if not _colors_close(got, accent):
+		await _fail("banter-accent-color", "caption color %s != rival accent %s"
+			% [got, accent])
+		return
+	_pass("banter-opening-line (accent-tinted: %s)" % caption.text)
+	var opening_text := caption.text
+	# Capture #1 (fullmove 1): the first-blood beat must land in the HUD.
+	var state: Object = game.get("state")
+	if not await _wait_until(func():
+		return game.get("busy") == false and state.turn == false, 15.0):
+		await _fail("banter-player-turn", "never became the player's turn")
+		return
+	var taunts_before := int(banter.get("taunt_count"))
+	var cap1 = await _click_first_matching(game,
+		func(m): return m.is_capture(), "banter-cap1")
+	if cap1 == null:
+		return
+	if not await _wait_until(func():
+		return int(banter.get("taunt_count")) > taunts_before \
+			and caption.visible and caption.text != opening_text, 20.0):
+		await _fail("banter-capture-line", "capture taunt never reached the HUD (taunts=%d)"
+			% int(banter.get("taunt_count")))
+		return
+	got = caption.get_theme_color("font_color")
+	if not _colors_close(got, accent):
+		await _fail("banter-capture-accent", "capture caption color %s != accent %s"
+			% [got, accent])
+		return
+	_pass("banter-capture-line (%s)" % caption.text)
+	await _shot("banter_capture_caption")
+	var capture_text := caption.text
+	var taunts_after_cap := int(banter.get("taunt_count"))
+	# Two more plies (rival's reply + our second capture): the module must
+	# HOLD the 2-fullmove gap — skip evidence, no new caption, no new taunt.
+	if not await _wait_until(func():
+		return game.get("busy") == false and state.turn == false, 30.0):
+		await _fail("banter-turn-2", "board never settled before the second capture")
+		return
+	var cap2 = await _click_first_matching(game,
+		func(m): return m.is_capture(), "banter-cap2")
+	if cap2 == null:
+		return
+	if not await _wait_until(func(): return _banter_skipped("rate_limited"), 20.0):
+		await _fail("banter-rate-limited",
+			"second capture beat was not rate-limited (skips=%s taunts=%d)"
+			% [str(_banter_skips), int(banter.get("taunt_count"))])
+		return
+	if int(banter.get("taunt_count")) != taunts_after_cap:
+		await _fail("banter-rate-limit-held", "a taunt landed inside the fullmove gap")
+		return
+	if caption.visible and caption.text != capture_text:
+		await _fail("banter-caption-unchanged",
+			"caption changed inside the gap: %s" % caption.text)
+		return
+	_pass("banter-rate-limited (2-fullmove gap held across 2 more plies)")
+	if not await _wait_until(func(): return game.get("busy") == false, 30.0):
+		await _fail("banter-settled", "board never settled")
+		return
+	_pass("banter-settled (taunts=%d skips=%d)"
+		% [int(banter.get("taunt_count")), int(banter.get("skip_count"))])
+	await _shot("banter_final")
+	_finish(0)
+
+func _banter_skipped(why: String) -> bool:
+	for s in _banter_skips:
+		if str(s[1]) == why:
+			return true
+	return false
+
+# ── Scenario: dragon-live (the wyrm watches; ASHFALL burns the losers) ─────
+## FEN contract (run_e2e.sh DRAGON_FEN): Ra8# is mate-in-1 and the mated
+## house keeps three pawns — fuel for the pyre. Asserts the full integration:
+## spawn/perch, notice_move feed, duel-cam reaction gate, ASHFALL chain,
+## time_scale + view hygiene, victory flow.
+func _scenario_dragon_live() -> void:
+	if not await _navigate_select(DEFAULT_HOUSE, "Casual", "Single Match"):
+		return
+	var game := await _boot_game(0)
+	if game == null:
+		return
+	var spectator: Node = game.get("spectator")
+	if spectator == null or not is_instance_valid(spectator):
+		await _fail("dragon-present", "game did not spawn the DragonSpectator")
+		return
+	var hall: Node = game.get_node_or_null("GreatHall")
+	if hall == null \
+			or not (spectator.get("perch_position") as Vector3) \
+			.is_equal_approx(hall.spectator_perch()):
+		await _fail("dragon-perched", "spectator perch %s != hall.spectator_perch()"
+			% str(spectator.get("perch_position")))
+		return
+	_pass("dragon-present (perched at %s)" % str(spectator.get("perch_position")))
+	if not bool(spectator.call("can_react")):
+		await _fail("dragon-can-react", "spectator cannot react while idle")
+		return
+	if (spectator.get("_last_move_pos") as Vector3).is_finite():
+		await _fail("dragon-glance-idle", "glance target set before any ply")
+		return
+	_pass("dragon-idle-ready (can_react, no glance target yet)")
+	var state: Object = game.get("state")
+	if not await _wait_until(func():
+		return game.get("busy") == false and state.turn == false, 15.0):
+		await _fail("dragon-player-turn", "never became the player's turn")
+		return
+	# The FEN promises a mate-in-1 — find it in the SAN'd turn moves (the
+	# tournament scenario's pattern; bare legal_moves() carries no SAN).
+	var mate = null
+	for m in game.get("_turn_moves"):
+		if m.notation_san != null and str(m.notation_san).ends_with("#"):
+			mate = m
+			break
+	if mate == null:
+		await _fail("dragon-mate-available", "the FEN offers no mate-in-1")
+		return
+	_pass("dragon-mate-available (%s)" % mate.to_uci())
+	if not await _select_square(game, game.sq_of(mate.from_square)):
+		await _fail("dragon-mate-select", "mate mover never selected")
+		return
+	await _click_square(game, game.sq_of(mate.to_square))
+	if not await _wait_until(func(): return bool(game.get("game_over")), 10.0):
+		await _fail("dragon-mate-applied", "game never ended after the mate")
+		return
+	_pass("dragon-mate-applied")
+	# Under the checkmate cinematic the duel cam owns the frame: gated.
+	var dd: Node = game.get("duel_director")
+	if await _wait_until(func(): return dd.is_active(), 10.0):
+		if bool(spectator.call("can_react")):
+			await _fail("dragon-duel-gate", "spectator can react under the duel cam")
+			return
+		_pass("dragon-duel-gate (reactions locked under the cinematic)")
+	if not (spectator.get("_last_move_pos") as Vector3).is_finite():
+		await _fail("dragon-notice-move", "notice_move never reached the spectator")
+		return
+	_pass("dragon-notice-move (glance target fed from the real ply)")
+	# ASHFALL: chained after the king's death, before the victory flow.
+	if not await _wait_until(func():
+		return bool(spectator.call("is_ashfall_active")), 30.0):
+		await _fail("dragon-ashfall-started", "ASHFALL never started after the checkmate")
+		return
+	_pass("dragon-ashfall-started")
+	if not await _wait_until(func(): return Engine.time_scale < 0.9, 3.0):
+		await _fail("dragon-ashfall-dip", "no cinematic time dip (%.2f)" % Engine.time_scale)
+		return
+	await _sleep(1.5)   # into the breath sweep — flame + caption on screen
+	await _shot("mid_ashfall")
+	if not await _wait_until(func():
+		return not bool(spectator.call("is_ashfall_active")), 15.0):
+		await _fail("dragon-ashfall-finished", "ASHFALL never finished")
+		return
+	_pass("dragon-ashfall-finished")
+	if not await _wait_until(func():
+		return is_equal_approx(Engine.time_scale, 1.0), 5.0):
+		await _fail("dragon-timescale", "time_scale=%f after ASHFALL" % Engine.time_scale)
+		return
+	_pass("dragon-timescale-1.0")
+	if not await _wait_until(func(): return _dragon_losers_purged(game), 10.0):
+		await _fail("dragon-losers-purged", "loser views survived ASHFALL (views=%d)"
+			% (game.get("views") as Dictionary).size())
+		return
+	_pass("dragon-losers-purged (only the two white views remain)")
+	if not await _wait_until(func():
+		var vp = game.get("_victory_panel")
+		return vp != null and vp.visible, 15.0):
+		await _fail("dragon-victory-flow", "victory panel never appeared")
+		return
+	_pass("dragon-victory-flow")
+	await _shot("after_ashfall")
+	_finish(0)
+
+## True when only the two live white views (Ra8 + Ke1) remain and no freed
+## corpse lingers in the views dict.
+func _dragon_losers_purged(game: Node) -> bool:
+	var views: Dictionary = game.get("views")
+	if views.size() != 2:
+		return false
+	for sq in views:
+		var pv = views[sq]
+		if pv == null or not is_instance_valid(pv) \
+				or int(pv.get("side")) != PieceView.House.FROST:
+			return false
+	return true
+
 # ── Scenario: fullgame (two-rook ladder mate, Gate D) ──────────────────────
 func _scenario_fullgame() -> void:
 	if not await _navigate_select(DEFAULT_HOUSE, "Casual", "Single Match"):
@@ -1714,10 +2096,20 @@ func _handle_mock_conn(peer: StreamPeerTCP) -> void:
 	else:
 		var body_text := raw.slice(header_end, header_end + content_len).get_string_from_utf8()
 		var parsed: Variant = JSON.parse_string(body_text)
-		_mock_requests.append(parsed if parsed is Dictionary else {})
+		var req: Dictionary = parsed if parsed is Dictionary else {}
 		var content := "MOVE: e7e5"
-		if not _mock_replies.is_empty():
-			content = _mock_replies.pop_front()
+		if _is_banter_request(req):
+			# The rival's BanterEngine shares the oracle tunnel by design
+			# (same DS4_CHESS_URL family). Serve it a canned taunt WITHOUT
+			# consuming the oracle's scripted replies or polluting the
+			# recorded oracle requests — 2026-08-08: the game_start taunt
+			# once ate the scripted blunder proposal and the counsel had
+			# nothing left to reject.
+			content = "The mock wind howls, and the tunnel answers for two."
+		else:
+			_mock_requests.append(req)
+			if not _mock_replies.is_empty():
+				content = _mock_replies.pop_front()
 		response_body = JSON.stringify({
 			"id": "chatcmpl-e2e-mock",
 			"object": "chat.completion",
@@ -1740,6 +2132,18 @@ func _handle_mock_conn(peer: StreamPeerTCP) -> void:
 		peer.poll()
 		await get_tree().process_frame
 	peer.disconnect_from_host()
+
+## True when a chat request came from the BanterEngine, not the Oracle —
+## its persona system prompt always opens "You are the voice of ...".
+func _is_banter_request(req: Dictionary) -> bool:
+	var msgs: Variant = req.get("messages")
+	if not (msgs is Array) or (msgs as Array).is_empty():
+		return false
+	var first: Variant = (msgs as Array)[0]
+	if not (first is Dictionary):
+		return false
+	return str((first as Dictionary).get("content", "")).begins_with("You are the voice of")
+
 
 func _find_header_end(raw: PackedByteArray) -> int:
 	for i in range(0, raw.size() - 3):

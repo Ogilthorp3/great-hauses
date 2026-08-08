@@ -12,6 +12,7 @@ config/features=PackedStringArray("4.7", "Mobile")
 [autoload]
 
 PieceAssets="*res://src/board/piece_assets.gd"
+Music="*res://src/audio/music_manager.gd"
 E2EDriver="*res://test_e2e/e2e_driver.gd"
 
 [display]
