@@ -5,7 +5,8 @@
 #   preflight   import-artifacts check (the empty-.godot/imported scar) +
 #               headless boot with zero SCRIPT ERROR/Parse Error
 #   tests       ALL headless suites — engine (79), tournament, cinematics
-#               time-restore, DS4 opponent (mock+live)          — Gate A
+#               time-restore, DS4 opponent (mock+live, 3 modes),
+#               UciEngine/stockfish client                      — Gate A
 #   boot        windowed: select flows to game, 32 pieces, banners+HUD dyed
 #   move        windowed: click e2->e4, AI replies within 30 s  — Gate B
 #   duel        windowed: scripted capture duel via clicks      — Gate B
@@ -14,7 +15,9 @@
 #   slowmo      windowed: duel director activation, time dip, skip-on-click
 #   tournament  windowed: 3 scripted mates to the throne, bracket + banner
 #               re-dress asserts, championship panel
-#   oracle-mock windowed: DS4-Oracle vs in-driver canned HTTP mock
+#   oracle-mock windowed: DS4-Oracle (Pure) vs in-driver canned HTTP mock
+#   oracle-modes windowed: Counseled Oracle — mock proposes a blunder, real
+#               stockfish counsel rejects it, revised move plays
 #   fullgame    windowed: complete two-rook-ladder game, sync + time_scale
 #               hygiene every ply                                — Gate D
 #   showcase    windowed 45 s zero-error soak + beauty shots + the
@@ -55,6 +58,10 @@ TOURN_FEN="6k1/8/6K1/8/8/8/8/R7 w - - 0 1"
 # Fullgame: two rooks ladder-mate the bare king — a complete multi-move
 # game with a checkmate cinematic at the end (Gate D).
 FULLGAME_FEN="8/8/8/4k3/8/8/8/RR2K3 w - - 0 1"
+# Counseled-oracle scenario: Black (the Oracle) to move; d8d2 (Qxd2+??)
+# trades queen for pawn — the scripted blunder counsel must catch — while
+# d8d7 is sound (verified: d8d2 ≈ -522 cp vs best 0 cp at depth 12).
+COUNSEL_FEN="3qk3/8/8/8/8/8/3P4/3QK3 b - - 0 1"
 
 mkdir -p "$RUN_DIR" "$ART_ROOT"
 
@@ -177,7 +184,7 @@ run_scenario() {  # <name> [extra user args...]
 if [ ! -x "$GODOT" ]; then note "Godot binary missing: $GODOT"; exit 2; fi
 STEPS=("$@")
 [ ${#STEPS[@]} -eq 0 ] && STEPS=(preflight tests boot move duel castle promote \
-  slowmo tournament oracle-mock fullgame showcase)
+  slowmo tournament oracle-mock oracle-modes fullgame showcase)
 
 SUITE_RC=0
 for step in "${STEPS[@]}"; do
@@ -188,6 +195,7 @@ for step in "${STEPS[@]}"; do
       run_suite tournament-suite res://tests/test_tournament.gd || SUITE_RC=1
       run_suite cinematics-suite res://tests/test_cinematics.gd || SUITE_RC=1
       run_suite ds4-suite res://tests/test_ds4_opponent.gd || SUITE_RC=1
+      run_suite uci-suite res://tests/test_uci_engine.gd || SUITE_RC=1
       ;;
     boot)      run_scenario boot || SUITE_RC=1 ;;
     move)      run_scenario move || SUITE_RC=1 ;;
@@ -198,11 +206,13 @@ for step in "${STEPS[@]}"; do
     tournament) SCENARIO_TIMEOUT=170 run_scenario tournament \
                   "--e2e-fen=$TOURN_FEN" "--e2e-timeout=150" || SUITE_RC=1 ;;
     oracle-mock) run_scenario oracle-mock "--e2e-timeout=80" || SUITE_RC=1 ;;
+    oracle-modes) run_scenario oracle-modes "--e2e-fen=$COUNSEL_FEN" \
+                   "--e2e-timeout=90" || SUITE_RC=1 ;;
     fullgame)  SCENARIO_TIMEOUT=230 run_scenario fullgame \
                  "--e2e-fen=$FULLGAME_FEN" "--e2e-timeout=210" || SUITE_RC=1 ;;
     showcase)  run_scenario showcase "--e2e-fen=$DUEL_FEN" "--e2e-timeout=90" \
                  || SUITE_RC=1 ;;
-    *) note "unknown step '$step' (use preflight|tests|boot|move|duel|castle|promote|slowmo|tournament|oracle-mock|fullgame|showcase)"; SUITE_RC=1 ;;
+    *) note "unknown step '$step' (use preflight|tests|boot|move|duel|castle|promote|slowmo|tournament|oracle-mock|oracle-modes|fullgame|showcase)"; SUITE_RC=1 ;;
   esac
 done
 

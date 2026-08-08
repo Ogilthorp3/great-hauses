@@ -28,8 +28,13 @@
 ##   tournament  Begin Tournament with a mate-in-1 FEN: three rounds of
 ##               scripted mates; asserts bracket advance, banner re-dress
 ##               each round, and the championship panel
-##   oracle-mock DS4-Oracle opponent against an in-driver canned HTTP mock;
-##               asserts a legal oracle move, llm source, thinking HUD
+##   oracle-mock DS4-Oracle (Pure Oracle) against an in-driver canned HTTP
+##               mock; asserts a legal oracle move, llm source, thinking HUD
+##   oracle-modes Counseled Oracle vs the mock LLM + REAL local stockfish:
+##               (needs --e2e-fen with Black to move) the mock's first
+##               proposal is a deliberate blunder; asserts the counsel's
+##               reconsideration prompt was issued, the blunder was not
+##               played, the revised move landed, and the HUD mode label
 ##   fullgame    complete scripted game (two-rook ladder mate) vs the engine;
 ##               asserts board/view sync every ply and time_scale hygiene
 ##   showcase    beauty run for Gate C: hall wide shot, select screen,
@@ -87,7 +92,7 @@ func _ready() -> void:
 			+ "/" + scenario
 	DirAccess.make_dir_recursive_absolute(artifacts_dir)
 	_start_ms = Time.get_ticks_msec()
-	if scenario == "oracle-mock":
+	if scenario == "oracle-mock" or scenario == "oracle-modes":
 		# The env var must exist before main.gd/game.gd ever build an oracle;
 		# autoload _ready runs before the main scene loads, so this is early
 		# enough — and each e2e launch is its own process, nothing leaks.
@@ -134,6 +139,8 @@ func _run() -> void:
 			await _scenario_tournament()
 		"oracle-mock":
 			await _scenario_oracle_mock()
+		"oracle-modes":
+			await _scenario_oracle_modes()
 		"fullgame":
 			await _scenario_fullgame()
 		"showcase":
@@ -904,7 +911,7 @@ func _scenario_oracle_mock() -> void:
 		await _fail("oracle-mock-server", "in-driver mock oracle failed to listen")
 		return
 	_pass("oracle-mock-server (port %d)" % _mock_port)
-	if not await _navigate_select(DEFAULT_HOUSE, "DS4-Oracle", "Single Match"):
+	if not await _navigate_select(DEFAULT_HOUSE, "Pure Oracle", "Single Match"):
 		return
 	var game := await _boot_game(32)
 	if game == null:
@@ -953,6 +960,75 @@ func _scenario_oracle_mock() -> void:
 		return
 	_pass("oracle-settled")
 	await _shot("after_oracle_move")
+	_finish(0)
+
+# ── Scenario: oracle-modes (Counseled Oracle: blunder caught by counsel) ───
+## Launch with a Black-to-move FEN where d8d2 (Qxd2+??) trades queen for pawn
+## and d8d7 is sound (run_e2e.sh's COUNSEL_FEN). The Oracle opens: mock
+## proposes the blunder, real stockfish (depth 12) rejects it, the revised
+## proposal plays. Covers mode selection clicks, Session->game wiring, the
+## HUD mode label, and the reconsideration prompt.
+func _scenario_oracle_modes() -> void:
+	if not _mock_running:
+		await _fail("oracle-modes-server", "in-driver mock oracle failed to listen")
+		return
+	_pass("oracle-modes-server (port %d)" % _mock_port)
+	# Queue the canned proposals BEFORE the game scene boots the Oracle.
+	_mock_replies = ["The queen strikes!\nMOVE: d8d2", "Wisdom prevails.\nMOVE: d8d7"]
+	if not await _navigate_select(DEFAULT_HOUSE, "Counseled Oracle", "Single Match"):
+		return
+	var game := _game()
+	var oracle: Node = game.get("oracle")
+	if oracle == null:
+		await _fail("oracle-modes-node", "game did not create the Ds4Opponent node")
+		return
+	if str(oracle.get("mode")) != "counseled":
+		await _fail("oracle-modes-mode",
+			"oracle mode '%s', expected 'counseled'" % str(oracle.get("mode")))
+		return
+	_pass("oracle-modes-mode (counseled)")
+	var mode_lbl: Label = game.find_child("OracleMode", true, false)
+	if mode_lbl == null or not mode_lbl.text.contains("Counseled"):
+		await _fail("oracle-modes-hud", "HUD mode label missing/wrong: '%s'"
+			% (mode_lbl.text if mode_lbl != null else "<none>"))
+		return
+	_pass("oracle-modes-hud (%s)" % mode_lbl.text)
+	var state: Object = game.get("state")
+	var d7 := ChessState.square_index_from_name("d7")
+	var d2 := ChessState.square_index_from_name("d2")
+	if not await _wait_until(func(): return str(state.pieces[d7]) == "q", 60.0):
+		await _fail("oracle-modes-counseled-move",
+			"the counseled d8d7 never landed (d7='%s')" % str(state.pieces[d7]))
+		return
+	_pass("oracle-modes-counseled-move (d8d7)")
+	if str(state.pieces[d2]) != "P":
+		await _fail("oracle-modes-blunder-avoided",
+			"the d2 pawn is gone — the blunder was played")
+		return
+	_pass("oracle-modes-blunder-avoided")
+	if _mock_requests.size() < 2:
+		await _fail("oracle-modes-reconsidered",
+			"only %d chat requests — no reconsideration issued" % _mock_requests.size())
+		return
+	var msgs: Array = _mock_requests[1].get("messages", [])
+	var prompt2 := String((msgs.back() as Dictionary).get("content", "")) \
+		if not msgs.is_empty() else ""
+	if not prompt2.contains("Choose again"):
+		await _fail("oracle-modes-reconsidered", "second request lacks the reconsideration prompt")
+		return
+	_pass("oracle-modes-reconsidered")
+	if not str(oracle.get("last_source")).begins_with("counseled"):
+		await _fail("oracle-modes-source", "last_source='%s'" % str(oracle.get("last_source")))
+		return
+	_pass("oracle-modes-source (%s)" % str(oracle.get("last_source")))
+	if not await _wait_until(func(): return game.get("busy") == false, 20.0):
+		await _fail("oracle-modes-settled", "board never settled after the counseled move")
+		return
+	if not is_equal_approx(Engine.time_scale, 1.0):
+		await _fail("oracle-modes-timescale", "time_scale=%f" % Engine.time_scale)
+		return
+	_pass("oracle-modes-settled")
+	await _shot("after_counseled_move")
 	_finish(0)
 
 # ── Scenario: fullgame (two-rook ladder mate, Gate D) ──────────────────────

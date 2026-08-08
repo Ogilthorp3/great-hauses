@@ -12,9 +12,34 @@ extends SceneTree
 #            canned OpenAI-style completions, covering ping, clean move,
 #            corrective retry, random-move fallback + oracle_stumbled, and
 #            the "Oracle sleeps" preflight failure. Green offline.
+#            The advisor modes (counseled/maester) run against the same mock
+#            plus a REAL local stockfish via UciEngine (skipped with a note
+#            when stockfish is not installed).
 
 const Ds4OpponentScript := preload("res://src/ai/ds4_opponent.gd")
+const UE := preload("res://src/ai/uci_engine.gd")
 const CS := preload("res://src/chess/ChessState.gd")
+
+# Black to move; d8d2 (Qxd2+??) trades the queen for a pawn — an unambiguous
+# blunder for the counsel to catch; d8d7 is a sound quiet move.
+const BLUNDER_FEN := "3qk3/8/8/8/8/8/3P4/3QK3 b - - 0 1"
+
+# Capture-parse regression FENs (2026-08-08 bug: bare-UCI-only regexes
+# silently dropped every capture written as "e4xd5"/"exd5"/"Nxd5+", and the
+# corrective retry then steered the Oracle to a quieter move — the Oracle
+# NEVER captured in live play).
+# After 1.e4 d5 — White's capture is exd5 (e4d5).
+const CAPTURE_FEN := "rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2"
+# White knight on e3 can take d5 — SAN Nxd5 (e3d5).
+const KNIGHT_CAPTURE_FEN := "rnbqkbnr/ppp1pppp/8/3p4/8/4N3/PPPPPPPP/RNBQKB1R w KQkq - 0 1"
+
+# Latency-path FENs (2026-08-08: pure moves took ~2 min flat).
+# Exactly ONE legal move: Ka1 checked by Ra2 (defended by Kb3) -> only Kb1.
+const FORCED_FEN := "8/8/8/8/8/1k6/r7/K7 w - - 0 1"
+# Two legal moves (Kb1, Kxa2) -> the 512-token tier.
+const FEW_MOVES_FEN := "7k/8/8/8/8/8/r6P/K7 w - - 0 1"
+# Fifteen legal moves (K a1: 2, R b1: 13) -> the 1024-token tier.
+const SOME_MOVES_FEN := "7k/8/8/8/8/8/8/KR6 w - - 0 1"
 
 const MOCK_MODEL := "deepseek-v4-flash-mock"
 
@@ -177,6 +202,12 @@ func _run_mock_suite() -> void:
 		check("mock: corrective message scolds", true,
 			msgs2.size() == 4 and String(msgs2[3].get("content", "")).contains("could not be used"))
 
+	# 3b. capture notations must parse — no retry may be consumed
+	await _test_capture_parsing(opp)
+
+	# 3c. latency paths: forced-move fast path + adaptive token budgets
+	await _test_latency_paths(opp)
+
 	# 4. fallback: every reply unusable -> random legal move, loudly flagged
 	_mock_requests.clear()
 	_mock_replies = ["??", "??", "??", "??"]
@@ -202,9 +233,218 @@ func _run_mock_suite() -> void:
 	check("mock: offline reason says Oracle sleeps", true,
 		String(opp.offline_reason).contains(Ds4OpponentScript.OFFLINE_TEXT))
 
+	# 6-7. advisor modes (counseled + maester) against mock LLM + real stockfish
+	OS.set_environment(Ds4OpponentScript.ENV_URL, "http://127.0.0.1:%d" % port)
+	if UE.find_stockfish().is_empty():
+		print("stockfish not installed — counseled/maester tests SKIPPED")
+	else:
+		await _test_counseled(opp, stumbles)
+		await _test_maester(opp, port)
+
 	_mock_running = false
 	_server.stop()
 	opp.queue_free()
+
+
+# -- capture-parse regression (pure mode) ------------------------------------
+
+
+func _test_capture_parsing(opp: Ds4OpponentScript) -> void:
+	var cases := [
+		["x-notation MOVE line", "Seize the center pawn.\nMOVE: e4xd5", CAPTURE_FEN, "e4d5"],
+		["SAN MOVE line", "The pawn answers in kind.\nMOVE: exd5", CAPTURE_FEN, "e4d5"],
+		["bare annotated SAN", "The knight claims the pawn: Nxd5+", KNIGHT_CAPTURE_FEN, "e3d5"],
+		["backticked caps UCI", "Best is the capture. MOVE: `E4D5`", CAPTURE_FEN, "e4d5"],
+	]
+	for c in cases:
+		_mock_requests.clear()
+		_mock_replies = [String(c[1])]
+		var st = CS.new()
+		st.set_fen(String(c[2]))
+		var mv: Variant = await opp.choose_move(st)
+		check("capture: %s parses" % c[0], c[3], mv.to_uci() if mv != null else "null")
+		check("capture: %s no retry" % c[0], 1, _mock_requests.size())
+		check("capture: %s source llm" % c[0], "llm", opp.last_source)
+	# Capture-preference smoke: realistic analysis prose naming quiet
+	# candidates, capture chosen — the parsed move must be that capture.
+	_mock_requests.clear()
+	_mock_replies = [
+		"Candidates: Nf3 develops calmly; d4 stakes the center; but exd5 " +
+		"wins a clean pawn and opens the queen's path. The capture is " +
+		"clearly strongest here.\nMOVE: exd5"]
+	var st2 = CS.new()
+	st2.set_fen(CAPTURE_FEN)
+	var mv2: Variant = await opp.choose_move(st2)
+	check("capture: preference smoke plays the capture", "e4d5",
+		mv2.to_uci() if mv2 != null else "null")
+	check("capture: preference smoke no retry", 1, _mock_requests.size())
+	check("capture: preference smoke source llm", "llm", opp.last_source)
+
+
+# -- latency paths (pure mode) ------------------------------------------------
+
+
+func _test_latency_paths(opp: Ds4OpponentScript) -> void:
+	# Forced move: exactly one legal move -> played instantly, zero LLM calls.
+	var reasons: Array = []
+	var handler := func(t: String) -> void: reasons.append(t)
+	opp.oracle_reason.connect(handler)
+	_mock_requests.clear()
+	_mock_replies = []
+	var state = CS.new()
+	check("forced: fen accepted", true, state.set_fen(FORCED_FEN))
+	check("forced: exactly one legal move", 1, state.legal_moves(true).size())
+	var move: Variant = await opp.choose_move(state)
+	check("forced: the single move played", "a1b1", move.to_uci() if move != null else "null")
+	check("forced: zero llm requests", 0, _mock_requests.size())
+	check("forced: source", "forced", opp.last_source)
+	check("forced: HUD line emitted", true,
+		reasons.size() == 1 and String(reasons[0]) == Ds4OpponentScript.FORCED_TEXT)
+	check("forced: instant", true, opp.last_elapsed_s < 0.5)
+	opp.oracle_reason.disconnect(handler)
+
+	# Budget tiers by branching factor (boundaries).
+	check("budget: 5 moves -> 512", Ds4OpponentScript.TOKENS_FEW, opp._tokens_for(5))
+	check("budget: 6 moves -> 1024", Ds4OpponentScript.TOKENS_SOME, opp._tokens_for(6))
+	check("budget: 15 moves -> 1024", Ds4OpponentScript.TOKENS_SOME, opp._tokens_for(15))
+	check("budget: 16 moves -> 3072", Ds4OpponentScript.TOKENS_FULL, opp._tokens_for(16))
+
+	# Integration: the request body carries the tiered max_tokens.
+	_mock_requests.clear()
+	_mock_replies = ["MOVE: a1b1"]
+	state = CS.new()
+	state.set_fen(FEW_MOVES_FEN)
+	move = await opp.choose_move(state)
+	check("budget: few-moves move played", "a1b1", move.to_uci() if move != null else "null")
+	check("budget: few-moves request max_tokens 512", Ds4OpponentScript.TOKENS_FEW,
+		int(_mock_requests[0].get("max_tokens", 0)) if _mock_requests.size() == 1 else -1)
+
+	_mock_requests.clear()
+	_mock_replies = ["MOVE: b1b2"]
+	state = CS.new()
+	state.set_fen(SOME_MOVES_FEN)
+	check("budget: mid fen has 15 moves", 15, state.legal_moves(true).size())
+	move = await opp.choose_move(state)
+	check("budget: mid-moves move played", "b1b2", move.to_uci() if move != null else "null")
+	check("budget: mid-moves request max_tokens 1024", Ds4OpponentScript.TOKENS_SOME,
+		int(_mock_requests[0].get("max_tokens", 0)) if _mock_requests.size() == 1 else -1)
+	# (startpos 3072 is asserted by the historic "mock: max_tokens 3072" check.)
+
+
+# -- counseled mode ----------------------------------------------------------
+
+
+func _test_counseled(opp: Ds4OpponentScript, stumbles: Array) -> void:
+	opp.mode = Ds4OpponentScript.MODE_COUNSELED
+
+	# 6a. a sound proposal sails through counsel untouched
+	_mock_requests.clear()
+	_mock_replies = ["The pawn strides forth.\nMOVE: e2e4"]
+	var state = CS.new()
+	var move: Variant = await opp.choose_move(state)
+	check("counseled: sound proposal played", "e2e4", move.to_uci() if move != null else "null")
+	check("counseled: sound source", "counseled", opp.last_source)
+	check("counseled: sound one request", 1, _mock_requests.size())
+
+	# 6b. a blunder draws a reconsideration prompt; the revised move is played
+	_mock_requests.clear()
+	_mock_replies = ["The queen strikes!\nMOVE: d8d2", "Wisdom prevails.\nMOVE: d8d7"]
+	state = CS.new()
+	check("counseled: blunder fen accepted", true, state.set_fen(BLUNDER_FEN))
+	move = await opp.choose_move(state)
+	check("counseled: blunder not played", true, move != null and move.to_uci() != "d8d2")
+	check("counseled: revised move played", "d8d7", move.to_uci() if move != null else "null")
+	check("counseled: two requests", 2, _mock_requests.size())
+	var prompt2 := ""
+	if _mock_requests.size() == 2:
+		var msgs: Array = _mock_requests[1].get("messages", [])
+		if not msgs.is_empty():
+			prompt2 = String((msgs.back() as Dictionary).get("content", ""))
+	check("counseled: reconsideration prompt issued", true,
+		prompt2.contains("Choose again") and prompt2.contains("loses"))
+	check("counseled: prompt names the SAN", true, prompt2.contains("Qxd2"))
+	check("counseled: retry source", "counseled-r1", opp.last_source)
+	check("counseled: reconsideration max_tokens 768", Ds4OpponentScript.TOKENS_RECONSIDER,
+		int(_mock_requests[1].get("max_tokens", 0)) if _mock_requests.size() == 2 else -1)
+
+	# 6c. counsel exhausted -> the quiet save (engine's 3rd-ranked), soft-flagged
+	var stumbles_before := stumbles.size()
+	_mock_requests.clear()
+	_mock_replies = ["MOVE: d8d2", "MOVE: d8d2", "MOVE: d8d2"]
+	state = CS.new()
+	state.set_fen(BLUNDER_FEN)
+	move = await opp.choose_move(state)
+	check("counseled: save returns a move", true, move != null)
+	check("counseled: save is not the blunder", true, move != null and move.to_uci() != "d8d2")
+	check("counseled: save is legal", true, move != null and _is_legal_uci(state, move.to_uci()))
+	check("counseled: save used three requests", 3, _mock_requests.size())
+	check("counseled: save source", "counseled-save", opp.last_source)
+	check("counseled: heeds-counsel stumble", true,
+		stumbles.size() == stumbles_before + 1
+		and String(stumbles.back()).contains(Ds4OpponentScript.HEEDS_TEXT))
+
+	opp.mode = Ds4OpponentScript.MODE_PURE
+
+
+# -- maester mode ------------------------------------------------------------
+
+
+func _test_maester(opp: Ds4OpponentScript, port: int) -> void:
+	opp.mode = Ds4OpponentScript.MODE_MAESTER
+	var reasons: Array = []
+	var handler := func(t: String) -> void: reasons.append(t)
+	opp.oracle_reason.connect(handler)
+
+	# 7a. the Oracle picks candidate #2 and narrates
+	_mock_requests.clear()
+	_mock_replies = ["PICK: 2\nREASON: The knight rides before the pawns."]
+	var state = CS.new()
+	var move: Variant = await opp.choose_move(state)
+	check("maester: four candidates gathered", 4, opp.last_candidates.size())
+	var expect2 := ""
+	if opp.last_candidates.size() > 1:
+		expect2 = String(opp.last_candidates[1].get("uci", ""))
+	check("maester: plays the picked candidate", expect2,
+		move.to_uci() if move != null else "null")
+	check("maester: source", "maester", opp.last_source)
+	check("maester: reason emitted once", 1, reasons.size())
+	check("maester: reason text carried", true,
+		reasons.size() == 1 and String(reasons[0]).contains("knight rides"))
+	check("maester: reason within 100 chars", true,
+		reasons.size() == 1 and String(reasons[0]).length() <= 100)
+	check("maester: one llm request", 1, _mock_requests.size())
+	if _mock_requests.size() == 1:
+		var msgs: Array = _mock_requests[0].get("messages", [])
+		var user := String((msgs.back() as Dictionary).get("content", "")) \
+			if not msgs.is_empty() else ""
+		check("maester: prompt numbers candidates", true,
+			user.contains("1.") and user.contains("4."))
+		check("maester: prompt asks for PICK", true, user.contains("PICK"))
+		check("maester: pick request max_tokens 300", Ds4OpponentScript.TOKENS_MAESTER_PICK,
+			int(_mock_requests[0].get("max_tokens", 0)))
+
+	# 7b. sleeping Oracle: dead endpoint -> engine top move + the sleeping line
+	var dead := TCPServer.new()
+	dead.listen(0, "127.0.0.1")
+	var dead_port := dead.get_local_port()
+	dead.stop()
+	OS.set_environment(Ds4OpponentScript.ENV_URL, "http://127.0.0.1:%d" % dead_port)
+	reasons.clear()
+	state = CS.new()
+	move = await opp.choose_move(state)
+	var expect_top := ""
+	if not opp.last_candidates.is_empty():
+		expect_top = String(opp.last_candidates[0].get("uci", ""))
+	check("maester: sleeping plays engine top", expect_top,
+		move.to_uci() if move != null else "null")
+	check("maester: sleeping source", "maester-fallback", opp.last_source)
+	check("maester: sleeping reason line", true,
+		reasons.size() == 1
+		and String(reasons[0]) == Ds4OpponentScript.MAESTER_SLEEP_REASON)
+
+	opp.oracle_reason.disconnect(handler)
+	opp.mode = Ds4OpponentScript.MODE_PURE
+	OS.set_environment(Ds4OpponentScript.ENV_URL, "http://127.0.0.1:%d" % port)
 
 
 # -- tiny canned HTTP/1.1 server on TCPServer -------------------------------

@@ -14,7 +14,8 @@ extends Control
 ## opponent Dictionary shapes:
 ##   {"kind":"engine", "level":"casual"|"seasoned"|"master",
 ##    "difficulty": ChessAI.Difficulty.*, "label": String}
-##   {"kind":"ds4_oracle", "level":"max_thinking", "label": String}
+##   {"kind":"ds4_oracle", "level":"max_thinking",
+##    "oracle_mode":"pure"|"counseled"|"maester", "label": String}
 ##
 ## Keyboard: Left/Right rotate the ring (Up/Down move in opponent lists),
 ## Enter/Space accept, Esc steps back a phase.
@@ -38,8 +39,12 @@ const OPPONENTS: Array[Dictionary] = [
 		"label": "Engine — Seasoned"},
 	{"kind": "engine", "level": "master", "difficulty": ChessAI.Difficulty.HARD,
 		"label": "Engine — Master"},
-	{"kind": "ds4_oracle", "level": "max_thinking",
-		"label": "DS4-Oracle — Max Thinking"},
+	{"kind": "ds4_oracle", "level": "max_thinking", "oracle_mode": "pure",
+		"label": "Pure Oracle"},
+	{"kind": "ds4_oracle", "level": "max_thinking", "oracle_mode": "counseled",
+		"label": "Counseled Oracle"},
+	{"kind": "ds4_oracle", "level": "max_thinking", "oracle_mode": "maester",
+		"label": "Oracle + Grand Maester"},
 ]
 const MODES: Array[Dictionary] = [
 	{"id": "tournament", "label": "Begin Tournament"},
@@ -51,6 +56,7 @@ var selected_house := ""
 var selected_opponent: Dictionary = {}
 var selected_mode := ""
 var _disabled_opponents: Dictionary = {}   # opponent kind -> reason
+var _disabled_modes: Dictionary = {}       # oracle_mode -> reason (per-entry)
 
 var _house_ids: Array[String] = []
 var _ring_index := 0
@@ -119,8 +125,27 @@ func set_opponent_enabled(kind: String, enabled: bool, reason := "") -> void:
 		_set_opp_index(_opp_index)
 
 
+## Grey a single Oracle mode in or out (e.g. "maester" when stockfish is not
+## installed) without touching the other DS4-Oracle entries.
+func set_oracle_mode_enabled(oracle_mode: String, enabled: bool, reason := "") -> void:
+	if enabled:
+		_disabled_modes.erase(oracle_mode)
+	else:
+		_disabled_modes[oracle_mode] = reason if not reason.is_empty() else "unavailable"
+	if not _opp_buttons.is_empty():
+		_set_opp_index(_opp_index)
+
+
 func _opp_disabled(i: int) -> bool:
-	return _disabled_opponents.has(str(OPPONENTS[i]["kind"]))
+	return _disabled_opponents.has(str(OPPONENTS[i]["kind"])) \
+		or _disabled_modes.has(str(OPPONENTS[i].get("oracle_mode", "")))
+
+
+func _opp_disabled_reason(i: int) -> String:
+	var kind := str(OPPONENTS[i]["kind"])
+	if _disabled_opponents.has(kind):
+		return str(_disabled_opponents[kind])
+	return str(_disabled_modes.get(str(OPPONENTS[i].get("oracle_mode", "")), "unavailable"))
 
 
 # -- input ------------------------------------------------------------------
@@ -189,7 +214,7 @@ func _on_opponent_pressed(i: int) -> void:
 		return
 	if _opp_disabled(i):
 		_set_opp_index(i)
-		_footer.text = str(_disabled_opponents.get(str(OPPONENTS[i]["kind"]), "unavailable"))
+		_footer.text = _opp_disabled_reason(i)
 		return
 	_set_opp_index(i)
 	selected_opponent = OPPONENTS[i].duplicate()

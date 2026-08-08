@@ -28,6 +28,7 @@ func _ready() -> void:
 	add_child(_select)
 	_select.selection_complete.connect(_on_selection_complete)
 	_probe_oracle()
+	_probe_maester()
 
 
 func _probe_oracle() -> void:
@@ -39,6 +40,14 @@ func _probe_oracle() -> void:
 		_select.set_opponent_enabled("ds4_oracle", up,
 			"" if up else probe.offline_reason)
 	probe.queue_free()
+
+
+func _probe_maester() -> void:
+	## The maester needs Stockfish; without it the entry greys out.
+	## (Counseled stays selectable — it degrades to pure at runtime, logged.)
+	if UciEngine.find_stockfish().is_empty():
+		_select.set_oracle_mode_enabled("maester", false,
+			"the Grand Maester is abroad (stockfish not installed)")
 
 
 func _on_selection_complete(house_id: String, opp: Dictionary, chosen_mode: String) -> void:

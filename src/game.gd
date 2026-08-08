@@ -60,6 +60,7 @@ var _san_log: Array[String] = []
 var _turn_label: Label
 var _move_list: RichTextLabel
 var _oracle_flash: Label
+var _oracle_caption: Label
 var _victory_panel: PanelContainer
 var _victory_label: Label
 var _continue_btn: Button
@@ -89,11 +90,13 @@ func _ready() -> void:
 	if Session.configured and str(Session.opponent.get("kind", "")) == "ds4_oracle":
 		oracle = Ds4Opponent.new()
 		oracle.name = "Oracle"
+		oracle.mode = str(Session.opponent.get("oracle_mode", Ds4Opponent.MODE_PURE))
 		add_child(oracle)
 		oracle.thinking_started.connect(_on_oracle_thinking_started)
 		oracle.thinking_finished.connect(_on_oracle_thinking_finished)
 		oracle.oracle_stumbled.connect(_on_oracle_stumbled)
 		oracle.retry_attempted.connect(_on_oracle_retry)
+		oracle.oracle_reason.connect(_on_oracle_reason)
 	_build_hud()
 	_dress_hall()
 	_spawn_from_state()
@@ -548,13 +551,28 @@ func _on_oracle_thinking_finished(_elapsed_s: float) -> void:
 	_update_turn_label()
 
 
-func _on_oracle_stumbled(_reason: String) -> void:
+func _on_oracle_stumbled(reason: String) -> void:
 	oracle_stumble_count += 1
-	_flash_oracle(Ds4Opponent.STUMBLE_TEXT, 3.0)
+	# Counseled saves are strong moves — soften the HUD line for them.
+	var line := Ds4Opponent.HEEDS_TEXT if reason.contains(Ds4Opponent.HEEDS_TEXT) \
+		else Ds4Opponent.STUMBLE_TEXT
+	_flash_oracle(line, 3.0)
 
 
 func _on_oracle_retry(_attempt: int) -> void:
 	_flash_oracle("the Oracle reconsiders…", 2.0)
+
+
+func _on_oracle_reason(text: String) -> void:
+	## Maester mode: the Oracle's in-character reason, captioned under the
+	## move list for 6 s.
+	if _oracle_caption == null:
+		return
+	_oracle_caption.text = "“%s”" % text
+	_oracle_caption.visible = true
+	get_tree().create_timer(6.0).timeout.connect(func() -> void:
+		if is_instance_valid(_oracle_caption) and _oracle_caption.text == "“%s”" % text:
+			_oracle_caption.visible = false)
 
 
 func _flash_oracle(text: String, sec: float) -> void:
@@ -638,6 +656,16 @@ func _build_hud() -> void:
 	ctx.position = Vector2(16, 14)
 	hud.add_child(ctx)
 
+	if oracle != null:
+		# The Oracle's mode, named under the opponent label.
+		var mode_lbl := Label.new()
+		mode_lbl.name = "OracleMode"
+		mode_lbl.text = str(Ds4Opponent.MODE_LABELS.get(oracle.mode, oracle.mode))
+		mode_lbl.add_theme_font_size_override("font_size", 12)
+		mode_lbl.add_theme_color_override("font_color", HUD_GOLD)
+		mode_lbl.position = Vector2(16, 34)
+		hud.add_child(mode_lbl)
+
 	_oracle_flash = Label.new()
 	_oracle_flash.name = "OracleFlash"
 	_oracle_flash.visible = false
@@ -659,8 +687,22 @@ func _build_hud() -> void:
 	_move_list.offset_left = -150
 	_move_list.offset_top = 80
 	_move_list.offset_right = -16
-	_move_list.offset_bottom = -20
+	_move_list.offset_bottom = -44
 	hud.add_child(_move_list)
+
+	_oracle_caption = Label.new()
+	_oracle_caption.name = "OracleCaption"
+	_oracle_caption.visible = false
+	_oracle_caption.add_theme_font_size_override("font_size", 13)
+	_oracle_caption.add_theme_color_override("font_color", HUD_GOLD)
+	_oracle_caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_oracle_caption.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_oracle_caption.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	_oracle_caption.offset_left = -360
+	_oracle_caption.offset_top = -38
+	_oracle_caption.offset_right = -16
+	_oracle_caption.offset_bottom = -10
+	hud.add_child(_oracle_caption)
 
 	_victory_panel = PanelContainer.new()
 	_victory_panel.name = "VictoryPanel"
