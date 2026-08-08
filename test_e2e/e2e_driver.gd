@@ -16,22 +16,32 @@
 ## Scenarios:
 ##   boot        select flows into the game, 32 pieces standing, banners
 ##               dyed to the chosen house, HUD carries the house names
-##   board-truth startpos ground truth: a1 dark bottom-LEFT of the default
-##               camera, every tile's stone matches the engine's square
-##               color, Ranger queen on d1/d8 (her color), crowned king on
-##               e1/e8 — the earned check for the 2026-08-08 tile-parity
-##               inversion ("queen not on her color" read as a mirrored board)
-##   board-moves (needs --e2e-fen with castling legal) clicks the crowned
-##               piece and asserts the surfaced highlights are exactly the
-##               engine's KING moves (adjacent + castling), then clicks the
-##               Ranger and demands a long queen ray — the royal movesets
-##               through the real click → highlight pipeline
+##   orientation (launched with --debug-coords) the labeled-overlay
+##               tiebreaker: saves labeled.png, the engine's own file/rank/
+##               royal beliefs photographed from the default player camera —
+##               a permanent human-auditable orientation artifact
+##   board-truth startpos ground truth, convention-INDEPENDENT: squares
+##               located by screen geometry (visual-a1 = the board polygon's
+##               bottom-left corner), checkerboard + queen-color read from
+##               RENDERED pixels, royals found by rendered world position,
+##               White seated nearest; engine tile-node parity kept as a
+##               secondary crosscheck — the earned check for the 2026-08-08
+##               tile-parity inversion ("queen not on her color")
+##   board-moves (needs BOARD_FEN) clicks visual e1/d1 BY SCREEN POSITION and
+##               asserts the surfaced highlights equal the hand-derived king
+##               moveset (incl. the O-O hop) and queen moveset (incl. the
+##               long a4 ray), all in visual space — the royal movesets
+##               through the real click → highlight pipeline, mirror-proof
 ##   move        click e2 pawn -> e4 via real clicks, AI replies within 30 s
 ##   duel        (needs --e2e-fen with an immediate white capture) executes
 ##               the capture by clicks; slow-mo duel plays out untouched;
 ##               asserts victim gone, death anim, attacker arrival, and
 ##               time_scale restored to 1.0
-##   castle      (needs --e2e-fen with O-O available) castles by clicks
+##   castle      (needs --e2e-fen with O-O available) castles by clicks;
+##               visually asserts the king STANDS on visual g1, rook on f1
+##   enpassant   (needs EP_FEN) exd6 e.p. by screen-position clicks; asserts
+##               the pawn lands visual d6 and the captured pawn vanishes
+##               from visual d5 — the square BEHIND the landing
 ##   promote     (needs --e2e-fen with a promotion push) promotes by clicks
 ##   slowmo      capture triggers the DuelDirector; asserts activation, the
 ##               time dip, skip-on-click restore, and a clean final settle
@@ -139,12 +149,16 @@ func _run() -> void:
 			await _scenario_board_truth()
 		"board-moves":
 			await _scenario_board_moves()
+		"orientation":
+			await _scenario_orientation()
 		"move":
 			await _scenario_move()
 		"duel":
 			await _scenario_duel(false)
 		"castle":
 			await _scenario_castle()
+		"enpassant":
+			await _scenario_enpassant()
 		"promote":
 			await _scenario_promote()
 		"slowmo":
@@ -317,6 +331,166 @@ func _select_square(game: Node, sq: Vector2i, attempts: int = 3) -> bool:
 		await _sleep(0.6)
 	return false
 
+# ── Visual-space geometry (convention-INDEPENDENT board truth) ─────────────
+## Chess truth is a SCREEN property: from White's seat, a1 is the bottom-left
+## board corner, files ascend left-to-right, White sits nearest. The helpers
+## below locate "visual squares" purely from (a) the board slab's fixed world
+## AABB and (b) which of its corners land where ON SCREEN through the live
+## camera. No sq_of, no square_to_world, no engine indices — a global mirror
+## in ANY game layer (mapping, spawn, camera) fails these assertions; it can
+## never pass self-consistently the way engine-frame checks can (the
+## 2026-08-08 scar this section was built from).
+
+const VIS_BOARD_HALF := 4.0   # 8 tiles x 1.0, slab centered on the Board node
+const VIS_TILE_TOP := 0.22
+
+## Anchor corners of the board top face, named BY SCREEN GEOMETRY:
+## [0] screen bottom-left corner (chess truth: a1's outer corner),
+## [1] screen bottom-right (h1's), [2] the far corner adjacent to [0] (a8's).
+func _visual_anchors(game: Node) -> Array:
+	var board: Node3D = game.get("board")
+	var cam := get_viewport().get_camera_3d()
+	var corners: Array = []
+	for xs in [-1.0, 1.0]:
+		for zs in [-1.0, 1.0]:
+			corners.append(board.to_global(
+				Vector3(VIS_BOARD_HALF * xs, VIS_TILE_TOP, VIS_BOARD_HALF * zs)))
+	corners.sort_custom(func(a, b):
+		return cam.unproject_position(a).y > cam.unproject_position(b).y)
+	var bl: Vector3 = corners[0]
+	var br: Vector3 = corners[1]
+	if cam.unproject_position(bl).x > cam.unproject_position(br).x:
+		var t := bl
+		bl = br
+		br = t
+	# Of the two far corners, a8's is the one whose offset from a1's corner is
+	# perpendicular to the near edge (the diagonal corner dots ~0.7).
+	var far_adj: Vector3 = corners[2]
+	if absf((corners[2] - bl).normalized().dot((br - bl).normalized())) > 0.5:
+		far_adj = corners[3]
+	return [bl, br, far_adj]
+
+func _visual_ij(square_name: String) -> Vector2i:
+	return Vector2i(square_name[0].unicode_at(0) - "a".unicode_at(0),
+		int(square_name.substr(1)) - 1)
+
+## World center of visual square (i files from screen-LEFT, j ranks from the
+## NEAR edge), i/j 0..7 — visual-a1 is (0,0), visual-h1 (7,0), visual-a8 (0,7).
+func _visual_square_world(game: Node, i: float, j: float) -> Vector3:
+	var a := _visual_anchors(game)
+	var right: Vector3 = (a[1] - a[0]) / 8.0
+	var deep: Vector3 = (a[2] - a[0]) / 8.0
+	return a[0] + right * (i + 0.5) + deep * (j + 0.5)
+
+func _visual_name_world(game: Node, square_name: String) -> Vector3:
+	var ij := _visual_ij(square_name)
+	return _visual_square_world(game, float(ij.x), float(ij.y))
+
+## Nearest visual square for a world position on the board top.
+func _visual_of_world(game: Node, world: Vector3) -> Vector2i:
+	var a := _visual_anchors(game)
+	var right: Vector3 = (a[1] - a[0]) / 8.0
+	var deep: Vector3 = (a[2] - a[0]) / 8.0
+	var rel: Vector3 = world - a[0]
+	return Vector2i(
+		int(floor(rel.dot(right) / right.length_squared())),
+		int(floor(rel.dot(deep) / deep.length_squared())))
+
+## The piece view standing on a visual square (by its rendered world
+## position), or null.
+func _view_on_visual(game: Node, square_name: String) -> Node:
+	var want := _visual_ij(square_name)
+	var views: Dictionary = game.get("views")
+	for sq in views:
+		var pv = views[sq]
+		if is_instance_valid(pv) \
+				and _visual_of_world(game, (pv as Node3D).global_position) == want:
+			return pv
+	return null
+
+func _assert_visual_royal(game: Node, square_name: String, want_type: int,
+		want_crown: bool) -> bool:
+	var pv := _view_on_visual(game, square_name)
+	if pv == null:
+		await _fail("visual-royal-%s" % square_name,
+			"no piece view standing on visual %s" % square_name)
+		return false
+	if int(pv.get("piece_type")) != want_type:
+		await _fail("visual-royal-%s" % square_name, "piece_type %d on visual %s, expected %d"
+			% [int(pv.get("piece_type")), square_name, want_type])
+		return false
+	var crowned: bool = not pv.find_children("Crown", "", true, false).is_empty()
+	if crowned != want_crown:
+		await _fail("visual-royal-%s" % square_name, "crown %s on visual %s, expected %s"
+			% [str(crowned), square_name, str(want_crown)])
+		return false
+	return true
+
+## Click a visual square by SCREEN position (never through sq_of).
+func _click_visual(game: Node, square_name: String) -> void:
+	var cam := get_viewport().get_camera_3d()
+	await _click_at(cam.unproject_position(_visual_name_world(game, square_name)))
+
+## Where the selection highlight quad sits, in visual coords (or (-9,-9)).
+func _selection_visual(game: Node) -> Vector2i:
+	var board: Node = game.get("board")
+	var quad: Node3D = board.get("_select_quad")
+	if quad == null or not quad.visible:
+		return Vector2i(-9, -9)
+	return _visual_of_world(game, quad.global_position)
+
+## Select a visual square via real clicks; the proof of selection is the
+## rendered highlight quad standing on that same visual square.
+func _select_visual(game: Node, square_name: String, attempts: int = 3) -> bool:
+	var want := _visual_ij(square_name)
+	for i in attempts:
+		await _click_visual(game, square_name)
+		if await _wait_until(func(): return _selection_visual(game) == want, 1.5):
+			return true
+		print("E2E WARN visual select attempt %d/%d for %s failed (quad at %s) — retrying"
+			% [i + 1, attempts, square_name, str(_selection_visual(game))])
+		await _sleep(0.6)
+	return false
+
+## Visible legal-move markers, as visual squares.
+func _visible_marker_visuals(game: Node) -> Array[Vector2i]:
+	var board: Node = game.get("board")
+	var out: Array[Vector2i] = []
+	for q in board.get_node("MoveMarkers").get_children():
+		if q.visible:
+			var v := _visual_of_world(game, (q as Node3D).global_position)
+			if not out.has(v):
+				out.append(v)
+	return out
+
+func _visual_set(names: Array) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	for n in names:
+		out.append(_visual_ij(str(n)))
+	return out
+
+func _visual_names(squares: Array[Vector2i]) -> String:
+	var parts: PackedStringArray = []
+	for v in squares:
+		if v.x >= 0 and v.x < 8 and v.y >= 0 and v.y < 8:
+			parts.append("%s%d" % [char("a".unicode_at(0) + v.x), v.y + 1])
+		else:
+			parts.append(str(v))
+	return ",".join(parts)
+
+## Mean 3x3 luminance of the RENDERED frame at a world point (canvas coords
+## go through the calibrated canvas->window transform, same as clicks).
+func _sample_lum(img: Image, cam: Camera3D, world: Vector3) -> float:
+	var p := _to_window * cam.unproject_position(world)
+	var sum := 0.0
+	for dy in [-1, 0, 1]:
+		for dx in [-1, 0, 1]:
+			var c := img.get_pixelv(Vector2i(
+				clampi(int(p.x) + dx, 0, img.get_width() - 1),
+				clampi(int(p.y) + dy, 0, img.get_height() - 1)))
+			sum += c.r * 0.2126 + c.g * 0.7152 + c.b * 0.0722
+	return sum / 9.0
+
 # ── The Hall of Banners (house select) by clicks ───────────────────────────
 func _navigate_select(house_id: String, opponent_needle: String, mode_needle: String) -> bool:
 	if not await _wait_until(func(): return _select_screen() != null, 15.0):
@@ -439,10 +613,48 @@ func _scenario_boot() -> void:
 	await _shot("boot_lineup")
 	_finish(0)
 
+# ── Scenario: orientation (labeled-overlay tiebreaker) ─────────────────────
+## Launched WITH --debug-coords: the game renders the engine's own belief of
+## files/ranks/royal squares as world-space labels; this scenario walks the
+## real select flow (default player camera, no shortcuts) and saves the frame
+## as labeled.png — a permanent, human-auditable orientation artifact every
+## run. The assertion is intentionally thin: the labels exist and the shot
+## saved. The PICTURE is the check — conventions can be self-consistently
+## wrong, a labeled photograph cannot.
+func _scenario_orientation() -> void:
+	if not await _navigate_select(DEFAULT_HOUSE, "Casual", "Single Match"):
+		return
+	var game := await _boot_game(32)
+	if game == null:
+		return
+	if game.get_node_or_null("DebugCoords") == null:
+		await _fail("orientation-overlay",
+			"no DebugCoords node — was --debug-coords passed to the launch?")
+		return
+	_pass("orientation-overlay-present")
+	await _sleep(1.2)   # idles + label render settle
+	await RenderingServer.frame_post_draw
+	var img := get_viewport().get_texture().get_image()
+	if img == null:
+		await _fail("orientation-shot", "no viewport image for labeled.png")
+		return
+	var path := artifacts_dir + "/labeled.png"
+	if img.save_png(path) != OK:
+		await _fail("orientation-shot", "could not save %s" % path)
+		return
+	_pass("orientation-labeled-shot (%s)" % path)
+	_finish(0)
+
 # ── Scenario: board-truth ──────────────────────────────────────────────────
-## The rendered board must BE the engine's board. Every check derives its
-## expectation from ChessState (square_is_dark / square_index_from_name), so
-## the view is audited against engine truth, never against itself.
+## The rendered board must BE a correct chessboard AS A HUMAN SEES IT. The
+## primary assertions are convention-INDEPENDENT: squares are located by
+## screen geometry (visual-a1 = the board polygon's bottom-left corner from
+## the default player camera), colors are sampled from the actual rendered
+## pixels, royals are found by their rendered world positions. Engine-frame
+## crosschecks (tile nodes vs square_is_dark) are kept as a SECONDARY layer —
+## they catch parity regressions but, unlike the visual layer, a globally
+## mirrored convention could pass them self-consistently (the 2026-08-08
+## scar: 20/20 green while the user saw a wrong board).
 func _scenario_board_truth() -> void:
 	if not await _navigate_select(DEFAULT_HOUSE, "Casual", "Single Match"):
 		return
@@ -454,18 +666,76 @@ func _scenario_board_truth() -> void:
 	if cam == null:
 		await _fail("board-camera", "no active Camera3D")
 		return
-	# 1) Orientation from the player's default camera: a1 bottom-left,
-	#    h1 bottom-right, rank 8 receding to the top of the frame.
-	var a1 := _square_screen(game, cam, "a1")
-	var h1 := _square_screen(game, cam, "h1")
-	var a8 := _square_screen(game, cam, "a8")
-	if not (a1.x < h1.x and a1.y > a8.y):
-		await _fail("board-orientation",
-			"a1=%s h1=%s a8=%s — a1 must sit left of h1 and nearer the bottom than a8"
-			% [str(a1), str(h1), str(a8)])
+	await _sleep(1.0)   # idles settle before the frame we sample
+	# 1) VISUAL: White (the player's FROST side) is seated nearest the
+	#    camera — every piece in visual ranks 1-2 is FROST, ranks 7-8 EMBER.
+	#    This is the orbit camera's default-yaw contract, checked by pixels'
+	#    own geometry, not by yaw value.
+	var views: Dictionary = game.get("views")
+	var seat_wrong: Array[String] = []
+	for sq in views:
+		var pv: Node3D = views[sq]
+		if not is_instance_valid(pv):
+			continue
+		var v := _visual_of_world(game, pv.global_position)
+		if v.y <= 1 and int(pv.get("side")) != PieceView.House.FROST:
+			seat_wrong.append("rival piece near at %s" % _visual_names([v]))
+		elif v.y >= 6 and int(pv.get("side")) != PieceView.House.EMBER:
+			seat_wrong.append("player piece far at %s" % _visual_names([v]))
+		elif v.y > 1 and v.y < 6:
+			seat_wrong.append("piece adrift mid-board at %s" % _visual_names([v]))
+	if not seat_wrong.is_empty():
+		await _fail("board-white-seated-near", "%d/32 misplaced (first: %s)"
+			% [seat_wrong.size(), seat_wrong[0]])
 		return
-	_pass("board-orientation (a1 bottom-left, h1 bottom-right)")
-	# 2) Tile parity: all 64 tiles wear the engine's stone for their square.
+	_pass("board-white-seated-near (player army fills visual ranks 1-2)")
+	# 2) VISUAL: rendered-pixel checkerboard. Sample the empty middle (visual
+	#    ranks 3-6) from the actual frame: with a1 dark, a tile at (i,j) is
+	#    dark iff (i+j) is even, so every adjacent pair must alternate luminance.
+	await RenderingServer.frame_post_draw
+	var img := get_viewport().get_texture().get_image()
+	if img == null:
+		await _fail("board-pixel-parity", "no viewport image to sample")
+		return
+	var pair_wrong: Array[String] = []
+	for j in range(2, 6):
+		for i in range(0, 7):
+			var l0 := _sample_lum(img, cam, _visual_square_world(game, float(i), float(j)))
+			var l1 := _sample_lum(img, cam, _visual_square_world(game, float(i + 1), float(j)))
+			var dark_left := (i + j) % 2 == 0
+			if absf(l0 - l1) < 0.01 or dark_left != (l0 < l1):
+				pair_wrong.append("%s=%.3f vs %s=%.3f" % [
+					_visual_names([Vector2i(i, j)]), l0,
+					_visual_names([Vector2i(i + 1, j)]), l1])
+	if not pair_wrong.is_empty():
+		await _fail("board-pixel-parity", "%d/28 adjacent pairs wrong (first: %s)"
+			% [pair_wrong.size(), pair_wrong[0]])
+		return
+	_pass("board-pixel-parity (28/28 rendered pairs alternate, a1-parity dark)")
+	# 3) VISUAL: the two user-facing color truths, sampled on the tile strip
+	#    in front of the rank-1 pieces: a1 darker than b1, d1 (queen's
+	#    square) LIGHTER than e1 — the queen stands on her color.
+	var lum_a1 := _sample_lum(img, cam, _visual_square_world(game, 0.0, -0.38))
+	var lum_b1 := _sample_lum(img, cam, _visual_square_world(game, 1.0, -0.38))
+	var lum_d1 := _sample_lum(img, cam, _visual_square_world(game, 3.0, -0.38))
+	var lum_e1 := _sample_lum(img, cam, _visual_square_world(game, 4.0, -0.38))
+	if not (lum_a1 < lum_b1 - 0.005):
+		await _fail("board-a1-dark", "a1 strip %.3f !< b1 strip %.3f" % [lum_a1, lum_b1])
+		return
+	if not (lum_d1 > lum_e1 + 0.005):
+		await _fail("board-queen-on-her-color",
+			"d1 strip %.3f !> e1 strip %.3f — the queen's square must be light"
+			% [lum_d1, lum_e1])
+		return
+	_pass("board-a1-dark · board-queen-on-her-color (rendered strips)")
+	# 4) VISUAL royals both sides, located by rendered position: uncrowned
+	#    Ranger queen on visual d1/d8, crowned king on visual e1/e8.
+	for check in [["d1", PieceView.Type.QUEEN, false], ["e1", PieceView.Type.KING, true],
+			["d8", PieceView.Type.QUEEN, false], ["e8", PieceView.Type.KING, true]]:
+		if not await _assert_visual_royal(game, str(check[0]), int(check[1]), bool(check[2])):
+			return
+	_pass("board-royals (visual: queen d1/d8 uncrowned · king e1/e8 crowned)")
+	# 5) ENGINE crosscheck: all 64 tile nodes wear the engine's stone.
 	var wrong: Array[String] = []
 	for idx in 64:
 		var sq: Vector2i = game.sq_of(idx)
@@ -484,47 +754,26 @@ func _scenario_board_truth() -> void:
 		await _fail("board-tile-parity", "%d/64 tiles wear the wrong stone (first: %s)"
 			% [wrong.size(), ",".join(wrong.slice(0, 8))])
 		return
-	_pass("board-tile-parity (64/64 tiles match engine square colors)")
-	# 3) Royal identity both sides: Ranger queen on d (her color), crowned
-	#    king on e. Startpos: d1 light, e1 dark, d8 dark, e8 light.
-	for check in [["d1", PieceView.Type.QUEEN, false], ["e1", PieceView.Type.KING, true],
-			["d8", PieceView.Type.QUEEN, false], ["e8", PieceView.Type.KING, true]]:
-		if not await _assert_royal(game, str(check[0]), int(check[1]), bool(check[2])):
-			return
-	_pass("board-royals (queen d1/d8 uncrowned · king e1/e8 crowned)")
-	await _sleep(1.0)   # let idles settle for the screenshot
+	_pass("board-tile-parity (64/64 tile nodes match engine square colors)")
 	await _shot("board_truth_startpos")
 	_finish(0)
 
-func _square_screen(game: Node, cam: Camera3D, square_name: String) -> Vector2:
-	var board: Node = game.get("board")
-	return cam.unproject_position(board.square_to_world(
-		game.sq_of(ChessState.square_index_from_name(square_name))))
-
-func _assert_royal(game: Node, square_name: String, want_type: int,
-		want_crown: bool) -> bool:
-	var views: Dictionary = game.get("views")
-	var pv = views.get(game.sq_of(ChessState.square_index_from_name(square_name)))
-	if pv == null or not is_instance_valid(pv):
-		await _fail("royal-%s" % square_name, "no piece view standing on %s" % square_name)
-		return false
-	if int(pv.piece_type) != want_type:
-		await _fail("royal-%s" % square_name, "piece_type %d on %s, expected %d"
-			% [int(pv.piece_type), square_name, want_type])
-		return false
-	var crowned: bool = not pv.find_children("Crown", "", true, false).is_empty()
-	if crowned != want_crown:
-		await _fail("royal-%s" % square_name, "crown %s on %s, expected %s"
-			% [str(crowned), square_name, str(want_crown)])
-		return false
-	return true
-
 # ── Scenario: board-moves ──────────────────────────────────────────────────
 ## FEN contract (run_e2e.sh BOARD_FEN): White to move, Qd1 + Ke1, O-O legal
-## (O-O-O is truthfully blocked — the queen herself holds d1). The crowned
-## view must surface exactly the engine's KING moves (all adjacent, plus the
-## two-file castling hop); the Ranger view must surface the queen's rays, at
-## least one of them long.
+## (O-O-O is truthfully blocked — the queen herself holds d1). Convention-
+## INDEPENDENT throughout: visual squares are clicked by SCREEN position and
+## the surfaced highlight markers are read back as visual squares, compared
+## against the humanly-computed movesets for that FEN. No engine indices
+## anywhere in the assertions — a mirrored mapping fails here, loudly.
+##
+## Hand-derived truth for BOARD_FEN (Ra1 Qd1 Ke1 Rh1, Pd2 Pe2):
+##   king e1  -> f1, f2, g1 (O-O hop; d1/d2/e2 blocked by own pieces,
+##               O-O-O blocked by the queen herself)
+##   queen d1 -> c1, b1 (a1 rook stops the file), c2, b3, a4 (long diagonal;
+##               d2/e2 own pawns block north and north-east)
+const KING_E1_VISUAL := ["f1", "f2", "g1"]
+const QUEEN_D1_VISUAL := ["c1", "b1", "c2", "b3", "a4"]
+
 func _scenario_board_moves() -> void:
 	if not await _navigate_select(DEFAULT_HOUSE, "Casual", "Single Match"):
 		return
@@ -532,95 +781,52 @@ func _scenario_board_moves() -> void:
 	if game == null:
 		return
 	var state: Object = game.get("state")
-	var board: Node = game.get("board")
 	if not await _wait_until(func():
 		return game.get("busy") == false and state.turn == false, 15.0):
 		await _fail("board-moves-turn", "never became the player's turn")
 		return
-	if not await _assert_royal(game, "d1", PieceView.Type.QUEEN, false) \
-			or not await _assert_royal(game, "e1", PieceView.Type.KING, true):
+	if not await _assert_visual_royal(game, "d1", PieceView.Type.QUEEN, false) \
+			or not await _assert_visual_royal(game, "e1", PieceView.Type.KING, true):
 		return
-	_pass("board-moves-royals (Ranger d1 · crowned king e1)")
-	# The crowned piece: exactly the king's moves, king-shaped.
-	var e1 := ChessState.square_index_from_name("e1")
-	if not await _select_square(game, game.sq_of(e1)):
-		await _fail("board-moves-select-king", "e1 never became the selected square")
+	_pass("board-moves-royals (visual: Ranger d1 · crowned king e1)")
+	# The crowned piece, clicked where a human sees it: exactly the king's
+	# moves, including the two-file O-O hop to visual g1.
+	if not await _select_visual(game, "e1"):
+		await _fail("board-moves-select-king",
+			"clicking visual e1 never selected it (highlight quad elsewhere)")
 		return
-	var king_targets := _engine_targets(game, e1)
-	var shown := _visible_marker_squares(board)
-	if not _same_squares(shown, king_targets):
-		await _fail("board-moves-king-set", "crowned piece highlights %s, engine king moves %s"
-			% [str(shown), str(king_targets)])
-		return
-	var castles := 0
-	for m in game.get("_turn_moves"):
-		if m.from_square != e1:
-			continue
-		var span := _move_span(e1, m.to_square)
-		if m.is_castling:
-			castles += 1
-			if span != Vector2i(2, 0):
-				await _fail("board-moves-castle-shape", "castling hop %s spans %s files/ranks"
-					% [m.to_uci(), str(span)])
-				return
-		elif maxi(span.x, span.y) != 1:
-			await _fail("board-moves-king-shape", "king move %s is not adjacent (span %s)"
-				% [m.to_uci(), str(span)])
-			return
-	if castles != 1:
-		await _fail("board-moves-castling",
-			"expected exactly O-O legal (O-O-O blocked by Qd1), found %d" % castles)
+	var shown := _visible_marker_visuals(game)
+	if not _same_squares(shown, _visual_set(KING_E1_VISUAL)):
+		await _fail("board-moves-king-set",
+			"crowned piece highlights visual [%s], chess truth says [%s]"
+			% [_visual_names(shown), ",".join(KING_E1_VISUAL)])
 		return
 	await _shot("king_highlights")
-	_pass("board-moves-king (crowned piece shows %d king moves incl. O-O)"
-		% king_targets.size())
-	# The Ranger: exactly the queen's moves, with a long ray.
-	var d1 := ChessState.square_index_from_name("d1")
-	if not await _select_square(game, game.sq_of(d1)):
-		await _fail("board-moves-select-queen", "d1 never became the selected square")
+	_pass("board-moves-king (visual e1 shows exactly %s)" % ",".join(KING_E1_VISUAL))
+	# The Ranger on visual d1: exactly the queen's moves, with the long
+	# a4 diagonal proving queen-range rays.
+	if not await _select_visual(game, "d1"):
+		await _fail("board-moves-select-queen",
+			"clicking visual d1 never selected it (highlight quad elsewhere)")
 		return
-	var queen_targets := _engine_targets(game, d1)
-	shown = _visible_marker_squares(board)
-	if not _same_squares(shown, queen_targets):
-		await _fail("board-moves-queen-set", "queen highlights %s, engine queen moves %s"
-			% [str(shown), str(queen_targets)])
+	shown = _visible_marker_visuals(game)
+	if not _same_squares(shown, _visual_set(QUEEN_D1_VISUAL)):
+		await _fail("board-moves-queen-set",
+			"queen highlights visual [%s], chess truth says [%s]"
+			% [_visual_names(shown), ",".join(QUEEN_D1_VISUAL)])
 		return
+	var origin := _visual_ij("d1")
 	var longest := 0
-	for m in game.get("_turn_moves"):
-		if m.from_square == d1:
-			var span := _move_span(d1, m.to_square)
-			longest = maxi(longest, maxi(span.x, span.y))
-	if longest < 2:
-		await _fail("board-moves-queen-ray", "no queen ray longer than 1 (longest %d)" % longest)
+	for v in shown:
+		longest = maxi(longest, maxi(absi(v.x - origin.x), absi(v.y - origin.y)))
+	if longest < 3:
+		await _fail("board-moves-queen-ray",
+			"no long queen ray on screen (longest visual span %d, need >=3)" % longest)
 		return
 	await _shot("queen_highlights")
-	_pass("board-moves-queen (Ranger shows %d queen moves, longest ray %d)"
-		% [queen_targets.size(), longest])
+	_pass("board-moves-queen (visual d1 shows exactly %s, ray span %d)"
+		% [",".join(QUEEN_D1_VISUAL), longest])
 	_finish(0)
-
-## |file delta|, |rank delta| between two engine squares, in TRUE board space.
-func _move_span(from_idx: int, to_idx: int) -> Vector2i:
-	return Vector2i(
-		absi(ChessState.square_get_file(to_idx) - ChessState.square_get_file(from_idx)),
-		absi(ChessState.square_get_rank(to_idx) - ChessState.square_get_rank(from_idx)))
-
-func _engine_targets(game: Node, from_idx: int) -> Array[Vector2i]:
-	var out: Array[Vector2i] = []
-	for m in game.get("_turn_moves"):
-		if m.from_square == from_idx:
-			var sq: Vector2i = game.sq_of(m.to_square)
-			if not out.has(sq):
-				out.append(sq)
-	return out
-
-func _visible_marker_squares(board: Node) -> Array[Vector2i]:
-	var out: Array[Vector2i] = []
-	for q in board.get_node("MoveMarkers").get_children():
-		if q.visible:
-			var sq: Vector2i = board.world_to_square(q.position)
-			if not out.has(sq):
-				out.append(sq)
-	return out
 
 func _same_squares(a: Array[Vector2i], b: Array[Vector2i]) -> bool:
 	if a.size() != b.size():
@@ -745,9 +951,96 @@ func _scenario_castle() -> void:
 			% [str(king_sq), str(rook_sq)])
 		return
 	_pass("castle-views-landed")
+	# VISUAL sanity (convention-independent): after O-O the crowned king must
+	# STAND two squares right of where he started — on visual g1 — with the
+	# rook having crossed him onto visual f1. CASTLE_FEN has no black rooks,
+	# so these views are unambiguous.
+	if not await _wait_until(func():
+		var kv := _view_on_visual(game, "g1")
+		var rv := _view_on_visual(game, "f1")
+		return kv != null and int(kv.get("piece_type")) == PieceView.Type.KING \
+			and rv != null and int(rv.get("piece_type")) == PieceView.Type.ROOK, 8.0):
+		var king_at := "<none>"
+		var views_now: Dictionary = game.get("views")
+		for sq in views_now:
+			var pv = views_now[sq]
+			if is_instance_valid(pv) and int(pv.get("piece_type")) == PieceView.Type.KING \
+					and int(pv.get("side")) == PieceView.House.FROST:
+				king_at = _visual_names([_visual_of_world(game,
+					(pv as Node3D).global_position)])
+		await _fail("castle-visual-landing",
+			"O-O did not put the king on visual g1 with the rook on visual f1 (king at %s)"
+			% king_at)
+		return
+	_pass("castle-visual-landing (king visual g1 · rook visual f1)")
 	await _shot("after_castle")
 	if not await _settle(game, "castle-settled"):
 		return
+	_finish(0)
+
+# ── Scenario: enpassant ────────────────────────────────────────────────────
+## FEN contract (run_e2e.sh EP_FEN): "4k3/8/8/3pP3/8/8/8/4K3 w - d6" —
+## White pawn e5, Black pawn d5 just double-stepped, exd6 e.p. available;
+## black has ONLY the king besides, so nothing can recapture and the visual
+## end-state is unambiguous. Clicks land by SCREEN position; the assertion is
+## the humanly-correct outcome: the white pawn STANDS on visual d6, and both
+## visual d5 (the captured pawn — NOT the destination square) and visual e5
+## are empty. This is the classic mirror tell: only a correct mapping removes
+## the pawn one square BEHIND the diagonal landing.
+func _scenario_enpassant() -> void:
+	if not await _navigate_select(DEFAULT_HOUSE, "Casual", "Single Match"):
+		return
+	var game := await _ready_for_scripted_move("ep")
+	if game == null:
+		return
+	var state: Object = game.get("state")
+	var ep_move = null
+	for m in state.legal_moves():
+		if m.en_passant:
+			ep_move = m
+			break
+	if ep_move == null:
+		await _fail("ep-move-available", "the FEN offers no en-passant capture")
+		return
+	_pass("ep-move-available (%s)" % ep_move.to_uci())
+	if not await _select_visual(game, "e5"):
+		await _fail("ep-select", "clicking visual e5 never selected the pawn")
+		return
+	_pass("ep-select (visual e5)")
+	await _click_visual(game, "d6")
+	# Engine truth first: pawn to d6, d5 AND e5 emptied.
+	var d6 := ChessState.square_index_from_name("d6")
+	var d5 := ChessState.square_index_from_name("d5")
+	var e5 := ChessState.square_index_from_name("e5")
+	if not await _wait_until(func():
+		return str(state.pieces[d6]) == "P" and state.pieces[d5] == null \
+			and state.pieces[e5] == null, 5.0):
+		await _fail("ep-engine-applied",
+			"engine state after click: d6=%s d5=%s e5=%s" % [
+				str(state.pieces[d6]), str(state.pieces[d5]), str(state.pieces[e5])])
+		return
+	_pass("ep-engine-applied")
+	# The capture duel + walk play out; then the VISUAL end-state.
+	if not await _wait_until(func():
+		var pv := _view_on_visual(game, "d6")
+		return pv != null and int(pv.get("piece_type")) == PieceView.Type.PAWN \
+			and int(pv.get("side")) == PieceView.House.FROST, 20.0):
+		await _fail("ep-visual-landing", "no white pawn standing on visual d6")
+		return
+	_pass("ep-visual-landing (white pawn on visual d6)")
+	if not await _settle(game, "ep-settled"):   # black king replies
+		return
+	if _view_on_visual(game, "d5") != null or _view_on_visual(game, "e5") != null:
+		await _fail("ep-victim-removed",
+			"a piece still stands on visual d5/e5 after the e.p. capture")
+		return
+	var views: Dictionary = game.get("views")
+	if views.size() != 3:
+		await _fail("ep-piece-count", "%d piece views remain, expected 3 (K, k, P)"
+			% views.size())
+		return
+	_pass("ep-victim-removed (visual d5/e5 clear · 3 views remain)")
+	await _shot("after_enpassant")
 	_finish(0)
 
 # ── Scenario: promote ──────────────────────────────────────────────────────

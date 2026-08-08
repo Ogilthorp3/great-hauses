@@ -13,6 +13,10 @@ extends Node3D
 ##   --e2e-fen=<fen>                 start from a custom position
 ##   --smoke                         windowed: wait 3 s, screenshot, quit
 ##   --dump-tree                     headless-safe: print scene tree, quit
+##   --debug-coords                  world-space file/rank/royal labels showing
+##                                   the ENGINE'S OWN square beliefs (the
+##                                   orientation tiebreaker — see e2e
+##                                   'orientation' scenario)
 
 const PieceScene: PackedScene = preload("res://scenes/piece_view.tscn")
 const MAIN_SCENE := "res://scenes/main.tscn"
@@ -104,6 +108,8 @@ func _ready() -> void:
 	_update_turn_label()
 	board.square_clicked.connect(_on_square_clicked)
 	var args := OS.get_cmdline_user_args()
+	if args.has("--debug-coords"):
+		_build_debug_coords()
 	if args.has("--smoke"):
 		_smoke()
 	elif args.has("--dump-tree"):
@@ -752,6 +758,57 @@ func _update_turn_label(ai_thinking := false) -> void:
 
 
 # -- e2e hooks -------------------------------------------------------------
+
+
+## --debug-coords: the orientation tiebreaker. Renders the ENGINE'S OWN belief
+## of every file, rank, and royal square as world-space Label3Ds — every
+## position below derives from square_index_from_name -> sq_of ->
+## square_to_world, the exact chain gameplay uses, and NOTHING derives from
+## the camera. If the mapping is mirrored, the labels render mirrored: the
+## overlay makes the engine's claim visible so a human (or a screenshot
+## reader) can diff it against chess truth in absolute terms.
+func _build_debug_coords() -> void:
+	var root := Node3D.new()
+	root.name = "DebugCoords"
+	add_child(root)
+	# File letters a..h along the rank-1 (White home) edge, each at the world
+	# X the engine believes that file occupies.
+	for f in 8:
+		var letter := char("a".unicode_at(0) + f)
+		var pos := board.square_to_world(
+			sq_of(ChessState.square_index_from_name(letter + "1")))
+		var out_z := pos.z + (1.0 if pos.z > 0.0 else -1.0)
+		_debug_label(root, letter, Vector3(pos.x, 0.45, out_z),
+			Color(1.0, 0.85, 0.25))
+	# Rank numbers 1..8 along the a-file edge, each at the world Z the engine
+	# believes that rank occupies.
+	for r in 8:
+		var pos := board.square_to_world(
+			sq_of(ChessState.square_index_from_name("a%d" % (r + 1))))
+		var out_x := pos.x + (1.0 if pos.x > 0.0 else -1.0)
+		_debug_label(root, str(r + 1), Vector3(out_x, 0.45, pos.z),
+			Color(0.35, 0.9, 1.0))
+	# Floating type labels over the 4 royal squares, as the engine believes
+	# them. Under a correct mapping "Qd1" floats over the 4th-from-left near
+	# square and the model beneath it is the uncrowned queen.
+	for royal in [["Qd1", "d1"], ["Ke1", "e1"], ["Qd8", "d8"], ["Ke8", "e8"]]:
+		var pos := board.square_to_world(
+			sq_of(ChessState.square_index_from_name(str(royal[1]))))
+		_debug_label(root, str(royal[0]), Vector3(pos.x, 2.4, pos.z),
+			Color(1.0, 0.45, 0.9))
+
+
+func _debug_label(parent: Node3D, text: String, pos: Vector3, color: Color) -> void:
+	var l := Label3D.new()
+	l.text = text
+	l.position = pos
+	l.font_size = 150
+	l.modulate = color
+	l.outline_size = 30
+	l.outline_modulate = Color(0, 0, 0, 1)
+	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	l.no_depth_test = true
+	parent.add_child(l)
 
 
 func _smoke() -> void:

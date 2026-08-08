@@ -8,14 +8,22 @@
 #               time-restore, DS4 opponent (mock+live, 3 modes),
 #               UciEngine/stockfish client                      — Gate A
 #   boot        windowed: select flows to game, 32 pieces, banners+HUD dyed
-#   board-truth windowed: startpos board vs engine truth — a1 dark bottom-
-#               left, 64-tile stone parity, queen on her color, crowned
-#               king on e1/e8                                    — Gate B
-#   board-moves windowed: crowned piece surfaces exactly the engine KING
-#               moves (adjacent+castles), Ranger the queen rays  — Gate B
+#   orientation windowed: --debug-coords labeled overlay from the default
+#               player camera, saved as labeled.png — the permanent
+#               human-auditable orientation artifact           — Gate B
+#   board-truth windowed: startpos board vs HUMAN truth, convention-
+#               independent — visual squares by screen geometry, colors
+#               sampled from rendered pixels (a1 dark, queen on light),
+#               royals by rendered position, White seated near; engine
+#               tile-node parity kept as a crosscheck            — Gate B
+#   board-moves windowed: clicks visual d1/e1 BY SCREEN POSITION; highlights
+#               must equal the hand-derived queen/king movesets  — Gate B
 #   move        windowed: click e2->e4, AI replies within 30 s  — Gate B
 #   duel        windowed: scripted capture duel via clicks      — Gate B
-#   castle      windowed: O-O by clicks, king+rook views land   — Gate B
+#   castle      windowed: O-O by clicks; king STANDS on visual g1,
+#               rook on visual f1                                — Gate B
+#   enpassant   windowed: exd6 e.p. by screen clicks; pawn lands visual d6,
+#               captured pawn vanishes from visual d5            — Gate B
 #   promote     windowed: promotion by clicks, queen view spawns — Gate B
 #   slowmo      windowed: duel director activation, time dip, skip-on-click
 #   tournament  windowed: 3 scripted mates to the throne, bracket + banner
@@ -55,6 +63,10 @@ SUITE_START=$(date +%s)
 DUEL_FEN="rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2"
 # Castling-ready: White can O-O immediately (the h2 pawn keeps material legal).
 CASTLE_FEN="4k3/8/8/8/8/8/7P/4K2R w K - 0 1"
+# En-passant-ready: Black just double-stepped d7d5 past the e5 pawn; exd6
+# e.p. is the only capture, and Black keeps ONLY the king so nothing can
+# recapture — the visual end-state (pawn d6, d5+e5 empty) is unambiguous.
+EP_FEN="4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 2"
 # Promotion-ready: a7 pawn promotes on the next move.
 PROMOTE_FEN="7k/P7/8/8/8/8/8/K7 w - - 0 1"
 # Tournament rounds: Ra8# is mate-in-1 (Kg6 seals the king, rook takes the
@@ -192,9 +204,9 @@ run_scenario() {  # <name> [extra user args...]
 # ── Main ───────────────────────────────────────────────────────────────────
 if [ ! -x "$GODOT" ]; then note "Godot binary missing: $GODOT"; exit 2; fi
 STEPS=("$@")
-[ ${#STEPS[@]} -eq 0 ] && STEPS=(preflight tests boot board-truth board-moves \
-  move duel castle promote slowmo tournament oracle-mock oracle-modes \
-  fullgame showcase)
+[ ${#STEPS[@]} -eq 0 ] && STEPS=(preflight tests boot orientation board-truth \
+  board-moves move duel castle enpassant promote slowmo tournament \
+  oracle-mock oracle-modes fullgame showcase)
 
 SUITE_RC=0
 for step in "${STEPS[@]}"; do
@@ -208,11 +220,13 @@ for step in "${STEPS[@]}"; do
       run_suite uci-suite res://tests/test_uci_engine.gd || SUITE_RC=1
       ;;
     boot)      run_scenario boot || SUITE_RC=1 ;;
+    orientation) run_scenario orientation "--debug-coords" || SUITE_RC=1 ;;
     board-truth) run_scenario board-truth || SUITE_RC=1 ;;
     board-moves) run_scenario board-moves "--e2e-fen=$BOARD_FEN" || SUITE_RC=1 ;;
     move)      run_scenario move || SUITE_RC=1 ;;
     duel)      run_scenario duel "--e2e-fen=$DUEL_FEN" || SUITE_RC=1 ;;
     castle)    run_scenario castle "--e2e-fen=$CASTLE_FEN" || SUITE_RC=1 ;;
+    enpassant) run_scenario enpassant "--e2e-fen=$EP_FEN" || SUITE_RC=1 ;;
     promote)   run_scenario promote "--e2e-fen=$PROMOTE_FEN" || SUITE_RC=1 ;;
     slowmo)    run_scenario slowmo "--e2e-fen=$DUEL_FEN" || SUITE_RC=1 ;;
     tournament) SCENARIO_TIMEOUT=170 run_scenario tournament \
@@ -227,7 +241,7 @@ for step in "${STEPS[@]}"; do
                  # 45 s soak + tableau is ~56 s alone but needs headroom at
                  # the tail of a full sequential run (watchdogged at 90 s
                  # under end-of-suite load, 2026-08-08)
-    *) note "unknown step '$step' (use preflight|tests|boot|board-truth|board-moves|move|duel|castle|promote|slowmo|tournament|oracle-mock|oracle-modes|fullgame|showcase)"; SUITE_RC=1 ;;
+    *) note "unknown step '$step' (use preflight|tests|boot|orientation|board-truth|board-moves|move|duel|castle|enpassant|promote|slowmo|tournament|oracle-mock|oracle-modes|fullgame|showcase)"; SUITE_RC=1 ;;
   esac
 done
 
