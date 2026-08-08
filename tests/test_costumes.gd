@@ -214,22 +214,66 @@ func _test_glyph_orientation() -> void:
 	ember.free()
 
 
-## set_selected brightens the ring's emissive glyph, deselect calms it.
+## Hover-only glyph rings (ISSUES.md #2): the ring is HIDDEN at rest, fades
+## in on set_hovered, stays lit while selected (selection also brightens the
+## glyph to beacon energy), and fades back out when hover + selection end.
 func _test_selection_feedback() -> void:
 	var pv := _spawn(T_KNIGHT, FROST, "winterfang")
 	var rest: float = assets.GLYPH_ENERGY_REST
 	var mat: StandardMaterial3D = pv._glyph_mat
+	var ring: Node3D = pv.get_node("GlyphRing")
+	# Hidden at rest — the ring node exists but renders nothing.
+	check("hover: ring hidden at rest", true,
+			not bool(pv.glyph_ring_shown()) and not ring.visible)
 	check("selection: rest energy", true,
 			absf(mat.emission_energy_multiplier - rest) < 0.01)
+	# Hover fades the ring in (~0.15 s).
+	pv.set_hovered(true)
+	await create_timer(0.4).timeout
+	check("hover: ring shown on hover", true,
+			bool(pv.glyph_ring_shown()) and ring.visible)
+	check("hover: ring meshes fully faded in", true, _ring_max_transparency(pv) < 0.05)
+	check("hover: hover alone keeps rest energy", true,
+			absf(mat.emission_energy_multiplier - rest) < 0.01)
+	# Leaving the square fades it back out and stops rendering it.
+	pv.set_hovered(false)
+	await create_timer(0.4).timeout
+	check("hover: ring hidden after leave", true,
+			not bool(pv.glyph_ring_shown()) and not ring.visible)
+	# Selection keeps the ring lit with no hover at all, at beacon energy.
 	pv.set_selected(true)
 	await create_timer(0.4).timeout
+	check("selection: ring lit while selected", true,
+			bool(pv.glyph_ring_shown()) and ring.visible)
 	check("selection: brightened", true,
 			mat.emission_energy_multiplier > rest + 0.5)
 	pv.set_selected(false)
 	await create_timer(0.4).timeout
 	check("selection: calmed again", true,
 			absf(mat.emission_energy_multiplier - rest) < 0.05)
+	check("selection: ring hidden after deselect", true,
+			not bool(pv.glyph_ring_shown()) and not ring.visible)
+	# Layering: deselecting under a live hover keeps the ring shown (the
+	# hover owns it); only leaving the square finally hides it.
+	pv.set_hovered(true)
+	pv.set_selected(true)
+	pv.set_selected(false)
+	await create_timer(0.4).timeout
+	check("layering: hover holds the ring after deselect", true,
+			bool(pv.glyph_ring_shown()) and ring.visible)
+	pv.set_hovered(false)
+	await create_timer(0.4).timeout
+	check("layering: leaving the square hides the ring", true,
+			not bool(pv.glyph_ring_shown()) and not ring.visible)
 	pv.free()
+
+
+func _ring_max_transparency(pv: Node) -> float:
+	var worst := 0.0
+	for mi: MeshInstance3D in (pv.get_node("GlyphRing") as Node3D) \
+			.find_children("*", "MeshInstance3D", true, false):
+		worst = maxf(worst, mi.transparency)
+	return worst
 
 
 ## The banner-rook crumble: die() must still work, the banner tears free

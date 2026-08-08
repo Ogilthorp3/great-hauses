@@ -63,6 +63,16 @@
 				"I have seen frozen things move with more purpose.",
 				"Hush. Do not startle it. It is helping us."
 			],
+			"player_undo": [
+				"Take it back, then. The snow remembers where you stepped.",
+				"The pack saw. Unmaking the track does not unmake the scent.",
+				"Retreat twice and winter will do your moving for you.",
+				"A move unmade is meat left in the trap.",
+				"Turn back the board. The cold turns back for no one.",
+				"So the wolf blinked. Interesting.",
+				"Unstep the snow all you like. It is still winter.",
+				"Second thoughts freeze faster than first ones."
+			],
 			"endgame_win": [
 				"The snow settles. Only wolf tracks leave this field.",
 				"Winter came, as promised.",
@@ -144,6 +154,16 @@
 				"Charity is a virtue. Ruinous, but a virtue.",
 				"That blunder appraises higher than your crown.",
 				"Even my counting-men gasped."
+			],
+			"player_undo": [
+				"A take-back? That loan carries interest, little house.",
+				"The ledger does not erase. It only adds a fee.",
+				"Reclaim the move; the debt of it stays on your page.",
+				"Even your courage is borrowed, and now returned.",
+				"We charge double for moves bought back.",
+				"The clock is a creditor too. You just missed a payment.",
+				"Unspend your move, then. Bankruptcy is a habit.",
+				"Every hesitation is collateral. I collect."
 			],
 			"endgame_win": [
 				"The account is closed. The lion is content.",
@@ -227,6 +247,16 @@
 				"Thunder laughed. I heard it.",
 				"The weathervane plays better, and it only spins."
 			],
+			"player_undo": [
+				"Lightning does not strike backward. What are you doing?",
+				"Call back your move, not the thunder that follows it.",
+				"The storm noted your hesitation. So did I.",
+				"Antlers lower for a charge, never for a retreat.",
+				"You cannot unring the sky.",
+				"Weather turns; wind does not apologize. Learn from it.",
+				"A backward step in a gale is still a fall.",
+				"Take it back, then. The storm keeps its own count."
+			],
 			"endgame_win": [
 				"The storm passes. Nothing of yours remains standing.",
 				"Stormrest writes your name in the flood line.",
@@ -308,6 +338,16 @@
 				"The wyrm need not hunt what crawls onto the spit.",
 				"From error, dominion. Mine, to be clear.",
 				"Generations of my line waited for a gift like that."
+			],
+			"player_undo": [
+				"Ash does not return to the branch. Yet you try.",
+				"My line has never unburned a field. We would not know how.",
+				"Take it back, hatchling. The fire saw your first heart.",
+				"A retracted move — how young your blood is.",
+				"The ember you fear was lit generations ago.",
+				"Unmake the move; the ash of it remains on the board.",
+				"Dragons do not reconsider. That is what wings are for.",
+				"Your ancestors flinched too. We remember the flavor."
 			],
 			"endgame_win": [
 				"From ash, dominion. You were the ash.",
@@ -391,6 +431,16 @@
 				"Even the gulls jeered.",
 				"Swim toward the maw, then. It saves us the reaching."
 			],
+			"player_undo": [
+				"The tide does not take moves back. That is why it wins.",
+				"Unrow all you like. The current keeps the distance.",
+				"You cannot unspill the sea, little admiral.",
+				"A wave withdrew. The drowning stands appointed.",
+				"The deep counts every oar you feather backward.",
+				"Take it back. The salt already tasted you.",
+				"Ebb now, flood later — you delay, we drown.",
+				"Wrecks are built of second thoughts."
+			],
 			"endgame_win": [
 				"The tide went out. You went with it.",
 				"Another kingdom sleeps in my trench.",
@@ -472,6 +522,16 @@
 				"The roses applauded. Quietly. With thorns.",
 				"Do that again; the compost is nearly full.",
 				"How courteous, laying yourself upon the trellis."
+			],
+			"player_undo": [
+				"How gracious — a mistake, curtsied back into its bud.",
+				"Do take your time. The garden grows over the indecisive.",
+				"A pruned move! And yet the thorn remains in your palm.",
+				"We replant our regrets too, dear. They flower as losses.",
+				"Such delicate fingers, forever putting pieces back.",
+				"The rose forgives the take-back. The vine does not.",
+				"Practice makes permanent, darling. Do try a real move.",
+				"One more curtsy backward and you shall exit the garden."
 			],
 			"endgame_win": [
 				"The garden takes the field. It always does, given time.",
@@ -555,6 +615,16 @@
 				"A blaze of glory requires glory.",
 				"The dawn applauds. Mockingly."
 			],
+			"player_undo": [
+				"The sun does not rise twice for your convenience.",
+				"Unmove all you wish. Noon still comes.",
+				"You cannot pull back a shadow at dawn — yet you try.",
+				"Radiance never retraces. That is why it is radiant.",
+				"A take-back, in front of the sun itself. Bold shame.",
+				"Even eclipses commit. You should study them.",
+				"Daylight watched your first choice. It laughs at the second.",
+				"Wind back the board; the light has already judged."
+			],
 			"endgame_win": [
 				"The sun sets on you alone. I keep the sky.",
 				"Sunspire shines. The board is scorched clean.",
@@ -637,6 +707,16 @@
 				"A wet hen glides better.",
 				"You fell without even the dignity of being pushed."
 			],
+			"player_undo": [
+				"A dive abandoned mid-air. The wind logs it as a fall.",
+				"Honor flies forward. What is this backward flapping?",
+				"Take the move back cleanly, at least. Form matters.",
+				"The falcon strikes once, true. It never asks the sky again.",
+				"From up here, a take-back looks like a stumble.",
+				"The high wind heard your nerve fail. It carries such news.",
+				"Retract and refly — the quarry is still faster than doubt.",
+				"A clean miss beats a smudged do-over. Noted on your honor."
+			],
 			"endgame_win": [
 				"The sky keeps its own. The field keeps you.",
 				"Checkmate, struck clean from the high wind.",
@@ -718,6 +798,16 @@
 				"You leapt into the creel of your own accord.",
 				"The current pauses, purely out of embarrassment.",
 				"Upstream, downstream — you managed to drown midstream."
+			],
+			"player_undo": [
+				"The river does not flow uphill, but do keep trying.",
+				"You cannot step out of the same mistake twice. Yet here we are.",
+				"Take it back; the current carried the truth downstream already.",
+				"Slow water is patient. It can watch you dither for years.",
+				"A stone unthrown still ripples in your mind, doesn't it?",
+				"We ford rivers. You wade backward through your own move.",
+				"The brook counts your hesitations like pebbles. Softly. Always.",
+				"Upstream is for spawning, not for armies."
 			],
 			"endgame_win": [
 				"The river binds us all. Today it bound a king.",

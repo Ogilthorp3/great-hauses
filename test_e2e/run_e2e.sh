@@ -32,6 +32,11 @@
 #   oracle-mock windowed: DS4-Oracle (Pure) vs in-driver canned HTTP mock
 #   oracle-modes windowed: Counseled Oracle — mock proposes a blunder, real
 #               stockfish counsel rejects it, revised move plays
+#   undo        windowed: take-back insurance vs the mock Oracle in
+#               tournament mode — full-round revert (FEN + view census
+#               byte-identical, captured pawn resurrects), mid-think undo
+#               discards the mock's delayed late reply without desync,
+#               3-undo tournament limit disables the button      — Gate B
 #   music       windowed: menu/game playlists, M mute on the Music bus,
 #               duel duck −8 dB + stinger, unduck on settle
 #   banter      windowed: rival taunts in the HUD — accent color, first-blood
@@ -223,7 +228,7 @@ if [ ! -x "$GODOT" ]; then note "Godot binary missing: $GODOT"; exit 2; fi
 STEPS=("$@")
 [ ${#STEPS[@]} -eq 0 ] && STEPS=(preflight tests boot orientation board-truth \
   board-moves move duel castle enpassant promote slowmo music banter \
-  dragon-live tournament oracle-mock oracle-modes fullgame showcase)
+  dragon-live tournament oracle-mock oracle-modes undo fullgame showcase)
 
 SUITE_RC=0
 for step in "${STEPS[@]}"; do
@@ -259,6 +264,9 @@ for step in "${STEPS[@]}"; do
     oracle-mock) run_scenario oracle-mock "--e2e-timeout=80" || SUITE_RC=1 ;;
     oracle-modes) run_scenario oracle-modes "--e2e-fen=$COUNSEL_FEN" \
                    "--e2e-timeout=90" || SUITE_RC=1 ;;
+    undo)      SCENARIO_TIMEOUT=170 run_scenario undo "--e2e-fen=$DUEL_FEN" \
+                 "--e2e-timeout=150" || SUITE_RC=1 ;;
+                 # 4 scripted duel rounds + a 4 s held oracle reply
     fullgame)  SCENARIO_TIMEOUT=230 run_scenario fullgame \
                  "--e2e-fen=$FULLGAME_FEN" "--e2e-timeout=210" || SUITE_RC=1 ;;
     showcase)  SCENARIO_TIMEOUT=170 run_scenario showcase "--e2e-fen=$DUEL_FEN" \
@@ -266,7 +274,7 @@ for step in "${STEPS[@]}"; do
                  # 45 s soak + tableau is ~56 s alone but needs headroom at
                  # the tail of a full sequential run (watchdogged at 90 s
                  # under end-of-suite load, 2026-08-08)
-    *) note "unknown step '$step' (use preflight|tests|boot|orientation|board-truth|board-moves|move|duel|castle|enpassant|promote|slowmo|music|banter|dragon-live|tournament|oracle-mock|oracle-modes|fullgame|showcase)"; SUITE_RC=1 ;;
+    *) note "unknown step '$step' (use preflight|tests|boot|orientation|board-truth|board-moves|move|duel|castle|enpassant|promote|slowmo|music|banter|dragon-live|tournament|oracle-mock|oracle-modes|undo|fullgame|showcase)"; SUITE_RC=1 ;;
   esac
 done
 

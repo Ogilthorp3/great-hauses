@@ -14,10 +14,18 @@ extends Node3D
 ## _build_board's tile parity — the 2026-08-08 "queen not on her color" scar).
 
 signal square_clicked(sq: Vector2i)
+## The square under the mouse changed. `sq` is a Vector2i, or null when the
+## cursor left the board. Fed by throttled mouse-motion picking (same
+## physics-less camera-ray path as clicks); game.gd drives the hover-only
+## glyph rings from it.
+signal square_hovered(sq)
 
 const BOARD_SIZE := 8
 const TILE_SIZE := 1.0
 const TILE_HEIGHT := 0.22
+## Re-pick on mouse motion at most this often — hover is cosmetic, one pick
+## per frame-ish is plenty.
+const HOVER_THROTTLE_MS := 30
 
 # Torch-lit great hall: desaturated, moody stone.
 const DARK_STONE := Color(0.13, 0.12, 0.115)
@@ -29,6 +37,8 @@ const MARKER_COLOR := Color(0.45, 0.62, 0.66)  # cold steel
 var _select_quad: MeshInstance3D
 var _markers_root: Node3D
 var _marker_pool: Array[MeshInstance3D] = []
+var _hover_sq: Variant = null       # Vector2i or null — last emitted hover
+var _last_hover_pick_ms := 0
 
 
 func _ready() -> void:
@@ -82,6 +92,15 @@ func _unhandled_input(event: InputEvent) -> void:
 		var sq: Variant = pick_square(event.position)
 		if sq != null:
 			square_clicked.emit(sq)
+	elif event is InputEventMouseMotion:
+		var now := Time.get_ticks_msec()
+		if now - _last_hover_pick_ms < HOVER_THROTTLE_MS:
+			return
+		_last_hover_pick_ms = now
+		var hov: Variant = pick_square(event.position)
+		if hov != _hover_sq:
+			_hover_sq = hov
+			square_hovered.emit(hov)
 
 
 # -- highlights ------------------------------------------------------------

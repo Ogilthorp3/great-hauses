@@ -131,7 +131,7 @@ func _test_pool_completeness() -> void:
 	check("pool: all lines <=90 chars substituted", 0, long_lines)
 	check("pool: no duplicate lines within a house", 0, dupes)
 	check("pool: {piece} is the only token", 0, bad_tokens)
-	check("pool: total >= 250 lines", true, total >= 250)
+	check("pool: total >= 320 lines", true, total >= 320)
 	print("pool: %d canned lines across %d houses x %d beats" % [total, ids.size(), BE.BEATS.size()])
 
 
@@ -235,9 +235,15 @@ func _test_rate_limiter() -> void:
 	check("rate: ctx fullmove override respected", true,
 		e.on_beat(BE.BEAT_CHECK_GIVEN, {"fullmove": 99}))
 	check("rate: endgame beat exempt from gap", true, e.on_beat(BE.BEAT_ENDGAME_LOSE))
+	check("rate: undo beat exempt from gap", true, e.on_beat(BE.BEAT_PLAYER_UNDO))
 	check("rate: unknown beat refused", false, e.on_beat("intermission"))
-	check("rate: five taunts delivered", 5, got.size())
-	check("rate: taunt_count tracks", 5, e.taunt_count)
+	check("rate: six taunts delivered", 6, got.size())
+	check("rate: taunt_count tracks", 6, e.taunt_count)
+	# The take-back clock rewind: winding the ply clock back can never leave
+	# the last-taunt marker in the future (the limiter would deadlock).
+	e.rewind_ply_clock(2)   # back to fullmove 2 after taunting at 99
+	check("rate: rewound clock allows the next gap-kept beat", true,
+		e.on_beat(BE.BEAT_CHECK_GIVEN, {"fullmove": 4}))
 
 	var mute = BE.new()   # no house set -> every beat refused
 	mute.llm_enabled = false

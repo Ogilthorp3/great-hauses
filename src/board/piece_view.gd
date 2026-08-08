@@ -8,7 +8,9 @@ extends Node3D
 ##     strict height grading (PieceAssets.TYPE_HEIGHT) · signature gear
 ##     (pawn sword+round shield · knight sword+kite shield · bishop
 ##     staff+tome · queen tiara+bow+quiver · king crown+cape+sword) · an
-##     engraved type-glyph ring under every piece (brightens on set_selected).
+##     engraved type-glyph ring under every piece — HIDDEN at rest, fading
+##     in on mouse hover (set_hovered), staying lit while selected
+##     (set_selected also brightens the glyph to beacon energy). ISSUES.md #2.
 ##   HOUSE layer (flourish — never changes the type silhouette):
 ##     palette tints · helmet crests on knight/queen/king · sigil decals
 ##     on shields · the rook's banner + fluttering pennant · Tidegrip
@@ -16,7 +18,8 @@ extends Node3D
 ##
 ## Model-agnostic API (callers touch nothing else):
 ##   setup(type, side, house_id="") · move_to(world_pos, walk_time) ·
-##   play_capture(victim) · die() · spawn_flourish() · set_selected(on)
+##   play_capture(victim) · die() · spawn_flourish() · set_selected(on) ·
+##   set_hovered(on)
 ## house_id skins the piece with HouseRegistry tints; "" keeps the legacy
 ## FROST/EMBER consts (fully backward compatible).
 
@@ -38,6 +41,9 @@ const HOUSE_TINT_TOWER := {
 	House.EMBER: Color(0.75, 0.33, 0.2),
 }
 const TINT_SATURATION := 0.25
+
+## Glyph-ring hover fade (ISSUES.md #2): hidden at rest, ~0.15 s in/out.
+const RING_FADE_TIME := 0.15
 
 const ANIM_IDLE := "Idle_A"
 const ANIM_WALK := "Walking_A"
@@ -65,6 +71,11 @@ var _home_yaw := 0.0
 var _glyph_ring: Node3D
 var _glyph_mat: StandardMaterial3D  # per-piece duplicate; brightened on select
 var _glyph_tween: Tween
+var _ring_meshes: Array[MeshInstance3D] = []  # faded via GeometryInstance3D.transparency
+var _ring_fade_tween: Tween
+var _ring_shown := false    # target state (true while fading in)
+var _hovered := false
+var _is_selected := false
 
 
 func setup(new_type: Type, new_side: House, new_house_id: String = "") -> void:
@@ -76,6 +87,10 @@ func setup(new_type: Type, new_side: House, new_house_id: String = "") -> void:
 	_anim = null
 	_glyph_ring = null
 	_glyph_mat = null
+	_ring_meshes = []
+	_ring_shown = false
+	_hovered = false
+	_is_selected = false
 	if piece_type == Type.ROOK:
 		_build_tower()
 	else:
@@ -94,8 +109,11 @@ func setup(new_type: Type, new_side: House, new_house_id: String = "") -> void:
 			_glyph_ring.translate_object_local(Vector3(0.0, 0.0, -0.14))
 
 
-## Selection feedback: the type-glyph ring warms from engraving to beacon.
+## Selection feedback: the ring stays lit for the whole selection and the
+## engraved glyph warms from engraving to beacon.
 func set_selected(selected: bool) -> void:
+	_is_selected = selected
+	_update_ring_visibility()
 	if _glyph_mat == null:
 		return
 	if _glyph_tween != null:
@@ -105,6 +123,46 @@ func set_selected(selected: bool) -> void:
 	_glyph_tween = create_tween()
 	_glyph_tween.tween_property(_glyph_mat, "emission_energy_multiplier",
 			target, 0.15).set_trans(Tween.TRANS_SINE)
+
+
+## Hover feedback (ISSUES.md #2): the type-glyph ring is hidden at rest and
+## fades in while the mouse rests on this piece's square — BOTH armies
+## reveal (knowing the rival's piece types matters too). game.gd drives it
+## from BoardView.square_hovered.
+func set_hovered(hovered: bool) -> void:
+	if _hovered == hovered:
+		return
+	_hovered = hovered
+	_update_ring_visibility()
+
+
+## True while the glyph ring is shown (or fading in) — hover or selection.
+## Introspection for the costume suite + e2e hover assertions.
+func glyph_ring_shown() -> bool:
+	return _ring_shown
+
+
+func _update_ring_visibility() -> void:
+	_set_ring_shown(_hovered or _is_selected)
+
+
+func _set_ring_shown(shown: bool) -> void:
+	if _glyph_ring == null or _ring_shown == shown:
+		return
+	_ring_shown = shown
+	if _ring_fade_tween != null:
+		_ring_fade_tween.kill()
+	_glyph_ring.visible = true
+	_ring_fade_tween = create_tween().set_parallel(true)
+	for mi in _ring_meshes:
+		_ring_fade_tween.tween_property(mi, "transparency",
+				0.0 if shown else 1.0, RING_FADE_TIME) \
+			.set_trans(Tween.TRANS_SINE)
+	if not shown:
+		# Fully faded out -> stop rendering the ring at all.
+		_ring_fade_tween.chain().tween_callback(func() -> void:
+			if not _ring_shown and _glyph_ring != null:
+				_glyph_ring.visible = false)
 
 
 # -- movement --------------------------------------------------------------
@@ -436,6 +494,7 @@ func _attach_cape() -> void:
 
 ## TYPE readability: the engraved glyph ring under the piece. Child of the
 ## PieceView root (not the model) so height grading never rescales it.
+## Built HIDDEN (transparency 1, invisible) — hover/selection reveal it.
 func _build_glyph_ring() -> void:
 	_glyph_ring = PieceAssets.glyph_ring_scene(piece_type).instantiate()
 	_glyph_ring.name = "GlyphRing"
@@ -444,6 +503,8 @@ func _build_glyph_ring() -> void:
 	# Per-piece duplicate of the emissive glyph material so selection can
 	# brighten THIS ring only.
 	for mi: MeshInstance3D in _glyph_ring.find_children("*", "MeshInstance3D", true, false):
+		_ring_meshes.append(mi)
+		mi.transparency = 1.0   # hidden at rest (ISSUES.md #2)
 		for s in mi.mesh.get_surface_count():
 			var src := mi.get_active_material(s)
 			if src is StandardMaterial3D \
@@ -451,6 +512,7 @@ func _build_glyph_ring() -> void:
 				_glyph_mat = (src as StandardMaterial3D).duplicate()
 				_glyph_mat.emission_energy_multiplier = PieceAssets.GLYPH_ENERGY_REST
 				mi.set_surface_override_material(s, _glyph_mat)
+	_glyph_ring.visible = false
 
 
 func _build_tower() -> void:

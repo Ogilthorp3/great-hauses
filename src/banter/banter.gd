@@ -45,6 +45,7 @@ signal banter_skipped(beat: String, why: String)
 #   check_given      the rival put the PLAYER's king in check      -> menace
 #   check_received   the player put the RIVAL's king in check      -> rattled defiance
 #   player_blunder   the player blundered (caller supplies the eval swing)
+#   player_undo      the player took their move back -> mock the take-back
 #   endgame_win      the RIVAL won the game
 #   endgame_lose     the RIVAL lost the game
 
@@ -54,19 +55,22 @@ const BEAT_RIVAL_CAPTURED := "rival_captured"
 const BEAT_CHECK_GIVEN := "check_given"
 const BEAT_CHECK_RECEIVED := "check_received"
 const BEAT_PLAYER_BLUNDER := "player_blunder"
+const BEAT_PLAYER_UNDO := "player_undo"
 const BEAT_ENDGAME_WIN := "endgame_win"
 const BEAT_ENDGAME_LOSE := "endgame_lose"
 
 const BEATS: Array[String] = [
 	BEAT_GAME_START, BEAT_PLAYER_CAPTURED, BEAT_RIVAL_CAPTURED,
 	BEAT_CHECK_GIVEN, BEAT_CHECK_RECEIVED, BEAT_PLAYER_BLUNDER,
-	BEAT_ENDGAME_WIN, BEAT_ENDGAME_LOSE,
+	BEAT_PLAYER_UNDO, BEAT_ENDGAME_WIN, BEAT_ENDGAME_LOSE,
 ]
 
 ## Beats exempt from the full-move gap: blunders are the best taunts and are
-## always allowed; the bookends (start/end) sit outside normal move flow.
+## always allowed; the bookends (start/end) sit outside normal move flow; an
+## undo happens outside the move flow too — the take-back IS the moment.
 const GAP_EXEMPT: Array[String] = [
-	BEAT_GAME_START, BEAT_PLAYER_BLUNDER, BEAT_ENDGAME_WIN, BEAT_ENDGAME_LOSE,
+	BEAT_GAME_START, BEAT_PLAYER_BLUNDER, BEAT_PLAYER_UNDO,
+	BEAT_ENDGAME_WIN, BEAT_ENDGAME_LOSE,
 ]
 
 # -- LLM configuration (endpoint resolution mirrors src/ai/ds4_opponent.gd) --
@@ -155,6 +159,16 @@ func note_ply() -> void:
 	_ply += 1
 	@warning_ignore("integer_division")
 	_fullmove = _ply / 2 + 1
+
+
+## Undo support: the take-back removed plies note_ply() already counted.
+## Winds the clock back to `ply` and clamps the last-taunt marker so the
+## rate limiter can never sit in the future after a revert.
+func rewind_ply_clock(ply: int) -> void:
+	_ply = maxi(ply, 0)
+	@warning_ignore("integer_division")
+	_fullmove = _ply / 2 + 1
+	_last_taunt_fullmove = mini(_last_taunt_fullmove, _fullmove)
 
 
 ## Fresh game: clears the dedupe set, counters, and the rate-limit clock.
@@ -332,6 +346,9 @@ static func build_beat_prompt(beat: String, ctx: Dictionary = {}) -> String:
 			var about := (" by about %.1f pawns" % swing) if swing > 0.0 else ""
 			return ("The enemy just made a terrible blunder, swinging the game%s " % about
 				+ "in your favor. Relish it — blunder taunts are your finest work.")
+		BEAT_PLAYER_UNDO:
+			return ("The enemy just took their move back, wishing it unmade. "
+				+ "Mock the take-back — no army marches backward with honor.")
 		BEAT_ENDGAME_WIN:
 			return "You have won the war. Deliver the victory line."
 		BEAT_ENDGAME_LOSE:

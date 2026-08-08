@@ -2,7 +2,9 @@ extends Node3D
 ## Great Houses — game root. The player's chosen Great House battles a rival
 ## house across a torch-lit hall: full rules via src/chess, capture duels in
 ## slow motion (DuelDirector), house-dyed armies and banners, SAN move list,
-## tournament bracket between matches, and an optional DS4-Oracle opponent.
+## tournament bracket between matches, an optional DS4-Oracle opponent,
+## undo/take-back (HUD button + Cmd/Ctrl+Z — 3 per game in tournaments,
+## unlimited in single matches), and hover-only type-glyph rings.
 ##
 ## Flow: main.tscn boots the Hall of Banners; Session carries the choices
 ## here. Unconfigured launches (probes, --smoke, direct game.tscn runs) fall
@@ -33,6 +35,8 @@ const PIECE_NAME := {
 
 const BLUNDER_CP := 150.0            # eval swing that counts as a player blunder
 const BLUNDER_DEPTH := 8             # shallow probe — a signal, not counsel
+
+const TOURNAMENT_UNDO_LIMIT := 3     # take-backs per tournament game (single: unlimited)
 
 const RESULT_TEXT := {
 	ChessState.RESULT.STALEMATE: "Stalemate — the war ends in a draw",
@@ -67,6 +71,17 @@ var busy := false                   # move/duel animation or AI turn in flight
 var game_over := false
 var death_log: Array[String] = []   # death anims played (e2e evidence)
 
+# -- undo / take-back state (see the "undo" section below) --
+var undo_count := 0                 # e2e evidence: take-backs executed
+var _turn_gen := 0                  # bumped on every undo; a stale AI reply is void
+var _ai_waiting := false            # inside choose_move await — the cancellable window
+var _undo_checkpoints: Array = []   # one per player move: {stack, san, banter_ply}
+var _undo_pending := false          # queued while a cinematic/animation owns the board
+var _undos_left := -1               # -1 = unlimited (single match); tournament = 3
+var _undo_btn: Button
+
+var _hovered_view: PieceView = null # glyph ring currently hover-revealed
+
 var _turn_moves: Array = []         # SAN-notated legal moves for side to move
 var _san_log: Array[String] = []
 
@@ -100,6 +115,8 @@ func _ready() -> void:
 		elif arg.begins_with("--e2e-fen="):
 			fen = arg.substr(10)
 	_resolve_identity()
+	if Session.configured and Session.mode == "tournament":
+		_undos_left = TOURNAMENT_UNDO_LIMIT
 	state = ChessState.new()
 	if not fen.is_empty() and not state.set_fen(fen):
 		push_error("invalid --e2e-fen '%s' — using the standard lineup" % fen)
@@ -131,6 +148,7 @@ func _ready() -> void:
 	_refresh_turn_moves()
 	_update_turn_label()
 	board.square_clicked.connect(_on_square_clicked)
+	board.square_hovered.connect(_on_square_hovered)
 	var args := OS.get_cmdline_user_args()
 	if args.has("--debug-coords"):
 		_build_debug_coords()
@@ -249,6 +267,7 @@ static func idx_of(sq: Vector2i) -> int:
 
 
 func _spawn_from_state() -> void:
+	_hovered_view = null   # the freed views take any hover reveal with them
 	for sq in views:
 		(views[sq] as PieceView).queue_free()
 	views.clear()
@@ -341,6 +360,25 @@ func _set_selected_glow(on: bool) -> void:
 		pv.set_selected(on)
 
 
+func _on_square_hovered(sq: Variant) -> void:
+	## Hover-only glyph rings (ISSUES.md #2): the type glyph fades in under
+	## the piece standing on the hovered square — BOTH armies reveal, knowing
+	## the rival's piece types matters too. Selection keeps its own ring lit
+	## via set_selected; leaving the square fades a non-selected ring out.
+	var pv: PieceView = null
+	if sq != null:
+		pv = views.get(sq)
+	if pv != null and not is_instance_valid(pv):
+		pv = null
+	if pv == _hovered_view:
+		return
+	if _hovered_view != null and is_instance_valid(_hovered_view):
+		_hovered_view.set_hovered(false)
+	_hovered_view = pv
+	if _hovered_view != null:
+		_hovered_view.set_hovered(true)
+
+
 func _move_for(from_idx: int, to_idx: int) -> Variant:
 	## The matching legal move; promotions auto-pick the queen (v1).
 	var found = null
@@ -357,21 +395,35 @@ func _move_for(from_idx: int, to_idx: int) -> Variant:
 
 func _play_turn(move) -> void:
 	## One full round: the player's ply, then (if the game goes on) the rival's.
+	## An undo mid-round bumps _turn_gen; every await below re-checks it and a
+	## stale continuation drops out without touching busy (the undo owns it).
 	busy = true
+	_push_undo_checkpoint()
+	var gen := _turn_gen
 	await _execute_ply(move)
+	if gen != _turn_gen:
+		return
 	if not game_over and state.turn:
 		await _ai_ply()
+		if gen != _turn_gen:
+			return
 	busy = false
 	_update_turn_label()
+	_update_undo_button()
 
 
 func _ai_ply() -> void:
 	_update_turn_label(true)
+	var gen := _turn_gen
 	var move = null
+	_ai_waiting = true   # the cancellable window: an undo here voids the reply
 	if oracle != null:
 		move = await oracle.choose_move(state, ai_difficulty)  # MAX thinking, difficulty ignored
 	else:
 		move = await ai.choose_move(state, ai_difficulty)  # WorkerThreadPool search
+	if gen != _turn_gen:
+		return   # undone while thinking — the late reply is for a dead position
+	_ai_waiting = false
 	if move == null:
 		_finish_game()
 		return
@@ -401,8 +453,13 @@ func _execute_ply(move) -> void:
 func _record_san(move) -> void:
 	var san: String = str(move.notation_san) if move.notation_san != null else move.to_uci()
 	_san_log.append(san)
+	_render_move_list()
+
+
+func _render_move_list() -> void:
 	var lines: Array[String] = []
 	for i in range(0, _san_log.size(), 2):
+		@warning_ignore("integer_division")
 		var row := "%d. %s" % [i / 2 + 1, _san_log[i]]
 		if i + 1 < _san_log.size():
 			row += "  %s" % _san_log[i + 1]
@@ -467,6 +524,91 @@ func _refresh_turn_moves() -> void:
 	_turn_moves = state.legal_moves(true)
 
 
+# -- undo / take-back (fat-finger insurance) --------------------------------
+# One checkpoint per player move (pushed before the ply applies). Undo pops
+# the newest checkpoint and rewinds the ENGINE with ChessState.undo() until
+# the move stack matches — that reverts both plies when the rival already
+# replied, or just the player's when the rival is still thinking (the late
+# reply is voided by _turn_gen). Views rebuild from state, the SAN list
+# truncates, banter/dragon ply clocks rewind, music is untouched. Requests
+# made under a cinematic queue until DuelDirector releases the board.
+# Limits: tournament 3/game (button shows remaining), single match unlimited.
+
+
+func _push_undo_checkpoint() -> void:
+	_undo_checkpoints.append({
+		"stack": state.move_stack.size(),
+		"san": _san_log.size(),
+		"banter_ply": banter._ply if banter != null else 0,
+	})
+	_update_undo_button()
+
+
+func _request_undo() -> void:
+	## HUD button + Cmd/Ctrl+Z land here.
+	if game_over or _undo_checkpoints.is_empty() or _undos_left == 0:
+		return
+	_undo_pending = true
+	_try_undo()
+
+
+func _try_undo() -> void:
+	## Executes a pending take-back at the first safe frame (_process polls).
+	if not _undo_pending:
+		return
+	if game_over:
+		_undo_pending = false   # the war ended while the request waited
+		return
+	if duel_director != null and duel_director.is_active():
+		return   # queued — executes when the cinematic releases the board
+	var cancel_thinking := busy and _ai_waiting
+	if busy and not cancel_thinking:
+		return   # mid move animation — wait for the board to settle
+	if not busy and state.turn:
+		return   # defensive: settled but rival to move — nothing safe to pop
+	_undo_pending = false
+	_perform_undo()
+
+
+func _perform_undo() -> void:
+	var cp: Dictionary = _undo_checkpoints.pop_back()
+	var undone := 0
+	while state.move_stack.size() > int(cp["stack"]):
+		state.undo()
+		undone += 1
+	_turn_gen += 1          # any in-flight rival reply is now void
+	_ai_waiting = false
+	busy = false
+	oracle_thinking = false
+	undo_count += 1
+	if _undos_left > 0:
+		_undos_left -= 1
+	selected = null
+	board.clear_highlights()
+	_san_log.resize(int(cp["san"]))
+	_render_move_list()
+	if banter != null:
+		banter.rewind_ply_clock(int(cp["banter_ply"]))
+		banter.on_beat(BanterEngine.BEAT_PLAYER_UNDO)   # the rival mocks the take-back
+	if spectator != null and is_instance_valid(spectator) \
+			and spectator.has_method("rewind_moves"):
+		spectator.rewind_moves(undone)   # ships with dragon_spectator.gd
+	_spawn_from_state()     # captured pieces resurrect
+	_refresh_turn_moves()
+	_update_turn_label()
+	_update_undo_button()
+
+
+func _update_undo_button() -> void:
+	if _undo_btn == null:
+		return
+	var label := "↶ undo"
+	if _undos_left >= 0:
+		label += "  ·  %d left" % _undos_left
+	_undo_btn.text = label
+	_undo_btn.disabled = game_over or _undo_checkpoints.is_empty() or _undos_left == 0
+
+
 # -- banter beats + the shared blunder probe --------------------------------
 
 
@@ -497,11 +639,12 @@ func _sample_blunder(fen_before: String, fen_after: String) -> void:
 	if _blunder_busy or (banter == null and spectator == null):
 		return
 	_blunder_busy = true
+	var gen := _turn_gen
 	var before := await _blunder_eval(fen_before)
 	var after_raw := await _blunder_eval(fen_after)
 	_blunder_busy = false
-	if is_nan(before) or is_nan(after_raw) or game_over:
-		return   # no engine / mated position (empty lines) / game already over
+	if gen != _turn_gen or is_nan(before) or is_nan(after_raw) or game_over:
+		return   # undone / no engine / mated position (empty lines) / game over
 	var swing := before + after_raw   # before − (−after_raw)
 	if swing < BLUNDER_CP:
 		return
@@ -557,6 +700,8 @@ func _ensure_blunder_engine() -> UciEngine:
 
 func _finish_game() -> void:
 	game_over = true
+	_undo_pending = false   # a take-back cannot outlive the war
+	_update_undo_button()
 	_clear_selection()
 	var result: int = state.get_result()
 	var player_won := result == ChessState.RESULT.CHECKMATE and state.turn
@@ -726,6 +871,9 @@ func _return_to_hall() -> void:
 func _unhandled_key_input(event: InputEvent) -> void:
 	if not (event is InputEventKey and event.pressed and not event.echo):
 		return
+	if event.keycode == KEY_Z and event.is_command_or_control_pressed():
+		_request_undo()   # queued through cinematics — see _try_undo
+		return
 	if duel_director != null and duel_director.is_active():
 		return  # the director owns input mid-cinematic (click/Esc = skip)
 	match event.keycode:
@@ -814,6 +962,8 @@ func _process(_delta: float) -> void:
 		var elapsed := (Time.get_ticks_msec() - _oracle_think_start_ms) / 1000.0
 		_turn_label.text = "%s  %ds" % [Ds4Opponent.THINKING_TEXT, int(elapsed)]
 		_turn_label.modulate.a = 0.7 + 0.3 * sin(Time.get_ticks_msec() * 0.001 * TAU * 1.4)
+	if _undo_pending:
+		_try_undo()   # a queued take-back fires at the first safe frame
 
 
 # -- HUD -------------------------------------------------------------------
@@ -900,6 +1050,24 @@ func _build_hud() -> void:
 	_oracle_flash.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	_oracle_flash.position.y = 96
 	hud.add_child(_oracle_flash)
+
+	# The take-back control: subtle, parked just above the move list it edits.
+	_undo_btn = Button.new()
+	_undo_btn.name = "UndoButton"
+	_undo_btn.flat = true
+	_undo_btn.focus_mode = Control.FOCUS_NONE
+	_undo_btn.add_theme_font_size_override("font_size", 13)
+	_undo_btn.add_theme_color_override("font_color", HUD_DIM)
+	_undo_btn.add_theme_color_override("font_hover_color", HUD_GOLD)
+	_undo_btn.add_theme_color_override("font_disabled_color", Color(0.38, 0.35, 0.3, 0.55))
+	_undo_btn.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	_undo_btn.offset_left = -150
+	_undo_btn.offset_top = 48
+	_undo_btn.offset_right = -16
+	_undo_btn.tooltip_text = "Take back your last move (Cmd/Ctrl+Z)"
+	_undo_btn.pressed.connect(_request_undo)
+	hud.add_child(_undo_btn)
+	_update_undo_button()
 
 	_move_list = RichTextLabel.new()
 	_move_list.name = "MoveList"

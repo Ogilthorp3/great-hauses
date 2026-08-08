@@ -15,7 +15,10 @@
 ##
 ## Scenarios:
 ##   boot        select flows into the game, 32 pieces standing, banners
-##               dyed to the chosen house, HUD carries the house names
+##               dyed to the chosen house, HUD carries the house names, and
+##               the hover-only glyph rings (ISSUES.md #2) through the real
+##               mouse path: hidden at rest, revealed under the cursor,
+##               held lit by selection, faded out on leave
 ##   orientation (launched with --debug-coords) the labeled-overlay
 ##               tiebreaker: saves labeled.png, the engine's own file/rank/
 ##               royal beliefs photographed from the default player camera —
@@ -69,6 +72,13 @@
 ##               notice_move wired, reactions locked under the duel cam, then
 ##               the scripted mate → ASHFALL (time dip, mid-fire frame,
 ##               time_scale restored, loser views purged, victory flow)
+##   undo        (needs DUEL_FEN) take-back insurance vs the mock Pure Oracle
+##               in TOURNAMENT mode: full-round revert restores FEN + view
+##               census byte-identical (captured pawn resurrects), a
+##               mid-think undo cancels the player ply and the mock's DELAYED
+##               late reply is discarded with no desync, then the 3-undo
+##               tournament limit disables the button and Cmd/Ctrl+Z goes
+##               inert
 ##   fullgame    complete scripted game (two-rook ladder mate) vs the engine;
 ##               asserts board/view sync every ply and time_scale hygiene
 ##   showcase    beauty run for Gate C: hall wide shot, select screen,
@@ -96,12 +106,14 @@ var _to_window: Transform2D = Transform2D.IDENTITY
 var _last_input_pos := Vector2(-1e9, -1e9)
 var _start_ms := 0
 
-# -- mock oracle server state (oracle-mock scenario) --
+# -- mock oracle server state (oracle-mock / oracle-modes / undo) --
 var _mock_server: TCPServer
 var _mock_port := 0
 var _mock_running := false
 var _mock_replies: Array = []    # queued chat contents; default "MOVE: e7e5"
 var _mock_requests: Array = []   # parsed JSON bodies of every chat call
+var _mock_delay_ms := 0          # undo scenario: hold each oracle reply this long
+var _mock_served := 0            # oracle chat replies fully written to the wire
 
 ## Observe every event that actually reaches the scene tree — proves
 ## synthesized events are delivered and learns the coordinate space
@@ -126,7 +138,7 @@ func _ready() -> void:
 			+ "/" + scenario
 	DirAccess.make_dir_recursive_absolute(artifacts_dir)
 	_start_ms = Time.get_ticks_msec()
-	if scenario == "oracle-mock" or scenario == "oracle-modes":
+	if scenario in ["oracle-mock", "oracle-modes", "undo"]:
 		# The env var must exist before main.gd/game.gd ever build an oracle;
 		# autoload _ready runs before the main scene loads, so this is early
 		# enough — and each e2e launch is its own process, nothing leaks.
@@ -188,6 +200,8 @@ func _run() -> void:
 			await _scenario_oracle_mock()
 		"oracle-modes":
 			await _scenario_oracle_modes()
+		"undo":
+			await _scenario_undo()
 		"music":
 			await _scenario_music()
 		"banter":
@@ -328,6 +342,51 @@ func _press_key(keycode: Key) -> void:
 	Input.parse_input_event(up)
 	await get_tree().process_frame
 	await get_tree().process_frame
+
+
+func _press_cmd_z() -> void:
+	## Cmd/Ctrl+Z through the real input pipeline — both modifier flags set so
+	## is_command_or_control_pressed() holds on every platform.
+	var down := InputEventKey.new()
+	down.keycode = KEY_Z
+	down.physical_keycode = KEY_Z
+	down.ctrl_pressed = true
+	down.meta_pressed = true
+	down.pressed = true
+	Input.parse_input_event(down)
+	await get_tree().process_frame
+	var up := InputEventKey.new()
+	up.keycode = KEY_Z
+	up.physical_keycode = KEY_Z
+	up.pressed = false
+	Input.parse_input_event(up)
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+
+func _move_mouse(canvas_pos: Vector2) -> void:
+	## Park the cursor at a canvas position (real motion event, no click) —
+	## the hover path under test IS this event stream.
+	var wpos := _to_window * canvas_pos
+	var mm := InputEventMouseMotion.new()
+	mm.position = wpos
+	mm.global_position = wpos
+	Input.parse_input_event(mm)
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+
+## Hover a board square until pred holds — motion is re-sent each attempt
+## (hover picking is throttled, and a lone event can race the throttle).
+func _hover_square_until(game: Node, sq: Vector2i, pred: Callable,
+		attempts := 4) -> bool:
+	var board: Node = game.get("board")
+	var cam := get_viewport().get_camera_3d()
+	for i in attempts:
+		await _move_mouse(cam.unproject_position(board.square_to_world(sq)))
+		if await _wait_until(pred, 1.0):
+			return true
+	return false
 
 # ── Game accessors ─────────────────────────────────────────────────────────
 func _game() -> Node:
@@ -675,9 +734,69 @@ func _scenario_boot() -> void:
 			% (title.text if title != null else "<no Title>"))
 		return
 	_pass("boot-hud-houses")
+	if not await _assert_hover_glyphs(game):
+		return
 	await _sleep(1.0)   # let idles and torchlight settle for the screenshot
 	await _shot("boot_lineup")
 	_finish(0)
+
+
+## Hover-only glyph rings (ISSUES.md #2), driven through the REAL input path:
+## every ring hidden at rest, hover reveals exactly the piece under the
+## cursor, selection holds its ring lit at beacon energy, and leaving the
+## square (with nothing selected) fades the ring back out.
+func _assert_hover_glyphs(game: Node) -> bool:
+	var views: Dictionary = game.get("views")
+	var lit_at_rest := 0
+	for sq in views:
+		if bool((views[sq] as Node).get("_ring_shown")):
+			lit_at_rest += 1
+	if lit_at_rest != 0:
+		await _fail("glyph-hidden-at-rest",
+			"%d glyph rings lit before any hover" % lit_at_rest)
+		return false
+	_pass("glyph-hidden-at-rest (0/%d rings lit)" % views.size())
+	var e2_sq: Vector2i = game.sq_of(ChessState.square_index_from_name("e2"))
+	var e4_sq: Vector2i = game.sq_of(ChessState.square_index_from_name("e4"))
+	var pv_e2: Node = views.get(e2_sq)
+	if pv_e2 == null:
+		await _fail("glyph-hover-target", "no piece view on e2 to hover")
+		return false
+	if not await _hover_square_until(game, e2_sq,
+			func(): return bool(pv_e2.get("_ring_shown"))):
+		await _fail("glyph-hover-reveal", "hovering e2 never revealed its glyph ring")
+		return false
+	_pass("glyph-hover-reveal (e2 ring fades in under the cursor)")
+	# Leaving for the empty e4 square fades the pawn's ring back out.
+	if not await _hover_square_until(game, e4_sq,
+			func(): return not bool(pv_e2.get("_ring_shown"))):
+		await _fail("glyph-hover-hide", "leaving e2 never hid its glyph ring")
+		return false
+	_pass("glyph-hover-hide (ring gone on leave)")
+	# Selection keeps the ring lit at beacon energy (the set_selected path).
+	if not await _select_square(game, e2_sq):
+		await _fail("glyph-select", "e2 never became the selected square")
+		return false
+	var rest_energy: float = PieceAssets.GLYPH_ENERGY_REST
+	if not await _wait_until(func():
+		return bool(pv_e2.get("_ring_shown")) \
+			and (pv_e2.get("_glyph_mat") as StandardMaterial3D) \
+			.emission_energy_multiplier > rest_energy + 0.5, 3.0):
+		await _fail("glyph-selected-lit", "selected e2 ring not lit at beacon energy")
+		return false
+	_pass("glyph-selected-lit (selection holds the ring)")
+	# Deselect via the second click; the cursor still rests on e2, so the
+	# hover layer keeps the ring shown — hovering away finally hides it.
+	await _click_square(game, e2_sq)
+	if not await _wait_until(func(): return game.get("selected") == null, 3.0):
+		await _fail("glyph-deselect", "second e2 click never cleared the selection")
+		return false
+	if not await _hover_square_until(game, e4_sq,
+			func(): return not bool(pv_e2.get("_ring_shown"))):
+		await _fail("glyph-deselect-hide", "ring stayed lit after deselect + leave")
+		return false
+	_pass("glyph-deselect-hide (rest state restored)")
+	return true
 
 # ── Scenario: orientation (labeled-overlay tiebreaker) ─────────────────────
 ## Launched WITH --debug-coords: the game renders the engine's own belief of
@@ -1602,6 +1721,216 @@ func _scenario_oracle_modes() -> void:
 	await _shot("after_counseled_move")
 	_finish(0)
 
+# ── Scenario: undo (take-back insurance vs the mock Oracle, tournament) ────
+## FEN contract (run_e2e.sh DUEL_FEN): White has exactly one capture (exd5).
+## Runs in TOURNAMENT mode (limit 3) against the mock Pure Oracle so both
+## the limit path and the mid-think cancellation are deterministic:
+##   round 1  exd5 duel + scripted Nf6 reply, button undo -> FEN + view
+##            census byte-identical to the pre-move snapshot (the captured
+##            pawn resurrects), SAN truncated, 2 left
+##   round 2  the mock HOLDS its reply 4 s; undo lands mid-think, reverts
+##            the player ply only, and the late reply is discarded with no
+##            desync, 1 left
+##   round 3  Cmd/Ctrl+Z spends the last undo -> 0 left, button disabled
+##   round 4  a fresh round, then button + Cmd/Ctrl+Z are both inert
+func _scenario_undo() -> void:
+	if not _mock_running:
+		await _fail("undo-mock-server", "in-driver mock oracle failed to listen")
+		return
+	_pass("undo-mock-server (port %d)" % _mock_port)
+	if not await _navigate_select(DEFAULT_HOUSE, "Pure Oracle", "Begin Tournament"):
+		return
+	var game := await _boot_game(0)
+	if game == null:
+		return
+	if game.get("oracle") == null:
+		await _fail("undo-oracle-node", "game did not create the Ds4Opponent node")
+		return
+	var state: Object = game.get("state")
+	if not await _wait_until(func():
+		return game.get("busy") == false and state.turn == false, 15.0):
+		await _fail("undo-player-turn", "never became the player's turn")
+		return
+	_pass("undo-player-turn")
+	var undo_btn: Button = game.find_child("UndoButton", true, false)
+	if undo_btn == null:
+		await _fail("undo-button-present", "no UndoButton in the HUD")
+		return
+	if not undo_btn.disabled or int(game.get("_undos_left")) != 3 \
+			or not undo_btn.text.contains("3"):
+		await _fail("undo-button-idle",
+			"before any move: disabled=%s left=%s text='%s' (want disabled, 3 left)"
+			% [str(undo_btn.disabled), str(game.get("_undos_left")), undo_btn.text])
+		return
+	_pass("undo-button-idle (disabled until a move exists · '%s')" % undo_btn.text)
+	var fen0 := str(state.get_fen())
+	var census0 := _view_census(game)
+
+	# ── round 1: full round, then the button reverts both plies ──
+	_mock_replies = ["The knight answers.\nMOVE: g8f6"]
+	if not await _play_capture_round(game, "undo-r1", true):
+		return
+	if str(state.get_fen()) == fen0 or (game.get("_san_log") as Array).size() != 2:
+		await _fail("undo-r1-advanced", "round did not land as expected (san=%d)"
+			% (game.get("_san_log") as Array).size())
+		return
+	await _shot("before_first_undo")
+	if not await _click_until(undo_btn,
+			func(): return str(state.get_fen()) == fen0, "undo-r1-button"):
+		await _fail("undo-r1-fen-restored", "FEN never returned to the pre-move snapshot")
+		return
+	_pass("undo-r1-fen-restored (both plies reverted)")
+	if _view_census(game) != census0:
+		await _fail("undo-r1-view-census",
+			"view census differs after the undo (was %s, now %s)"
+			% [census0, _view_census(game)])
+		return
+	if not await _assert_sync(game, "undo-r1-sync"):
+		return
+	if (game.get("_san_log") as Array).size() != 0:
+		await _fail("undo-r1-san-truncated", "SAN list not truncated")
+		return
+	if int(game.get("_undos_left")) != 2 or not undo_btn.text.contains("2"):
+		await _fail("undo-r1-remaining", "left=%s text='%s' (want 2)"
+			% [str(game.get("_undos_left")), undo_btn.text])
+		return
+	_pass("undo-r1-clean (census+sync+SAN · captured pawn resurrected · 2 left)")
+	await _shot("after_undo_full_round")
+
+	# ── round 2: mid-think undo; the DELAYED late reply must be discarded ──
+	_mock_delay_ms = 4000
+	_mock_replies = ["The knight answers again.\nMOVE: g8f6"]
+	var served_before := _mock_served
+	if not await _play_capture_round(game, "undo-r2", false):
+		return
+	if not await _wait_until(func():
+		return bool(game.get("oracle_thinking")) and bool(game.get("_ai_waiting")), 25.0):
+		await _fail("undo-r2-thinking", "the Oracle's thinking window never opened")
+		return
+	_pass("undo-r2-thinking (mock reply held %d ms)" % _mock_delay_ms)
+	if not await _click_until(undo_btn,
+			func(): return str(state.get_fen()) == fen0, "undo-r2-button"):
+		await _fail("undo-r2-fen-restored", "mid-think undo never restored the FEN")
+		return
+	if not await _wait_until(func():
+		return game.get("busy") == false and state.turn == false, 4.0):
+		await _fail("undo-r2-interactive", "board not interactive after the mid-think undo")
+		return
+	_pass("undo-r2-fen-restored (player ply reverted while the Oracle thought)")
+	# The late reply: wait until the mock has WRITTEN it, then give the game
+	# every chance to (wrongly) apply it — nothing may move.
+	if not await _wait_until(func(): return _mock_served > served_before, 20.0):
+		await _fail("undo-r2-late-reply", "the delayed oracle reply was never served")
+		return
+	await _sleep(2.0)
+	if str(state.get_fen()) != fen0:
+		await _fail("undo-r2-late-discarded",
+			"the late reply mutated the board: %s" % str(state.get_fen()))
+		return
+	if _view_census(game) != census0:
+		await _fail("undo-r2-late-census", "view census drifted after the late reply")
+		return
+	if not await _assert_sync(game, "undo-r2-sync"):
+		return
+	if bool(game.get("busy")) or int(game.get("_undos_left")) != 1:
+		await _fail("undo-r2-state", "busy=%s left=%s (want idle, 1 left)"
+			% [str(game.get("busy")), str(game.get("_undos_left"))])
+		return
+	_pass("undo-r2-late-discarded (stale Oracle reply dropped, no desync · 1 left)")
+	_mock_delay_ms = 0
+
+	# ── round 3: Cmd/Ctrl+Z spends the last take-back ──
+	_mock_replies = ["The knight, a third time.\nMOVE: g8f6"]
+	if not await _play_capture_round(game, "undo-r3", true):
+		return
+	var keyed := false
+	for i in 3:
+		await _press_cmd_z()
+		if await _wait_until(func(): return str(state.get_fen()) == fen0, 3.0):
+			keyed = true
+			break
+	if not keyed:
+		await _fail("undo-r3-fen-restored", "Cmd/Ctrl+Z undo never restored the FEN")
+		return
+	if int(game.get("_undos_left")) != 0 or not undo_btn.disabled \
+			or not undo_btn.text.contains("0"):
+		await _fail("undo-r3-limit", "after 3 undos: left=%s disabled=%s text='%s'"
+			% [str(game.get("_undos_left")), str(undo_btn.disabled), undo_btn.text])
+		return
+	_pass("undo-r3-limit (Cmd/Ctrl+Z · 0 left · button disabled)")
+
+	# ── round 4: allowance spent — button and key must both be inert ──
+	_mock_replies = ["The knight, unbothered.\nMOVE: g8f6"]
+	if not await _play_capture_round(game, "undo-r4", true):
+		return
+	var fen_r4 := str(state.get_fen())
+	await _click_control(undo_btn)
+	await _press_cmd_z()
+	await _sleep(2.0)
+	if str(state.get_fen()) != fen_r4 or int(game.get("undo_count")) != 3:
+		await _fail("undo-limit-inert", "a 4th undo landed (fen_changed=%s undo_count=%s)"
+			% [str(str(state.get_fen()) != fen_r4), str(game.get("undo_count"))])
+		return
+	_pass("undo-limit-inert (button + Cmd/Ctrl+Z both refused)")
+	if not is_equal_approx(Engine.time_scale, 1.0):
+		await _fail("undo-timescale", "time_scale=%f at the end" % Engine.time_scale)
+		return
+	_pass("undo-timescale-1.0")
+	await _shot("undo_final")
+	_finish(0)
+
+
+## One scripted round from the DUEL_FEN position: click the exd5 capture;
+## with wait_settle, also wait out the duel + the scripted rival reply.
+func _play_capture_round(game: Node, prefix: String, wait_settle: bool) -> bool:
+	var state: Object = game.get("state")
+	if not await _wait_until(func():
+		return game.get("busy") == false and state.turn == false, 20.0):
+		await _fail(prefix + "-turn", "never became the player's turn")
+		return false
+	var capture = null
+	for m in state.legal_moves():
+		if m.is_capture():
+			capture = m
+			break
+	if capture == null:
+		await _fail(prefix + "-capture", "the position offers no capture")
+		return false
+	if not await _select_square(game, game.sq_of(capture.from_square)):
+		await _fail(prefix + "-select", "attacker never selected")
+		return false
+	await _click_square(game, game.sq_of(capture.to_square))
+	if not await _wait_until(func():
+		return state.pieces[capture.from_square] == null, 5.0):
+		await _fail(prefix + "-applied", "engine never applied %s" % capture.to_uci())
+		return false
+	_pass(prefix + "-applied (%s)" % capture.to_uci())
+	if not wait_settle:
+		return true
+	if not await _wait_until(func():
+		return game.get("busy") == false and state.turn == false \
+			and not (game.get("duel_director") as Node).is_active(), 60.0):
+		await _fail(prefix + "-settled", "round never settled")
+		return false
+	return true
+
+
+## Deterministic census of the live piece views: "sq:type:side" rows, sorted —
+## byte-comparable across an undo round trip (the resurrection proof).
+func _view_census(game: Node) -> String:
+	var rows: Array[String] = []
+	var views: Dictionary = game.get("views")
+	for sq in views:
+		var pv = views[sq]
+		if pv == null or not is_instance_valid(pv):
+			rows.append("%d,%d:dead" % [sq.x, sq.y])
+			continue
+		rows.append("%d,%d:%d:%d" % [sq.x, sq.y,
+			int(pv.get("piece_type")), int(pv.get("side"))])
+	rows.sort()
+	return ",".join(rows)
+
+
 # ── Scenario: music (playlists, mute, duck + sting through real signals) ───
 func _scenario_music() -> void:
 	var music: Node = get_node_or_null("/root/Music")
@@ -2088,6 +2417,7 @@ func _handle_mock_conn(peer: StreamPeerTCP) -> void:
 	var request_line := raw.slice(0, header_end).get_string_from_utf8().get_slice("\r\n", 0)
 	var path := request_line.get_slice(" ", 1)
 	var response_body: String
+	var count_serve := false   # true for oracle chat replies (feeds _mock_served)
 	if path.ends_with("/models"):
 		response_body = JSON.stringify({
 			"object": "list",
@@ -2108,8 +2438,14 @@ func _handle_mock_conn(peer: StreamPeerTCP) -> void:
 			content = "The mock wind howls, and the tunnel answers for two."
 		else:
 			_mock_requests.append(req)
+			if _mock_delay_ms > 0:
+				# undo scenario: hold the reply so a take-back can land while
+				# the Oracle is still thinking — the reply arrives LATE, for a
+				# position that no longer exists, and must be discarded.
+				await _sleep(_mock_delay_ms / 1000.0)
 			if not _mock_replies.is_empty():
 				content = _mock_replies.pop_front()
+			count_serve = true
 		response_body = JSON.stringify({
 			"id": "chatcmpl-e2e-mock",
 			"object": "chat.completion",
@@ -2128,6 +2464,8 @@ func _handle_mock_conn(peer: StreamPeerTCP) -> void:
 		"Connection: close\r\n\r\n")
 	peer.put_data(head.to_utf8_buffer())
 	peer.put_data(body_bytes)
+	if count_serve:
+		_mock_served += 1
 	for i in 8:  # let the client drain before we hang up
 		peer.poll()
 		await get_tree().process_frame
