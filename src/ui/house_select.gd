@@ -50,6 +50,7 @@ var phase := Phase.HOUSE
 var selected_house := ""
 var selected_opponent: Dictionary = {}
 var selected_mode := ""
+var _disabled_opponents: Dictionary = {}   # opponent kind -> reason
 
 var _house_ids: Array[String] = []
 var _ring_index := 0
@@ -104,6 +105,22 @@ func reset() -> void:
 
 func get_selection() -> Dictionary:
 	return {"house": selected_house, "opponent": selected_opponent, "mode": selected_mode}
+
+
+## Grey an opponent kind in or out (e.g. "ds4_oracle" when the tunnel is
+## down). Disabled entries can be highlighted but not accepted; attempting
+## shows `reason` in the footer.
+func set_opponent_enabled(kind: String, enabled: bool, reason := "") -> void:
+	if enabled:
+		_disabled_opponents.erase(kind)
+	else:
+		_disabled_opponents[kind] = reason if not reason.is_empty() else "unavailable"
+	if not _opp_buttons.is_empty():
+		_set_opp_index(_opp_index)
+
+
+func _opp_disabled(i: int) -> bool:
+	return _disabled_opponents.has(str(OPPONENTS[i]["kind"]))
 
 
 # -- input ------------------------------------------------------------------
@@ -170,6 +187,10 @@ func _choose_house(id: String) -> void:
 func _on_opponent_pressed(i: int) -> void:
 	if phase != Phase.OPPONENT:
 		return
+	if _opp_disabled(i):
+		_set_opp_index(i)
+		_footer.text = str(_disabled_opponents.get(str(OPPONENTS[i]["kind"]), "unavailable"))
+		return
 	_set_opp_index(i)
 	selected_opponent = OPPONENTS[i].duplicate()
 	opponent_chosen.emit(selected_opponent)
@@ -232,7 +253,7 @@ func _set_ring_index(i: int) -> void:
 func _set_opp_index(i: int) -> void:
 	_opp_index = i
 	for j in _opp_buttons.size():
-		_style_list_button(_opp_buttons[j], j == i)
+		_style_list_button(_opp_buttons[j], j == i, _opp_disabled(j))
 
 
 func _set_mode_index(i: int) -> void:
@@ -241,7 +262,13 @@ func _set_mode_index(i: int) -> void:
 		_style_list_button(_mode_buttons[j], j == i)
 
 
-func _style_list_button(b: Button, active: bool) -> void:
+func _style_list_button(b: Button, active: bool, disabled := false) -> void:
+	if disabled:
+		var ash := Color(0.33, 0.31, 0.28)
+		b.add_theme_color_override("font_color", ash)
+		b.add_theme_color_override("font_hover_color", ash)
+		b.text = "%s — sleeps" % b.get_meta("label")
+		return
 	b.add_theme_color_override("font_color", GOLD if active else TEXT_DIM)
 	b.add_theme_color_override("font_hover_color", GOLD)
 	b.text = ("»  %s  «" % b.get_meta("label")) if active else str(b.get_meta("label"))

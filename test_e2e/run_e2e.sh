@@ -2,15 +2,25 @@
 # run_e2e.sh — Great Houses in-engine E2E suite.
 #
 # Steps:
-#   preflight  import-artifacts check (the empty-.godot/imported scar) +
-#              headless boot with zero SCRIPT ERROR/Parse Error
-#   tests      the chess-engine test suite (79 checks) headless — Gate A
-#   boot       windowed: scene loads, 32 pieces standing        — Gate B
-#   move       windowed: click e2->e4, AI replies within 30 s   — Gate B
-#   duel       windowed: scripted capture duel via clicks       — Gate B
-#   castle     windowed: O-O by clicks, king+rook views land    — Gate B
-#   promote    windowed: promotion by clicks, queen view spawns — Gate B
-#   showcase   windowed 30 s zero-error soak + beauty shots     — Gate C
+#   preflight   import-artifacts check (the empty-.godot/imported scar) +
+#               headless boot with zero SCRIPT ERROR/Parse Error
+#   tests       ALL headless suites — engine (79), tournament, cinematics
+#               time-restore, DS4 opponent (mock+live)          — Gate A
+#   boot        windowed: select flows to game, 32 pieces, banners+HUD dyed
+#   move        windowed: click e2->e4, AI replies within 30 s  — Gate B
+#   duel        windowed: scripted capture duel via clicks      — Gate B
+#   castle      windowed: O-O by clicks, king+rook views land   — Gate B
+#   promote     windowed: promotion by clicks, queen view spawns — Gate B
+#   slowmo      windowed: duel director activation, time dip, skip-on-click
+#   tournament  windowed: 3 scripted mates to the throne, bracket + banner
+#               re-dress asserts, championship panel
+#   oracle-mock windowed: DS4-Oracle vs in-driver canned HTTP mock
+#   fullgame    windowed: complete two-rook-ladder game, sync + time_scale
+#               hygiene every ply                                — Gate D
+#   showcase    windowed 45 s zero-error soak + beauty shots     — Gate C
+#
+# Every windowed scenario navigates the Hall of Banners (house select) by
+# synthesized clicks first — the select screen IS part of the tested flow.
 #
 # Scenario launches are WINDOWED (screenshots need rendering) — a game
 # window briefly appears; don't touch mouse/keyboard while it's up. Each
@@ -38,6 +48,12 @@ DUEL_FEN="rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2"
 CASTLE_FEN="4k3/8/8/8/8/8/7P/4K2R w K - 0 1"
 # Promotion-ready: a7 pawn promotes on the next move.
 PROMOTE_FEN="7k/P7/8/8/8/8/8/K7 w - - 0 1"
+# Tournament rounds: Ra8# is mate-in-1 (Kg6 seals the king, rook takes the
+# back rank) — one scripted click-mate per bracket round.
+TOURN_FEN="6k1/8/6K1/8/8/8/8/R7 w - - 0 1"
+# Fullgame: two rooks ladder-mate the bare king — a complete multi-move
+# game with a checkmate cinematic at the end (Gate D).
+FULLGAME_FEN="8/8/8/4k3/8/8/8/RR2K3 w - - 0 1"
 
 mkdir -p "$RUN_DIR" "$ART_ROOT"
 
@@ -101,17 +117,31 @@ run_preflight() {
   record preflight PASS "imported=$n_scn scenes · headless boot clean"
 }
 
-# ── Engine test suite (Gate A) ─────────────────────────────────────────────
+# ── Headless test suites (Gate A) ──────────────────────────────────────────
 run_tests() {
   local log="$RUN_DIR/engine-tests.log" rc
   note "tests: chess engine suite headless"
   run_with_timeout 300 "$log" "$GODOT" --headless --path "$PROJ" -s res://tests/run_tests.gd
   rc=$?
   if [ "$rc" -eq 0 ] && grep -q 'RESULT: ALL GREEN' "$log"; then
-    record tests PASS "$(grep -m1 '^TOTAL:' "$log")"
+    record engine-tests PASS "$(grep -m1 '^TOTAL:' "$log")"
     return 0
   fi
-  record tests FAIL "exit=$rc $(grep -m1 'FAILED:' "$log" || true) (log: $log)"
+  record engine-tests FAIL "exit=$rc $(grep -m1 'FAILED:' "$log" || true) (log: $log)"
+  return 1
+}
+
+run_suite() {  # <name> <res://script>  (suite exits 0 = green)
+  local name="$1" script="$2"
+  local log="$RUN_DIR/suite-$name.log" rc
+  note "tests: $name suite headless"
+  run_with_timeout 300 "$log" "$GODOT" --headless --path "$PROJ" -s "$script"
+  rc=$?
+  if [ "$rc" -eq 0 ]; then
+    record "$name" PASS "exit 0"
+    return 0
+  fi
+  record "$name" FAIL "exit=$rc (log: $log)"
   return 1
 }
 
@@ -145,21 +175,33 @@ run_scenario() {  # <name> [extra user args...]
 # ── Main ───────────────────────────────────────────────────────────────────
 if [ ! -x "$GODOT" ]; then note "Godot binary missing: $GODOT"; exit 2; fi
 STEPS=("$@")
-[ ${#STEPS[@]} -eq 0 ] && STEPS=(preflight tests boot move duel castle promote showcase)
+[ ${#STEPS[@]} -eq 0 ] && STEPS=(preflight tests boot move duel castle promote \
+  slowmo tournament oracle-mock fullgame showcase)
 
 SUITE_RC=0
 for step in "${STEPS[@]}"; do
   case "$step" in
     preflight) run_preflight || SUITE_RC=1 ;;
-    tests)     run_tests     || SUITE_RC=1 ;;
+    tests)
+      run_tests || SUITE_RC=1
+      run_suite tournament-suite res://tests/test_tournament.gd || SUITE_RC=1
+      run_suite cinematics-suite res://tests/test_cinematics.gd || SUITE_RC=1
+      run_suite ds4-suite res://tests/test_ds4_opponent.gd || SUITE_RC=1
+      ;;
     boot)      run_scenario boot || SUITE_RC=1 ;;
     move)      run_scenario move || SUITE_RC=1 ;;
     duel)      run_scenario duel "--e2e-fen=$DUEL_FEN" || SUITE_RC=1 ;;
     castle)    run_scenario castle "--e2e-fen=$CASTLE_FEN" || SUITE_RC=1 ;;
     promote)   run_scenario promote "--e2e-fen=$PROMOTE_FEN" || SUITE_RC=1 ;;
-    showcase)  run_scenario showcase "--e2e-fen=$DUEL_FEN" "--e2e-timeout=55" \
+    slowmo)    run_scenario slowmo "--e2e-fen=$DUEL_FEN" || SUITE_RC=1 ;;
+    tournament) SCENARIO_TIMEOUT=170 run_scenario tournament \
+                  "--e2e-fen=$TOURN_FEN" "--e2e-timeout=150" || SUITE_RC=1 ;;
+    oracle-mock) run_scenario oracle-mock "--e2e-timeout=80" || SUITE_RC=1 ;;
+    fullgame)  SCENARIO_TIMEOUT=230 run_scenario fullgame \
+                 "--e2e-fen=$FULLGAME_FEN" "--e2e-timeout=210" || SUITE_RC=1 ;;
+    showcase)  run_scenario showcase "--e2e-fen=$DUEL_FEN" "--e2e-timeout=70" \
                  || SUITE_RC=1 ;;
-    *) note "unknown step '$step' (use preflight|tests|boot|move|duel|castle|promote|showcase)"; SUITE_RC=1 ;;
+    *) note "unknown step '$step' (use preflight|tests|boot|move|duel|castle|promote|slowmo|tournament|oracle-mock|fullgame|showcase)"; SUITE_RC=1 ;;
   esac
 done
 

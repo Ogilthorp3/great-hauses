@@ -10,24 +10,39 @@
 ## canvas->window transform calibration so stretch/HiDPI can never break the
 ## click math. Never calls handlers directly — the input path IS the test.
 ##
+## Every game scenario first navigates the Hall of Banners (house select) by
+## synthesized clicks: crest -> opponent -> mode, then plays in game.tscn.
+##
 ## Scenarios:
-##   boot      scene loads, 32 pieces standing, engine agrees
-##   move      click e2 pawn -> e4 via real clicks, AI replies within 30 s
-##   duel      (needs --e2e-fen with an immediate white capture) executes the
-##             capture by clicks; asserts victim gone from engine AND view,
-##             a death animation played, attacker occupies the square
-##   castle    (needs --e2e-fen with O-O available) castles by clicks;
-##             asserts king AND rook views land on g1/f1 per move metadata
-##   promote   (needs --e2e-fen with a promotion push) promotes by clicks;
-##             asserts the pawn view was replaced by a queen view
-##   showcase  beauty run for Gate C: overview + mid-duel screenshots, then
-##             idles to the 30 s mark (shell greps the log for errors)
+##   boot        select flows into the game, 32 pieces standing, banners
+##               dyed to the chosen house, HUD carries the house names
+##   move        click e2 pawn -> e4 via real clicks, AI replies within 30 s
+##   duel        (needs --e2e-fen with an immediate white capture) executes
+##               the capture by clicks; slow-mo duel plays out untouched;
+##               asserts victim gone, death anim, attacker arrival, and
+##               time_scale restored to 1.0
+##   castle      (needs --e2e-fen with O-O available) castles by clicks
+##   promote     (needs --e2e-fen with a promotion push) promotes by clicks
+##   slowmo      capture triggers the DuelDirector; asserts activation, the
+##               time dip, skip-on-click restore, and a clean final settle
+##   tournament  Begin Tournament with a mate-in-1 FEN: three rounds of
+##               scripted mates; asserts bracket advance, banner re-dress
+##               each round, and the championship panel
+##   oracle-mock DS4-Oracle opponent against an in-driver canned HTTP mock;
+##               asserts a legal oracle move, llm source, thinking HUD
+##   fullgame    complete scripted game (two-rook ladder mate) vs the engine;
+##               asserts board/view sync every ply and time_scale hygiene
+##   showcase    beauty run for Gate C: hall wide shot, select screen,
+##               mid-duel caption frame, then idles to the 45 s mark
 ##
 ## Output contract (consumed by run_e2e.sh):
 ##     "E2E PASS <step>" / "E2E FAIL <step> — <reason>" lines,
 ##     per-step PNGs in the artifacts dir, exit code 0/1, watchdog.
 
 extends Node
+
+const DEFAULT_HOUSE := "winterfang"
+const MOCK_MODEL := "deepseek-v4-flash-mock"
 
 var scenario: String = ""
 var artifacts_dir: String = ""
@@ -39,6 +54,13 @@ var _done: bool = false
 var _to_window: Transform2D = Transform2D.IDENTITY
 var _last_input_pos := Vector2(-1e9, -1e9)
 var _start_ms := 0
+
+# -- mock oracle server state (oracle-mock scenario) --
+var _mock_server: TCPServer
+var _mock_port := 0
+var _mock_running := false
+var _mock_replies: Array = []    # queued chat contents; default "MOVE: e7e5"
+var _mock_requests: Array = []   # parsed JSON bodies of every chat call
 
 ## Observe every event that actually reaches the scene tree — proves
 ## synthesized events are delivered and learns the coordinate space
@@ -63,6 +85,11 @@ func _ready() -> void:
 			+ "/" + scenario
 	DirAccess.make_dir_recursive_absolute(artifacts_dir)
 	_start_ms = Time.get_ticks_msec()
+	if scenario == "oracle-mock":
+		# The env var must exist before main.gd/game.gd ever build an oracle;
+		# autoload _ready runs before the main scene loads, so this is early
+		# enough — and each e2e launch is its own process, nothing leaks.
+		_start_mock_oracle()
 	print("E2E driver active — scenario=%s timeout=%.0fs artifacts=%s"
 		% [scenario, timeout_sec, artifacts_dir])
 	_watchdog()
@@ -99,6 +126,14 @@ func _run() -> void:
 			await _scenario_castle()
 		"promote":
 			await _scenario_promote()
+		"slowmo":
+			await _scenario_slowmo()
+		"tournament":
+			await _scenario_tournament()
+		"oracle-mock":
+			await _scenario_oracle_mock()
+		"fullgame":
+			await _scenario_fullgame()
 		"showcase":
 			await _scenario_duel(true)
 		_:
@@ -108,6 +143,7 @@ func _finish(code: int) -> void:
 	if _done:
 		return
 	_done = true
+	_mock_running = false
 	print("E2E DONE scenario=%s exit=%d steps_passed=%d" % [scenario, code, _steps_passed])
 	get_tree().quit(code)
 
@@ -145,6 +181,9 @@ func _shot(step_name: String) -> void:
 	var err := img.save_png(path)
 	if err != OK:
 		print("E2E WARN screenshot save failed (err %d): %s" % [err, path])
+
+func _colors_close(a: Color, b: Color) -> bool:
+	return absf(a.r - b.r) < 0.02 and absf(a.g - b.g) < 0.02 and absf(a.b - b.b) < 0.02
 
 # ── Input synthesis ────────────────────────────────────────────────────────
 ## parse_input_event feeds events as-if-from-the-OS, i.e. in window
@@ -196,11 +235,29 @@ func _click_at(canvas_pos: Vector2) -> void:
 	await get_tree().process_frame
 	await get_tree().process_frame
 
+func _click_control(c: Control) -> void:
+	await _click_at(c.get_global_rect().get_center())
+
 # ── Game accessors ─────────────────────────────────────────────────────────
 func _game() -> Node:
 	var cs := get_tree().current_scene
 	if cs != null and cs.get("state") != null and cs.get("board") != null:
 		return cs
+	return null
+
+func _select_screen() -> Control:
+	var cs := get_tree().current_scene
+	if cs == null:
+		return null
+	if cs is HouseSelect:
+		return cs
+	return cs.find_child("HouseSelect", true, false) as Control
+
+func _find_button(root: Node, needle: String) -> Button:
+	for b: Button in root.find_children("*", "Button", true, false):
+		var label := str(b.get_meta("label")) if b.has_meta("label") else b.text
+		if label.contains(needle):
+			return b
 	return null
 
 func _black_snapshot(state: Object) -> String:
@@ -237,6 +294,43 @@ func _select_square(game: Node, sq: Vector2i, attempts: int = 3) -> bool:
 		await _sleep(0.6)
 	return false
 
+# ── The Hall of Banners (house select) by clicks ───────────────────────────
+func _navigate_select(house_id: String, opponent_needle: String, mode_needle: String) -> bool:
+	if not await _wait_until(func(): return _select_screen() != null, 15.0):
+		await _fail("select-screen", "the Hall of Banners never appeared")
+		return false
+	var sel: Control = _select_screen()
+	await _sleep(0.4)   # deferred ring layout + first draw
+	await _shot("house_select")
+	var crest: Node = sel.find_child("Crest_%s" % house_id, true, false)
+	if crest == null:
+		await _fail("select-crest", "no crest for house '%s'" % house_id)
+		return false
+	await _click_control(crest.get_node("Sigil"))
+	if not await _wait_until(func(): return int(sel.get("phase")) == 1, 3.0):
+		await _fail("select-house", "crest click did not advance to the opponent phase")
+		return false
+	_pass("select-house (%s)" % house_id)
+	var opp_btn := _find_button(sel, opponent_needle)
+	if opp_btn == null:
+		await _fail("select-opponent", "no opponent button matching '%s'" % opponent_needle)
+		return false
+	await _click_control(opp_btn)
+	if not await _wait_until(func(): return int(sel.get("phase")) == 2, 3.0):
+		await _fail("select-opponent", "opponent click did not advance to the mode phase")
+		return false
+	_pass("select-opponent (%s)" % opponent_needle)
+	var mode_btn := _find_button(sel, mode_needle)
+	if mode_btn == null:
+		await _fail("select-mode", "no mode button matching '%s'" % mode_needle)
+		return false
+	await _click_control(mode_btn)
+	if not await _wait_until(func(): return _game() != null, 15.0):
+		await _fail("select-into-game", "the game scene never appeared after selection")
+		return false
+	_pass("select-into-game")
+	return true
+
 # ── Shared boot steps ──────────────────────────────────────────────────────
 func _boot_game(expected_pieces: int) -> Node:
 	var got := await _wait_until(func(): return _game() != null, 20.0)
@@ -271,26 +365,70 @@ func _boot_game(expected_pieces: int) -> Node:
 	_pass("boot-pieces-standing (%d)" % standing)
 	return game
 
+## Board/view sync: every engine piece has a live view on its square and no
+## orphan views linger. `allow_missing_king` covers the post-checkmate state
+## where the mated king's view died under the cinematic.
+func _assert_sync(game: Node, step: String, allow_missing_king := false) -> bool:
+	var state: Object = game.get("state")
+	var views: Dictionary = game.get("views")
+	var engine_count := 0
+	var missing: Array[String] = []
+	for i in 64:
+		if state.pieces[i] == null:
+			continue
+		engine_count += 1
+		var sq: Vector2i = game.sq_of(i)
+		var pv = views.get(sq)
+		if pv == null or not is_instance_valid(pv):
+			missing.append("%s(%s)" % [ChessState.square_get_name(i), str(state.pieces[i])])
+	if allow_missing_king and missing.size() == 1 \
+			and (missing[0].contains("(k)") or missing[0].contains("(K)")):
+		missing.clear()
+		engine_count -= 1
+	if not missing.is_empty() or views.size() != engine_count:
+		await _fail(step, "desync: views=%d engine=%d missing=[%s]"
+			% [views.size(), engine_count, ",".join(missing)])
+		return false
+	return true
+
 # ── Scenario: boot ─────────────────────────────────────────────────────────
 func _scenario_boot() -> void:
+	if not await _navigate_select(DEFAULT_HOUSE, "Casual", "Single Match"):
+		return
 	var game := await _boot_game(32)
 	if game == null:
 		return
+	# The hall wears the chosen house's dye (banner 3 = west wall, player).
+	var hall: Node = game.get_node_or_null("GreatHall")
+	var expect: Color = HouseRegistry.get_colors(DEFAULT_HOUSE)["primary"]
+	var got: Color = hall.get_banner(3).house_color
+	if not _colors_close(got, expect):
+		await _fail("boot-banners-dressed", "west banner %s, expected %s" % [got, expect])
+		return
+	_pass("boot-banners-dressed")
+	var title: Label = game.find_child("Title", true, false)
+	if title == null or not title.text.contains(DEFAULT_HOUSE.to_upper()):
+		await _fail("boot-hud-houses", "HUD title missing the chosen house: '%s'"
+			% (title.text if title != null else "<no Title>"))
+		return
+	_pass("boot-hud-houses")
 	await _sleep(1.0)   # let idles and torchlight settle for the screenshot
 	await _shot("boot_lineup")
 	_finish(0)
 
 # ── Scenario: move ─────────────────────────────────────────────────────────
 func _scenario_move() -> void:
+	if not await _navigate_select(DEFAULT_HOUSE, "Casual", "Single Match"):
+		return
 	var game := await _boot_game(32)
 	if game == null:
 		return
 	var state: Object = game.get("state")
 	if not await _wait_until(func():
 		return game.get("busy") == false and state.turn == false, 15.0):
-		await _fail("move-frost-turn", "never became House Frost's turn")
+		await _fail("move-player-turn", "never became the player's turn")
 		return
-	_pass("move-frost-turn")
+	_pass("move-player-turn")
 	var e2 := ChessState.square_index_from_name("e2")
 	var e4 := ChessState.square_index_from_name("e4")
 	if state.pieces[e2] != "P":
@@ -324,7 +462,7 @@ func _scenario_move() -> void:
 	await _shot("after_ai_reply")
 	_finish(0)
 
-# ── Shared: wait for Frost's turn, find + click a scripted move ────────────
+# ── Shared: wait for the player's turn, find + click a scripted move ───────
 func _ready_for_scripted_move(prefix: String) -> Node:
 	var game := await _boot_game(0)   # custom FEN — piece count varies
 	if game == null:
@@ -332,9 +470,9 @@ func _ready_for_scripted_move(prefix: String) -> Node:
 	var state: Object = game.get("state")
 	if not await _wait_until(func():
 		return game.get("busy") == false and state.turn == false, 15.0):
-		await _fail(prefix + "-frost-turn", "never became House Frost's turn")
+		await _fail(prefix + "-player-turn", "never became the player's turn")
 		return null
-	_pass(prefix + "-frost-turn")
+	_pass(prefix + "-player-turn")
 	return game
 
 ## Click from->to for the first legal move matching pred. Returns the move.
@@ -366,6 +504,8 @@ func _settle(game: Node, step: String) -> bool:
 
 # ── Scenario: castle ───────────────────────────────────────────────────────
 func _scenario_castle() -> void:
+	if not await _navigate_select(DEFAULT_HOUSE, "Casual", "Single Match"):
+		return
 	var game := await _ready_for_scripted_move("castle")
 	if game == null:
 		return
@@ -398,6 +538,8 @@ func _scenario_castle() -> void:
 
 # ── Scenario: promote ──────────────────────────────────────────────────────
 func _scenario_promote() -> void:
+	if not await _navigate_select(DEFAULT_HOUSE, "Casual", "Single Match"):
+		return
 	var game := await _ready_for_scripted_move("promote")
 	if game == null:
 		return
@@ -425,20 +567,33 @@ func _scenario_promote() -> void:
 	_finish(0)
 
 # ── Scenario: duel / showcase ──────────────────────────────────────────────
-## duel: assert-heavy capture via clicks. showcase: same duel plus beauty
-## screenshots and a 30 s zero-error soak (asserted shell-side).
+## duel: assert-heavy capture via clicks (the slow-mo duel plays untouched).
+## showcase: same duel plus beauty screenshots and a 45 s zero-error soak.
 func _scenario_duel(showcase: bool) -> void:
+	if not await _navigate_select(DEFAULT_HOUSE, "Casual", "Single Match"):
+		return
 	var game := await _boot_game(0)   # custom FEN — piece count varies
 	if game == null:
 		return
 	var state: Object = game.get("state")
 	if not await _wait_until(func():
 		return game.get("busy") == false and state.turn == false, 15.0):
-		await _fail("duel-frost-turn", "never became House Frost's turn")
+		await _fail("duel-player-turn", "never became the player's turn")
 		return
-	_pass("duel-frost-turn")
+	_pass("duel-player-turn")
 	if showcase:
+		# Hero wide shot with the env module's framing note (pitch ~-0.55,
+		# distance ~13 keeps the far-wall banners in frame).
+		var rig: Node = game.get_node_or_null("CameraRig")
+		if rig != null:
+			rig.set("target_distance", 13.0)
+			rig.set("_target_pitch", -0.55)
 		await _sleep(1.5)
+		await _shot("great_hall_wide")
+		if rig != null:
+			rig.set("target_distance", 11.5)
+			rig.set("_target_pitch", -0.85)
+		await _sleep(1.0)
 		await _shot("board_overview")
 	# Find the scripted capture from the engine itself — the FEN promises one.
 	var capture = null
@@ -474,15 +629,18 @@ func _scenario_duel(showcase: bool) -> void:
 		await _fail("duel-engine-applied", "engine never applied the capture %s" % capture.to_uci())
 		return
 	_pass("duel-engine-applied")
-	await _sleep(1.1)   # walk + throw wind-up
+	await _sleep(1.2)   # walk + swoop + slow-mo ramp
 	await _shot("mid_duel")
+	if showcase:
+		await _sleep(0.5)
+		await _shot("duel_caption")   # inside the caption hold window
 	if not await _wait_until(func():
-		return (game.get("death_log") as Array).size() > deaths_before, 10.0):
+		return (game.get("death_log") as Array).size() > deaths_before, 12.0):
 		await _fail("duel-death-anim", "no death animation was recorded")
 		return
 	var last_death: String = (game.get("death_log") as Array).back()
 	_pass("duel-death-anim (%s)" % last_death)
-	if not await _wait_until(func(): return not is_instance_valid(victim), 5.0):
+	if not await _wait_until(func(): return not is_instance_valid(victim), 6.0):
 		await _fail("duel-victim-removed", "victim view still alive on the board")
 		return
 	if state.pieces[victim_idx] != null and ChessState.piece_color(state.pieces[victim_idx]):
@@ -491,20 +649,482 @@ func _scenario_duel(showcase: bool) -> void:
 	_pass("duel-victim-removed")
 	if not await _wait_until(func():
 		var v: Dictionary = game.get("views")
-		return v.get(to_sq) == attacker, 8.0):
+		return v.get(to_sq) == attacker, 10.0):
 		await _fail("duel-attacker-occupies", "attacker view never registered on %s" % str(to_sq))
 		return
 	_pass("duel-attacker-occupies")
 	await _shot("post_duel")
-	# Let Ember's reply (WorkerThreadPool search + animation) finish before
-	# quitting — tearing the engine down mid-task segfaults on shutdown.
-	if not await _wait_until(func(): return game.get("busy") == false, 20.0):
+	# Let the rival's reply (WorkerThreadPool search + animation + possibly
+	# its own duel) finish before quitting — tearing the engine down mid-task
+	# segfaults on shutdown.
+	if not await _wait_until(func(): return game.get("busy") == false, 30.0):
 		await _fail("duel-settled", "board never settled after the duel")
 		return
 	_pass("duel-settled")
+	var dd: Node = game.get("duel_director")
+	if not await _wait_until(func():
+		return not dd.is_active() and is_equal_approx(Engine.time_scale, 1.0), 10.0):
+		await _fail("duel-timescale-restored", "time_scale=%f after the duel" % Engine.time_scale)
+		return
+	_pass("duel-timescale-restored")
 	if showcase:
-		while Time.get_ticks_msec() - _start_ms < 30_000 and not _done:
+		while Time.get_ticks_msec() - _start_ms < 45_000 and not _done:
 			await _sleep(1.0)
 		await _shot("closing_tableau")
-		_pass("showcase-30s-soak")
+		_pass("showcase-45s-soak")
 	_finish(0)
+
+# ── Scenario: slowmo (duel director activation + skip contract) ────────────
+func _scenario_slowmo() -> void:
+	if not await _navigate_select(DEFAULT_HOUSE, "Casual", "Single Match"):
+		return
+	var game := await _boot_game(0)
+	if game == null:
+		return
+	var state: Object = game.get("state")
+	var dd: Node = game.get("duel_director")
+	if dd == null:
+		await _fail("slowmo-director", "game has no DuelDirector")
+		return
+	if not await _wait_until(func():
+		return game.get("busy") == false and state.turn == false, 15.0):
+		await _fail("slowmo-player-turn", "never became the player's turn")
+		return
+	var capture = null
+	for m in state.legal_moves():
+		if m.is_capture():
+			capture = m
+			break
+	if capture == null:
+		await _fail("slowmo-capture-available", "the FEN offers no capture")
+		return
+	if not await _select_square(game, game.sq_of(capture.from_square)):
+		await _fail("slowmo-select", "attacker never selected")
+		return
+	await _click_square(game, game.sq_of(capture.to_square))
+	if not await _wait_until(func(): return dd.is_active(), 8.0):
+		await _fail("slowmo-activated", "duel director never became active")
+		return
+	_pass("slowmo-activated")
+	if not await _wait_until(func(): return Engine.time_scale < 0.9, 3.0):
+		await _fail("slowmo-time-dipped", "time_scale never dipped (%.2f)" % Engine.time_scale)
+		return
+	_pass("slowmo-time-dipped (%.2f)" % Engine.time_scale)
+	await _sleep(0.3)
+	await _shot("mid_slowmo")
+	# A click mid-cinematic = skip: presentation snaps, time restores fast,
+	# gameplay still resolves at normal speed.
+	await _click_at(get_viewport().get_visible_rect().size * 0.5)
+	if not await _wait_until(func(): return absf(Engine.time_scale - 1.0) < 0.01, 2.0):
+		await _fail("slowmo-skip-restores",
+			"click-skip did not restore time_scale (%.2f)" % Engine.time_scale)
+		return
+	_pass("slowmo-skip-restores")
+	if not await _wait_until(func(): return not dd.is_active(), 10.0):
+		await _fail("slowmo-cinematic-ended", "director stayed active after skip")
+		return
+	_pass("slowmo-cinematic-ended")
+	if not await _wait_until(func():
+		return state.pieces[capture.to_square] != null \
+			and not ChessState.piece_color(state.pieces[capture.to_square]), 10.0):
+		await _fail("slowmo-capture-resolved", "capture never resolved on the engine")
+		return
+	_pass("slowmo-capture-resolved")
+	# Let the rival reply (possibly its own un-skipped duel) fully settle.
+	if not await _wait_until(func():
+		return game.get("busy") == false and not dd.is_active(), 40.0):
+		await _fail("slowmo-settled", "board never settled")
+		return
+	if not is_equal_approx(Engine.time_scale, 1.0):
+		await _fail("slowmo-final-timescale", "time_scale=%f after settle" % Engine.time_scale)
+		return
+	_pass("slowmo-final-timescale-1.0")
+	await _shot("post_slowmo")
+	_finish(0)
+
+# ── Scenario: tournament (3 scripted mates to the throne) ──────────────────
+func _scenario_tournament() -> void:
+	if not await _navigate_select("goldclaw", "Casual", "Begin Tournament"):
+		return
+	var prev_rival := ""
+	var prev_banner := Color.BLACK
+	for round_i in 3:
+		var game := await _boot_game(0)
+		if game == null:
+			return
+		var rival := str(game.get("rival_house_id"))
+		if rival.is_empty():
+			await _fail("tourn-rival-%d" % round_i, "no rival house resolved")
+			return
+		if rival == prev_rival:
+			await _fail("tourn-rival-advanced-%d" % round_i, "rival did not change (%s)" % rival)
+			return
+		var hall: Node = game.get_node_or_null("GreatHall")
+		var expect: Color = HouseRegistry.get_colors(rival)["primary"]
+		var got: Color = hall.get_banner(6).house_color
+		if not _colors_close(got, expect):
+			await _fail("tourn-banners-%d" % round_i,
+				"east banner %s != rival primary %s" % [got, expect])
+			return
+		if round_i > 0 and _colors_close(got, prev_banner):
+			await _fail("tourn-redress-%d" % round_i, "banner color unchanged between rounds")
+			return
+		prev_rival = rival
+		prev_banner = got
+		_pass("tourn-round%d-dressing (%s)" % [round_i, rival])
+		var state: Object = game.get("state")
+		if not await _wait_until(func():
+			return game.get("busy") == false and state.turn == false, 15.0):
+			await _fail("tourn-turn-%d" % round_i, "never became the player's turn")
+			return
+		# The FEN promises a mate-in-1 — find it in the SAN'd turn moves.
+		var mate = null
+		for m in game.get("_turn_moves"):
+			if m.notation_san != null and str(m.notation_san).ends_with("#"):
+				mate = m
+				break
+		if mate == null:
+			await _fail("tourn-mate-available-%d" % round_i, "FEN offers no mate-in-1")
+			return
+		if not await _select_square(game, game.sq_of(mate.from_square)):
+			await _fail("tourn-select-%d" % round_i, "mate mover never selected")
+			return
+		await _click_square(game, game.sq_of(mate.to_square))
+		if not await _wait_until(func(): return bool(game.get("game_over")), 10.0):
+			await _fail("tourn-mate-%d" % round_i, "game never ended after the mate")
+			return
+		_pass("tourn-round%d-mate" % round_i)
+		# The checkmate cinematic (~5 s) ends in victory_panel_requested.
+		if not await _wait_until(func():
+			var vp = game.get("_victory_panel")
+			return vp != null and vp.visible, 25.0):
+			await _fail("tourn-victory-panel-%d" % round_i, "victory panel never appeared")
+			return
+		await _shot("round%d_victory" % round_i)
+		# The panel fires before the death tail ends; while the director is
+		# active it consumes every click as "skip" — wait for it to let go.
+		var dd: Node = game.get("duel_director")
+		if not await _wait_until(func(): return not dd.is_active(), 15.0):
+			await _fail("tourn-cinematic-released-%d" % round_i,
+				"duel director never released input after the checkmate")
+			return
+		var t = Session.tournament
+		if t == null:
+			await _fail("tourn-state-%d" % round_i, "Session.tournament is null")
+			return
+		if round_i < 2:
+			if t.is_over():
+				await _fail("tourn-bracket-%d" % round_i, "tournament ended early")
+				return
+			var nxt: String = t.current_opponent()
+			if nxt.is_empty() or nxt == rival:
+				await _fail("tourn-bracket-advanced-%d" % round_i,
+					"bracket did not advance past %s" % rival)
+				return
+			_pass("tourn-round%d-bracket-advanced (next: %s)" % [round_i, nxt])
+			var btn := _find_button(game, "Ride to")
+			if btn == null:
+				await _fail("tourn-continue-%d" % round_i, "no continue button on the panel")
+				return
+			await _click_control(btn)
+			if not await _wait_until(func():
+				var g := _game()
+				return g != null and g != game, 15.0):
+				await _fail("tourn-next-round-%d" % round_i, "next round scene never loaded")
+				return
+		else:
+			if not t.is_champion():
+				await _fail("tourn-champion", "player is not champion after 3 wins")
+				return
+			if not bool(t.bracket_state().get("complete", false)):
+				await _fail("tourn-complete", "bracket not complete after the final")
+				return
+			_pass("tourn-champion")
+			await _sleep(0.6)
+			await _shot("championship_panel")
+	if not is_equal_approx(Engine.time_scale, 1.0):
+		await _fail("tourn-timescale", "time_scale=%f at the end" % Engine.time_scale)
+		return
+	_pass("tourn-timescale-1.0")
+	_finish(0)
+
+# ── Scenario: oracle-mock (DS4-Oracle vs the in-driver canned server) ──────
+func _scenario_oracle_mock() -> void:
+	if not _mock_running:
+		await _fail("oracle-mock-server", "in-driver mock oracle failed to listen")
+		return
+	_pass("oracle-mock-server (port %d)" % _mock_port)
+	if not await _navigate_select(DEFAULT_HOUSE, "DS4-Oracle", "Single Match"):
+		return
+	var game := await _boot_game(32)
+	if game == null:
+		return
+	if game.get("oracle") == null:
+		await _fail("oracle-node", "game did not create the Ds4Opponent node")
+		return
+	_pass("oracle-node")
+	var state: Object = game.get("state")
+	if not await _wait_until(func():
+		return game.get("busy") == false and state.turn == false, 15.0):
+		await _fail("oracle-player-turn", "never became the player's turn")
+		return
+	_mock_replies = ["The pawn answers in kind.\nMOVE: e7e5"]
+	var e2 := ChessState.square_index_from_name("e2")
+	var e4 := ChessState.square_index_from_name("e4")
+	if not await _select_square(game, game.sq_of(e2)):
+		await _fail("oracle-select-pawn", "e2 never became the selected square")
+		return
+	await _click_square(game, game.sq_of(e4))
+	if not await _wait_until(func(): return state.pieces[e4] == "P", 5.0):
+		await _fail("oracle-e4", "engine never showed the pawn on e4")
+		return
+	_pass("oracle-e4")
+	# The Oracle (mock) must answer with its scripted legal reply.
+	var e5 := ChessState.square_index_from_name("e5")
+	if not await _wait_until(func(): return str(state.pieces[e5]) == "p", 25.0):
+		await _fail("oracle-legal-move",
+			"the Oracle's e7e5 never landed (e5='%s')" % str(state.pieces[e5]))
+		return
+	_pass("oracle-legal-move (e7e5)")
+	var oracle: Node = game.get("oracle")
+	if str(oracle.last_source) != "llm":
+		await _fail("oracle-source-llm", "last_source='%s', expected 'llm'" % str(oracle.last_source))
+		return
+	_pass("oracle-source-llm")
+	if int(game.get("oracle_think_count")) < 1:
+		await _fail("oracle-thinking-hud", "thinking_started never reached the HUD")
+		return
+	_pass("oracle-thinking-hud (%d)" % int(game.get("oracle_think_count")))
+	if not await _wait_until(func(): return game.get("busy") == false, 15.0):
+		await _fail("oracle-settled", "board never settled after the oracle move")
+		return
+	if not is_equal_approx(Engine.time_scale, 1.0):
+		await _fail("oracle-timescale", "time_scale=%f after the oracle move" % Engine.time_scale)
+		return
+	_pass("oracle-settled")
+	await _shot("after_oracle_move")
+	_finish(0)
+
+# ── Scenario: fullgame (two-rook ladder mate, Gate D) ──────────────────────
+func _scenario_fullgame() -> void:
+	if not await _navigate_select(DEFAULT_HOUSE, "Casual", "Single Match"):
+		return
+	var game := await _boot_game(0)
+	if game == null:
+		return
+	var state: Object = game.get("state")
+	var dd: Node = game.get("duel_director")
+	var white_plies := 0
+	while white_plies < 40:
+		if not await _wait_until(func():
+			return bool(game.get("game_over")) \
+				or (game.get("busy") == false and state.turn == false and not dd.is_active()), 40.0):
+			await _fail("fullgame-turn", "board never settled for White ply %d" % (white_plies + 1))
+			return
+		if bool(game.get("game_over")):
+			break
+		if not is_equal_approx(Engine.time_scale, 1.0):
+			await _fail("fullgame-timescale", "time_scale=%f between moves" % Engine.time_scale)
+			return
+		if not await _assert_sync(game, "fullgame-sync-ply%d" % white_plies):
+			return
+		var mv = _ladder_pick(state, game)
+		if mv == null:
+			await _fail("fullgame-plan", "ladder found no move at ply %d" % white_plies)
+			return
+		if not await _select_square(game, game.sq_of(mv.from_square)):
+			await _fail("fullgame-select", "could not select the mover for %s" % mv.to_uci())
+			return
+		await _click_square(game, game.sq_of(mv.to_square))
+		if not await _wait_until(func():
+			return state.turn == true or bool(game.get("game_over")), 6.0):
+			await _fail("fullgame-applied", "engine never applied %s" % mv.to_uci())
+			return
+		white_plies += 1
+	if white_plies >= 40:
+		await _fail("fullgame-mate", "no mate within 40 White moves")
+		return
+	_pass("fullgame-mate-reached (%d white moves)" % white_plies)
+	if state.get_result() != ChessState.RESULT.CHECKMATE or state.turn != true:
+		await _fail("fullgame-result", "expected Black checkmated, result=%d" % state.get_result())
+		return
+	_pass("fullgame-checkmate")
+	if not await _wait_until(func():
+		var vp = game.get("_victory_panel")
+		return vp != null and vp.visible, 25.0):
+		await _fail("fullgame-victory-panel", "victory panel never appeared")
+		return
+	_pass("fullgame-victory-panel")
+	if not await _wait_until(func():
+		return is_equal_approx(Engine.time_scale, 1.0) and not dd.is_active(), 10.0):
+		await _fail("fullgame-timescale-restored",
+			"time_scale=%f after the end" % Engine.time_scale)
+		return
+	_pass("fullgame-timescale-restored")
+	if not await _assert_sync(game, "fullgame-final-sync", true):
+		return
+	_pass("fullgame-final-sync")
+	await _shot("fullgame_end")
+	_finish(0)
+
+## Two-rook ladder policy: mate-in-1 if available, else fence the row below
+## the black king, else check on the king's row from a safe distance,
+## sliding the fence away when the king hunts it. Falls back to any
+## non-drawing move (never needed on a clean ladder).
+func _ladder_pick(state: Object, game: Node) -> Variant:
+	var moves: Array = game.get("_turn_moves")
+	for m in moves:
+		if m.notation_san != null and str(m.notation_san).ends_with("#"):
+			return m
+	var bk: int = state.get_king(true)
+	@warning_ignore("integer_division")
+	var kr: int = bk / 8
+	var kc: int = bk % 8
+	var rooks: Array[int] = []
+	for i in 64:
+		if str(state.pieces[i]) == "R":
+			rooks.append(i)
+	var fence := -1
+	for r in rooks:
+		@warning_ignore("integer_division")
+		if r / 8 == kr + 1:
+			fence = r
+	if fence >= 0 and absi(fence % 8 - kc) <= 1:
+		var flee = _rook_to_row(moves, fence, kr + 1, kc, 3)
+		if flee != null:
+			return flee
+	if fence < 0:
+		for r in rooks:
+			var build = _rook_to_row(moves, r, kr + 1, kc, 2)
+			if build != null:
+				return build
+	else:
+		for r in rooks:
+			if r == fence:
+				continue
+			var chk = _rook_to_row(moves, r, kr, kc, 2)
+			if chk != null:
+				return chk
+	for m in moves:
+		var probe = state.duplicate(false)
+		var pm = probe.move_from_uci(m.to_uci())
+		if pm == null:
+			continue
+		probe.apply_move(pm)
+		var res: int = probe.get_result()
+		if res == ChessState.RESULT.ONGOING or res == ChessState.RESULT.CHECKMATE:
+			return m
+	return null
+
+func _rook_to_row(moves: Array, from_idx: int, want_row: int, king_col: int,
+		min_dist: int) -> Variant:
+	var best = null
+	var best_d := -1
+	for m in moves:
+		if m.from_square != from_idx:
+			continue
+		@warning_ignore("integer_division")
+		var tr: int = m.to_square / 8
+		var tc: int = m.to_square % 8
+		if tr != want_row:
+			continue
+		var d := absi(tc - king_col)
+		if d < min_dist:
+			continue
+		if d > best_d:
+			best_d = d
+			best = m
+	return best
+
+# ── Canned OpenAI-style HTTP mock (oracle-mock scenario) ───────────────────
+func _start_mock_oracle() -> bool:
+	_mock_server = TCPServer.new()
+	if _mock_server.listen(0, "127.0.0.1") != OK:
+		return false
+	_mock_port = _mock_server.get_local_port()
+	OS.set_environment(Ds4Opponent.ENV_URL, "http://127.0.0.1:%d" % _mock_port)
+	_mock_running = true
+	_pump_mock.call_deferred()
+	print("E2E mock oracle listening on 127.0.0.1:%d" % _mock_port)
+	return true
+
+func _pump_mock() -> void:
+	while _mock_running:
+		if _mock_server.is_connection_available():
+			var peer := _mock_server.take_connection()
+			await _handle_mock_conn(peer)
+		await get_tree().process_frame
+
+func _handle_mock_conn(peer: StreamPeerTCP) -> void:
+	peer.set_no_delay(true)
+	var raw := PackedByteArray()
+	var deadline := Time.get_ticks_msec() + 5000
+	var header_end := -1
+	var content_len := 0
+	while Time.get_ticks_msec() < deadline:
+		peer.poll()
+		var n := peer.get_available_bytes()
+		if n > 0:
+			var chunk: Array = peer.get_data(n)
+			if chunk[0] == OK:
+				raw.append_array(chunk[1])
+		if header_end < 0:
+			header_end = _find_header_end(raw)
+			if header_end >= 0:
+				content_len = _parse_content_length(
+					raw.slice(0, header_end).get_string_from_utf8())
+		if header_end >= 0 and raw.size() >= header_end + content_len:
+			break
+		await get_tree().process_frame
+	if header_end < 0:
+		peer.disconnect_from_host()
+		return
+	var request_line := raw.slice(0, header_end).get_string_from_utf8().get_slice("\r\n", 0)
+	var path := request_line.get_slice(" ", 1)
+	var response_body: String
+	if path.ends_with("/models"):
+		response_body = JSON.stringify({
+			"object": "list",
+			"data": [{"id": MOCK_MODEL, "object": "model"}],
+		})
+	else:
+		var body_text := raw.slice(header_end, header_end + content_len).get_string_from_utf8()
+		var parsed: Variant = JSON.parse_string(body_text)
+		_mock_requests.append(parsed if parsed is Dictionary else {})
+		var content := "MOVE: e7e5"
+		if not _mock_replies.is_empty():
+			content = _mock_replies.pop_front()
+		response_body = JSON.stringify({
+			"id": "chatcmpl-e2e-mock",
+			"object": "chat.completion",
+			"model": MOCK_MODEL,
+			"choices": [{
+				"index": 0,
+				"message": {"role": "assistant", "content": content},
+				"finish_reason": "stop",
+			}],
+			"usage": {"prompt_tokens": 0, "completion_tokens": 0},
+		})
+	var body_bytes := response_body.to_utf8_buffer()
+	var head := ("HTTP/1.1 200 OK\r\n" +
+		"Content-Type: application/json\r\n" +
+		"Content-Length: %d\r\n" % body_bytes.size() +
+		"Connection: close\r\n\r\n")
+	peer.put_data(head.to_utf8_buffer())
+	peer.put_data(body_bytes)
+	for i in 8:  # let the client drain before we hang up
+		peer.poll()
+		await get_tree().process_frame
+	peer.disconnect_from_host()
+
+func _find_header_end(raw: PackedByteArray) -> int:
+	for i in range(0, raw.size() - 3):
+		if raw[i] == 13 and raw[i + 1] == 10 and raw[i + 2] == 13 and raw[i + 3] == 10:
+			return i + 4
+	return -1
+
+func _parse_content_length(headers: String) -> int:
+	for line in headers.split("\r\n"):
+		if line.to_lower().begins_with("content-length:"):
+			return int(line.get_slice(":", 1).strip_edges())
+	return 0

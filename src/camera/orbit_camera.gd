@@ -6,7 +6,9 @@ extends Node3D
 
 @export var target_distance := 11.5
 @export var min_distance := 4.0
-@export var max_distance := 24.0
+## Clamped so the camera can never back out through the great hall's walls
+## at shallow pitch (env module's framing note: safe ceiling ~13).
+@export var max_distance := 13.0
 @export var yaw := PI            ## radians; PI = behind the Frost side
 @export var pitch := -0.85       ## radians; negative looks down at the board
 @export var min_pitch := -1.35

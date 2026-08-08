@@ -1,16 +1,22 @@
 extends Node3D
-## Great Houses — game root. Player commands House Frost (white) against a
-## ChessAI-driven House Ember (black). Full rules via src/chess (castling,
-## en passant, promotion, draw rules), capture duels choreographed by
-## PieceView, SAN move list HUD, game-over banner, R to restart.
+## Great Houses — game root. The player's chosen Great House battles a rival
+## house across a torch-lit hall: full rules via src/chess, capture duels in
+## slow motion (DuelDirector), house-dyed armies and banners, SAN move list,
+## tournament bracket between matches, and an optional DS4-Oracle opponent.
+##
+## Flow: main.tscn boots the Hall of Banners; Session carries the choices
+## here. Unconfigured launches (probes, --smoke, direct game.tscn runs) fall
+## back to the legacy Frost-vs-Ember skin so every old hook keeps working.
 ##
 ## Command-line hooks (after "--"):
-##   --difficulty=easy|medium|hard   AI strength (default medium)
+##   --difficulty=easy|medium|hard   AI strength when Session is unconfigured
 ##   --e2e-fen=<fen>                 start from a custom position
 ##   --smoke                         windowed: wait 3 s, screenshot, quit
 ##   --dump-tree                     headless-safe: print scene tree, quit
 
 const PieceScene: PackedScene = preload("res://scenes/piece_view.tscn")
+const MAIN_SCENE := "res://scenes/main.tscn"
+const GAME_SCENE := "res://scenes/game.tscn"
 
 const CHAR_TO_TYPE := {
 	"p": PieceView.Type.PAWN, "r": PieceView.Type.ROOK, "n": PieceView.Type.KNIGHT,
@@ -30,6 +36,18 @@ var state: ChessState
 var ai := ChessAI.new()
 var ai_difficulty := ChessAI.Difficulty.MEDIUM
 
+var duel_director: DuelDirector
+var oracle: Ds4Opponent = null       # non-null only vs DS4-Oracle
+var oracle_thinking := false
+var oracle_think_count := 0          # e2e evidence: thinking HUD fired
+var oracle_stumble_count := 0        # e2e evidence: fallback was surfaced
+var _oracle_think_start_ms := 0
+
+var player_house_id := ""            # "" = legacy Frost/Ember skin
+var rival_house_id := ""
+var _player_display := "House Frost"
+var _rival_display := "House Ember"
+
 var views: Dictionary = {}          # Vector2i (board sq) -> PieceView
 var selected: Variant = null        # Vector2i, or null
 var busy := false                   # move/duel animation or AI turn in flight
@@ -41,8 +59,12 @@ var _san_log: Array[String] = []
 
 var _turn_label: Label
 var _move_list: RichTextLabel
-var _banner: PanelContainer
-var _banner_label: Label
+var _oracle_flash: Label
+var _victory_panel: PanelContainer
+var _victory_label: Label
+var _continue_btn: Button
+var _victory_shown := false
+var _next_action := "rematch"       # "rematch" | "next_round" | "hall"
 
 
 func _ready() -> void:
@@ -56,10 +78,24 @@ func _ready() -> void:
 				_: push_warning("unknown difficulty '%s', using medium" % arg.substr(13))
 		elif arg.begins_with("--e2e-fen="):
 			fen = arg.substr(10)
+	_resolve_identity()
 	state = ChessState.new()
 	if not fen.is_empty() and not state.set_fen(fen):
 		push_error("invalid --e2e-fen '%s' — using the standard lineup" % fen)
+	duel_director = DuelDirector.new()
+	duel_director.name = "DuelDirector"
+	add_child(duel_director)
+	duel_director.victory_panel_requested.connect(_on_victory_panel_requested)
+	if Session.configured and str(Session.opponent.get("kind", "")) == "ds4_oracle":
+		oracle = Ds4Opponent.new()
+		oracle.name = "Oracle"
+		add_child(oracle)
+		oracle.thinking_started.connect(_on_oracle_thinking_started)
+		oracle.thinking_finished.connect(_on_oracle_thinking_finished)
+		oracle.oracle_stumbled.connect(_on_oracle_stumbled)
+		oracle.retry_attempted.connect(_on_oracle_retry)
 	_build_hud()
+	_dress_hall()
 	_spawn_from_state()
 	_refresh_turn_moves()
 	_update_turn_label()
@@ -73,9 +109,61 @@ func _ready() -> void:
 		_kick_ai_opening()
 
 
+# -- identity / hall dressing ----------------------------------------------
+
+
+func _resolve_identity() -> void:
+	if not Session.configured:
+		return
+	player_house_id = Session.player_house
+	rival_house_id = Session.rival_house()
+	if rival_house_id.is_empty():
+		var rivals := Tournament.seeded_rivals(player_house_id)
+		rival_house_id = rivals[0] if not rivals.is_empty() else player_house_id
+	if Session.opponent.has("difficulty"):
+		ai_difficulty = int(Session.opponent["difficulty"]) as ChessAI.Difficulty
+	_player_display = _house_name(player_house_id)
+	_rival_display = _house_name(rival_house_id)
+
+
+func _house_name(id: String) -> String:
+	var h := HouseRegistry.get_house(id)
+	return str(h.get("name", "House " + id.capitalize()))
+
+
+func _dress_hall() -> void:
+	## Banner index map (great_hall.gd): 0-2 far wall, 3-5 west, 6-8 east.
+	if player_house_id.is_empty():
+		return
+	var hall: GreatHall = get_node_or_null("GreatHall")
+	if hall == null:
+		return
+	var pc := HouseRegistry.get_colors(player_house_id)
+	var rc := HouseRegistry.get_colors(rival_house_id)
+	hall.set_banner_colors([
+		pc["primary"], pc["accent"], rc["primary"],     # far wall — both claims
+		pc["primary"], pc["secondary"], pc["primary"],  # west wall — the player
+		rc["primary"], rc["secondary"], rc["primary"],  # east wall — the rival
+	])
+
+
+func _dress_hall_championship() -> void:
+	## The throne shot: every banner in the hall falls to the champion.
+	if player_house_id.is_empty():
+		return
+	var hall: GreatHall = get_node_or_null("GreatHall")
+	if hall == null:
+		return
+	var pc := HouseRegistry.get_colors(player_house_id)
+	var colors: Array = []
+	for i in 9:
+		colors.append(pc["primary"] if i % 2 == 0 else pc["accent"])
+	hall.set_banner_colors(colors)
+
+
 # -- square mapping (engine 0..63, a8=0 .. h1=63  <->  board Vector2i) ------
-# Board sq.y=0 is House Frost's home rank (world -Z); the camera starts
-# behind Frost, so files run a..h from screen-left: sq.x = 7 - file.
+# Board sq.y=0 is the player's home rank (world -Z); the camera starts
+# behind the player, so files run a..h from screen-left: sq.x = 7 - file.
 
 
 static func sq_of(idx: int) -> Vector2i:
@@ -106,7 +194,10 @@ func _spawn_from_state() -> void:
 func _spawn(piece_type: PieceView.Type, piece_side: PieceView.House, sq: Vector2i) -> PieceView:
 	var p: PieceView = PieceScene.instantiate()
 	add_child(p)
-	p.setup(piece_type, piece_side)
+	var hid := ""
+	if not player_house_id.is_empty():
+		hid = player_house_id if piece_side == PieceView.House.FROST else rival_house_id
+	p.setup(piece_type, piece_side, hid)
 	p.position = board.square_to_world(sq)
 	p.died.connect(_on_piece_died.bind(p))
 	views[sq] = p
@@ -118,7 +209,7 @@ func _on_piece_died(p: PieceView) -> void:
 
 
 func _kick_ai_opening() -> void:
-	## FEN gave House Ember the move — let the AI open.
+	## FEN gave the rival the move — let the AI open.
 	busy = true
 	await _ai_ply()
 	busy = false
@@ -129,8 +220,9 @@ func _kick_ai_opening() -> void:
 
 
 func _on_square_clicked(sq: Vector2i) -> void:
-	if busy or game_over or state == null or state.turn:
-		return  # not interactive during animations, after the end, or on Ember's turn
+	if busy or game_over or state == null or state.turn \
+			or (duel_director != null and duel_director.is_active()):
+		return  # not interactive during animations/cinematics, after the end, or on the rival's turn
 	var idx := idx_of(sq)
 	var piece = state.pieces[idx]
 	var is_own: bool = piece != null and not ChessState.piece_color(piece)
@@ -182,7 +274,7 @@ func _move_for(from_idx: int, to_idx: int) -> Variant:
 
 
 func _play_turn(move) -> void:
-	## One full round: the player's ply, then (if the game goes on) Ember's.
+	## One full round: the player's ply, then (if the game goes on) the rival's.
 	busy = true
 	await _execute_ply(move)
 	if not game_over and state.turn:
@@ -193,7 +285,11 @@ func _play_turn(move) -> void:
 
 func _ai_ply() -> void:
 	_update_turn_label(true)
-	var move = await ai.choose_move(state, ai_difficulty)  # WorkerThreadPool search
+	var move = null
+	if oracle != null:
+		move = await oracle.choose_move(state, ai_difficulty)  # MAX thinking, difficulty ignored
+	else:
+		move = await ai.choose_move(state, ai_difficulty)  # WorkerThreadPool search
 	if move == null:
 		_finish_game()
 		return
@@ -228,6 +324,14 @@ func _walk_time(from_pos: Vector3, to_pos: Vector3) -> float:
 	return clampf(from_pos.distance_to(to_pos) * 0.3, 0.3, 1.1)
 
 
+func _duel_meta(mover_is_ember: bool) -> Dictionary:
+	if player_house_id.is_empty():
+		return {}
+	var atk := rival_house_id if mover_is_ember else player_house_id
+	var vic := player_house_id if mover_is_ember else rival_house_id
+	return {"attacker_house": atk, "victim_house": vic}
+
+
 func _animate_move(move, mover_is_ember: bool) -> void:
 	var from_sq := sq_of(move.from_square)
 	var to_sq := sq_of(move.to_square)
@@ -252,45 +356,195 @@ func _animate_move(move, mover_is_ember: bool) -> void:
 			var dir := (target - mover.position).normalized()
 			var edge := target - dir * 0.55
 			await mover.move_to(edge, _walk_time(mover.position, edge))
-			await mover.play_capture(victim)
+			# The slow-mo duel: the strike callable IS the old choreography,
+			# now running under the director's time curve and battle cam.
+			await duel_director.play_duel(mover, victim, _duel_meta(mover_is_ember),
+				func(): await mover.play_capture(victim))
 	await mover.move_to(target, _walk_time(mover.position, target))
 	views[to_sq] = mover
 	if move.promotion != null:
 		mover.queue_free()
 		var promo_side := PieceView.House.EMBER if mover_is_ember else PieceView.House.FROST
 		var promoted := _spawn(CHAR_TO_TYPE[str(move.promotion).to_lower()], promo_side, to_sq)
-		await promoted.spawn_flourish()
+		promoted.spawn_flourish()  # overlaps the director's beam + banner
+		await duel_director.play_promotion(promoted)
 
 
 func _refresh_turn_moves() -> void:
 	_turn_moves = state.legal_moves(true)
 
 
+# -- endgame ---------------------------------------------------------------
+
+
 func _finish_game() -> void:
 	game_over = true
 	_clear_selection()
 	var result: int = state.get_result()
-	var text: String
-	if result == ChessState.RESULT.CHECKMATE:
-		var frost_wins: bool = state.turn  # the side to move is the one mated
-		text = "Checkmate — House %s triumphs" % ("Frost" if frost_wins else "Ember")
-	else:
-		text = RESULT_TEXT.get(result, "The war is over")
-	_banner_label.text = text + "\nPress R to restart"
-	_banner.visible = true
+	var player_won := result == ChessState.RESULT.CHECKMATE and state.turn
+	if Session.configured and Session.mode == "tournament" and Session.tournament != null:
+		Session.tournament.report_result(player_won)  # a draw eliminates the player
 	_update_turn_label()
+	_end_sequence.call_deferred(result, player_won)
+
+
+func _end_sequence(result: int, player_won: bool) -> void:
+	if result != ChessState.RESULT.CHECKMATE:
+		_show_match_end(false, RESULT_TEXT.get(result, "The war is over"))
+		return
+	# The mated king falls under the checkmate cinematic's slow orbit.
+	var loser := PieceView.House.EMBER if state.turn else PieceView.House.FROST
+	var king_view: PieceView = null
+	var king_sq := Vector2i.ZERO
+	for sq in views:
+		var pv: PieceView = views[sq]
+		if is_instance_valid(pv) and pv.piece_type == PieceView.Type.KING and pv.side == loser:
+			king_view = pv
+			king_sq = sq
+			break
+	var winner_key := ""
+	if player_house_id.is_empty():
+		winner_key = "FROST" if player_won else "EMBER"
+	else:
+		winner_key = player_house_id if player_won else rival_house_id
+	if king_view == null:
+		_on_victory_panel_requested(duel_director.resolve_house_name(winner_key))
+		return
+	views.erase(king_sq)
+	await duel_director.play_checkmate(king_view, winner_key,
+		func(): await king_view.die())
+
+
+func _on_victory_panel_requested(winning_house: String) -> void:
+	var player_won := state.get_result() == ChessState.RESULT.CHECKMATE and state.turn
+	_show_match_end(player_won, "Checkmate — %s triumphs" % winning_house)
+
+
+func _show_match_end(player_won: bool, base_text: String) -> void:
+	var lines: Array[String] = [base_text]
+	_next_action = "rematch"
+	var btn_text := "Rematch"
+	if Session.configured and Session.mode == "tournament" and Session.tournament != null:
+		var t: Tournament = Session.tournament
+		if t.is_champion():
+			var motto := str(HouseRegistry.get_house(player_house_id).get("motto", ""))
+			lines = ["THE THRONE IS WON",
+				"%s rules the Nine Houses." % _player_display, "“%s”" % motto]
+			_next_action = "hall"
+			btn_text = "Return to the Hall of Banners"
+			_dress_hall_championship()
+			Tournament.clear_saved()
+		elif player_won:
+			var round_name := _next_round_name(t)
+			lines.append("%s awaits in the %s." % [_house_name(t.current_opponent()), round_name])
+			_next_action = "next_round"
+			btn_text = "Ride to the %s" % round_name
+		else:
+			var champ := str(t.bracket_state().get("champion", ""))
+			lines.append("%s has fallen from the war." % _player_display)
+			if not champ.is_empty():
+				lines.append("%s takes the throne." % _house_name(champ))
+			_next_action = "hall"
+			btn_text = "Return to the Hall of Banners"
+	else:
+		lines.append("R — rematch · Esc — the Hall of Banners")
+	_victory_label.text = "\n".join(lines)
+	_continue_btn.text = btn_text
+	_victory_panel.visible = true
+	_victory_shown = true
+
+
+func _next_round_name(t: Tournament) -> String:
+	var bs := t.bracket_state()
+	var rounds: Array = bs["rounds"]
+	for r in rounds.size():
+		for m in rounds[r]:
+			if str(m["winner"]).is_empty() \
+					and (str(m["a"]) == t.player_house or str(m["b"]) == t.player_house):
+				return str(bs["round_names"][r])
+	return "war"
+
+
+func _continue_pressed() -> void:
+	match _next_action:
+		"next_round":
+			get_tree().change_scene_to_file(GAME_SCENE)
+		"hall":
+			_return_to_hall()
+		_:
+			get_tree().reload_current_scene()
+
+
+func _return_to_hall() -> void:
+	Session.reset()
+	get_tree().change_scene_to_file(MAIN_SCENE)
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
-	if event is InputEventKey and event.pressed and not event.echo \
-			and event.keycode == KEY_R:
-		get_tree().reload_current_scene()
+	if not (event is InputEventKey and event.pressed and not event.echo):
+		return
+	if duel_director != null and duel_director.is_active():
+		return  # the director owns input mid-cinematic (click/Esc = skip)
+	match event.keycode:
+		KEY_R:
+			if _victory_shown and _next_action != "rematch":
+				_continue_pressed()
+			else:
+				get_tree().reload_current_scene()
+		KEY_ENTER, KEY_KP_ENTER:
+			if _victory_shown:
+				_continue_pressed()
+		KEY_ESCAPE:
+			if game_over:
+				_return_to_hall()
+
+
+# -- oracle HUD glue --------------------------------------------------------
+
+
+func _on_oracle_thinking_started() -> void:
+	oracle_thinking = true
+	oracle_think_count += 1
+	_oracle_think_start_ms = Time.get_ticks_msec()
+
+
+func _on_oracle_thinking_finished(_elapsed_s: float) -> void:
+	oracle_thinking = false
+	_update_turn_label()
+
+
+func _on_oracle_stumbled(_reason: String) -> void:
+	oracle_stumble_count += 1
+	_flash_oracle(Ds4Opponent.STUMBLE_TEXT, 3.0)
+
+
+func _on_oracle_retry(_attempt: int) -> void:
+	_flash_oracle("the Oracle reconsiders…", 2.0)
+
+
+func _flash_oracle(text: String, sec: float) -> void:
+	if _oracle_flash == null:
+		return
+	_oracle_flash.text = text
+	_oracle_flash.visible = true
+	get_tree().create_timer(sec).timeout.connect(func() -> void:
+		if is_instance_valid(_oracle_flash) and _oracle_flash.text == text:
+			_oracle_flash.visible = false)
+
+
+func _process(_delta: float) -> void:
+	## Oracle thinking shimmer + elapsed seconds counter.
+	if oracle_thinking and _turn_label != null and not game_over:
+		var elapsed := (Time.get_ticks_msec() - _oracle_think_start_ms) / 1000.0
+		_turn_label.text = "%s  %ds" % [Ds4Opponent.THINKING_TEXT, int(elapsed)]
+		_turn_label.modulate.a = 0.7 + 0.3 * sin(Time.get_ticks_msec() * 0.001 * TAU * 1.4)
 
 
 # -- HUD -------------------------------------------------------------------
 
 const HUD_TEXT := Color(0.85, 0.8, 0.7)
 const HUD_DIM := Color(0.62, 0.58, 0.5)
+const HUD_GOLD := Color(0.8, 0.62, 0.3)
 
 
 func _build_hud() -> void:
@@ -300,7 +554,7 @@ func _build_hud() -> void:
 
 	var title := Label.new()
 	title.name = "Title"
-	title.text = "HOUSE FROST  vs  HOUSE EMBER"
+	title.text = "%s  vs  %s" % [_player_display.to_upper(), _rival_display.to_upper()]
 	title.add_theme_font_size_override("font_size", 22)
 	title.add_theme_color_override("font_color", HUD_TEXT)
 	title.set_anchors_preset(Control.PRESET_CENTER_TOP)
@@ -310,6 +564,21 @@ func _build_hud() -> void:
 	title.position.y = 14
 	hud.add_child(title)
 
+	var mottos := Label.new()
+	mottos.name = "Mottos"
+	if not player_house_id.is_empty():
+		mottos.text = "“%s”   ·   “%s”" % [
+			str(HouseRegistry.get_house(player_house_id).get("motto", "")),
+			str(HouseRegistry.get_house(rival_house_id).get("motto", ""))]
+	mottos.add_theme_font_size_override("font_size", 13)
+	mottos.add_theme_color_override("font_color", HUD_DIM)
+	mottos.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	mottos.anchor_left = 0.5
+	mottos.anchor_right = 0.5
+	mottos.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	mottos.position.y = 44
+	hud.add_child(mottos)
+
 	_turn_label = Label.new()
 	_turn_label.name = "TurnLabel"
 	_turn_label.add_theme_font_size_override("font_size", 15)
@@ -318,8 +587,33 @@ func _build_hud() -> void:
 	_turn_label.anchor_left = 0.5
 	_turn_label.anchor_right = 0.5
 	_turn_label.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	_turn_label.position.y = 44
+	_turn_label.position.y = 66
 	hud.add_child(_turn_label)
+
+	var ctx := Label.new()
+	ctx.name = "MatchContext"
+	if Session.configured:
+		var bits: Array[String] = []
+		if Session.mode == "tournament" and Session.tournament != null:
+			bits.append(_next_round_name(Session.tournament))
+		bits.append(str(Session.opponent.get("label", "")))
+		ctx.text = " · ".join(bits)
+	ctx.add_theme_font_size_override("font_size", 14)
+	ctx.add_theme_color_override("font_color", HUD_DIM)
+	ctx.position = Vector2(16, 14)
+	hud.add_child(ctx)
+
+	_oracle_flash = Label.new()
+	_oracle_flash.name = "OracleFlash"
+	_oracle_flash.visible = false
+	_oracle_flash.add_theme_font_size_override("font_size", 17)
+	_oracle_flash.add_theme_color_override("font_color", HUD_GOLD)
+	_oracle_flash.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	_oracle_flash.anchor_left = 0.5
+	_oracle_flash.anchor_right = 0.5
+	_oracle_flash.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_oracle_flash.position.y = 96
+	hud.add_child(_oracle_flash)
 
 	_move_list = RichTextLabel.new()
 	_move_list.name = "MoveList"
@@ -333,35 +627,51 @@ func _build_hud() -> void:
 	_move_list.offset_bottom = -20
 	hud.add_child(_move_list)
 
-	_banner = PanelContainer.new()
-	_banner.name = "Banner"
-	_banner.visible = false
+	_victory_panel = PanelContainer.new()
+	_victory_panel.name = "VictoryPanel"
+	_victory_panel.visible = false
 	var style := StyleBoxFlat.new()
 	style.bg_color = Color(0.05, 0.04, 0.045, 0.92)
 	style.border_color = Color(0.55, 0.4, 0.2)
 	style.set_border_width_all(2)
 	style.set_content_margin_all(26)
-	_banner.add_theme_stylebox_override("panel", style)
-	_banner.set_anchors_preset(Control.PRESET_CENTER)
-	_banner.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	_banner.grow_vertical = Control.GROW_DIRECTION_BOTH
-	_banner_label = Label.new()
-	_banner_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_banner_label.add_theme_font_size_override("font_size", 26)
-	_banner_label.add_theme_color_override("font_color", HUD_TEXT)
-	_banner.add_child(_banner_label)
-	hud.add_child(_banner)
+	_victory_panel.add_theme_stylebox_override("panel", style)
+	_victory_panel.set_anchors_preset(Control.PRESET_CENTER)
+	_victory_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_victory_panel.grow_vertical = Control.GROW_DIRECTION_BOTH
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 16)
+	_victory_panel.add_child(vbox)
+	_victory_label = Label.new()
+	_victory_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_victory_label.add_theme_font_size_override("font_size", 26)
+	_victory_label.add_theme_color_override("font_color", HUD_TEXT)
+	vbox.add_child(_victory_label)
+	_continue_btn = Button.new()
+	_continue_btn.name = "ContinueButton"
+	_continue_btn.flat = true
+	_continue_btn.focus_mode = Control.FOCUS_NONE
+	_continue_btn.add_theme_font_size_override("font_size", 18)
+	_continue_btn.add_theme_color_override("font_color", HUD_GOLD)
+	_continue_btn.add_theme_color_override("font_hover_color", Color(1.0, 0.82, 0.45))
+	_continue_btn.pressed.connect(_continue_pressed)
+	vbox.add_child(_continue_btn)
+	hud.add_child(_victory_panel)
 
 
 func _update_turn_label(ai_thinking := false) -> void:
 	if _turn_label == null:
 		return
+	_turn_label.modulate.a = 1.0
 	if game_over:
 		_turn_label.text = "the field falls silent"
 	elif ai_thinking or state.turn:
-		_turn_label.text = "House Ember is thinking..."
+		if oracle != null:
+			_turn_label.text = Ds4Opponent.THINKING_TEXT
+		else:
+			_turn_label.text = "%s is thinking..." % _rival_display
 	else:
-		_turn_label.text = "House Frost to move"
+		_turn_label.text = "%s to move" % _player_display
 
 
 # -- e2e hooks -------------------------------------------------------------

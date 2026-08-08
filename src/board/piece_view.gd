@@ -5,8 +5,10 @@ extends Node3D
 ## shared Rig_Medium animation libraries.
 ##
 ## Model-agnostic API (callers touch nothing else):
-##   setup(type, side) · move_to(world_pos, walk_time) ·
+##   setup(type, side, house_id="") · move_to(world_pos, walk_time) ·
 ##   play_capture(victim) · die() · spawn_flourish()
+## house_id skins the piece with HouseRegistry tints; "" keeps the legacy
+## FROST/EMBER consts (fully backward compatible).
 
 signal move_finished
 signal died
@@ -50,6 +52,8 @@ const TOWER_SCALE := 0.78      # imported tower base is 1.0u tall + 0.3u crenell
 
 var piece_type: Type = Type.PAWN
 var side: House = House.FROST
+## Canonical HouseRegistry id skinning this piece ("" = legacy FROST/EMBER).
+var house_id := ""
 ## Set just before `died` fires — e2e reads it to prove a death anim played.
 var death_anim := ""
 
@@ -58,9 +62,10 @@ var _anim: AnimationPlayer  # null for the rook (static tower)
 var _home_yaw := 0.0
 
 
-func setup(new_type: Type, new_side: House) -> void:
+func setup(new_type: Type, new_side: House, new_house_id: String = "") -> void:
 	piece_type = new_type
 	side = new_side
+	house_id = new_house_id
 	for child in get_children():
 		child.queue_free()
 	_anim = null
@@ -251,7 +256,7 @@ func _build_character() -> void:
 	_anim.name = "Anim"
 	_model.add_child(_anim)  # root_node ".." = the character scene root
 	_anim.add_animation_library("", PieceAssets.shared_anims())
-	_tint_meshes(_model, HOUSE_TINT[side])
+	_tint_meshes(_model, _tint_for("piece"), _saturation_for())
 	_anim.play(ANIM_IDLE)
 	# Desynchronize the armies' idles.
 	_anim.seek(randf() * PieceAssets.anim_length(ANIM_IDLE))
@@ -268,10 +273,24 @@ func _build_tower() -> void:
 	_model.add_child(top)
 	_model.scale = Vector3.ONE * TOWER_SCALE
 	add_child(_model)
-	_tint_meshes(_model, HOUSE_TINT_TOWER[side])
+	_tint_meshes(_model, _tint_for("tower"), _saturation_for())
 
 
-func _tint_meshes(root: Node, tint: Color) -> void:
+## The multiply tint for this piece: HouseRegistry colors when a house id was
+## given, the legacy FROST/EMBER consts otherwise.
+func _tint_for(role: String) -> Color:
+	if house_id.is_empty():
+		return HOUSE_TINT[side] if role == "piece" else HOUSE_TINT_TOWER[side]
+	return HouseRegistry.get_house_tint(house_id, role)
+
+
+func _saturation_for() -> float:
+	if house_id.is_empty():
+		return TINT_SATURATION
+	return HouseRegistry.get_tint_saturation(house_id)
+
+
+func _tint_meshes(root: Node, tint: Color, saturation: float) -> void:
 	## Per-side material overlay: multiply the pack's albedo texture by the
 	## house tint, push roughness up. Tinted materials are cached and shared.
 	for mi: MeshInstance3D in root.find_children("*", "MeshInstance3D", true, false):
@@ -280,4 +299,4 @@ func _tint_meshes(root: Node, tint: Color) -> void:
 			if src == null or not src is StandardMaterial3D:
 				continue
 			mi.set_surface_override_material(
-				s, PieceAssets.tinted_material(src, tint, TINT_SATURATION))
+				s, PieceAssets.tinted_material(src, tint, saturation))
