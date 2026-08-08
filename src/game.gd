@@ -749,8 +749,11 @@ func _end_sequence(result: int, player_won: bool) -> void:
 			if is_instance_valid(lpv) and lpv.side == loser:
 				loser_pieces.append(lpv)
 		if not loser_pieces.is_empty():   # a bare king leaves nothing to burn
+			var champ_tier := Session.configured and Session.mode == "tournament" \
+					and Session.tournament != null and player_won \
+					and Session.tournament.is_champion()
 			await spectator.play_ashfall(loser,
-				duel_director.resolve_house_name(winner_key), loser_pieces)
+				duel_director.resolve_house_name(winner_key), loser_pieces, champ_tier)
 			for lsq in views.keys():      # ashfall freed those views
 				if not is_instance_valid(views[lsq]):
 					views.erase(lsq)
