@@ -10,6 +10,9 @@ extends Node
 const ANIM_GENERAL := preload("res://assets/kaykit-adventurers/Rig_Medium_General.glb")
 const ANIM_MOVEMENT := preload("res://assets/kaykit-adventurers/Rig_Medium_MovementBasic.glb")
 
+const CROWN_GOLD := preload("res://assets/custom-props/crown.glb")
+const CROWN_FROST := preload("res://assets/custom-props/crown_frost.glb")
+
 const LOOPED_ANIMS := ["Idle_A", "Idle_B", "Walking_A", "Walking_B", "Walking_C",
 		"Running_A", "Running_B"]
 
@@ -37,6 +40,14 @@ func shared_anims() -> AnimationLibrary:
 
 func anim_length(anim_name: String) -> float:
 	return shared_anims().get_animation(anim_name).length
+
+
+## Crown-variant mapping (kings only, custom-props INTEGRATION.md): a house
+## whose piece tint leans blue — cold houses (Winterfang, Tidegrip,
+## Swiftcrest, Silverbrook, legacy FROST) — crowns its king in frost silver;
+## warm tints wear the battle-worn gold.
+func crown_scene(tint: Color) -> PackedScene:
+	return CROWN_FROST if tint.b > tint.r else CROWN_GOLD
 
 
 ## House-tinted variant of a pack material: desaturated albedo texture

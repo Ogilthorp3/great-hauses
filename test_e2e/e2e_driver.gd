@@ -33,7 +33,9 @@
 ##   fullgame    complete scripted game (two-rook ladder mate) vs the engine;
 ##               asserts board/view sync every ply and time_scale hygiene
 ##   showcase    beauty run for Gate C: hall wide shot, select screen,
-##               mid-duel caption frame, then idles to the 45 s mark
+##               mid-duel caption frame, idles to the 45 s mark, then the
+##               championship throne-room tableau (crowned king + throne +
+##               dragon, camera parked on the frame — 09_throne_room.png)
 ##
 ## Output contract (consumed by run_e2e.sh):
 ##     "E2E PASS <step>" / "E2E FAIL <step> — <reason>" lines,
@@ -672,7 +674,55 @@ func _scenario_duel(showcase: bool) -> void:
 			await _sleep(1.0)
 		await _shot("closing_tableau")
 		_pass("showcase-45s-soak")
+		await _showcase_throne_room(game)
 	_finish(0)
+
+
+## Showcase closer: the championship tableau — champion-dyed banners, the
+## Throne of Blades, the dragon hovering overhead, the crowned champion king
+## on the dais, camera parked framing it all (09_throne_room.png).
+func _showcase_throne_room(game: Node) -> void:
+	var hall: Node = game.get_node_or_null("GreatHall")
+	if hall == null or hall.get("throne") == null:
+		await _fail("showcase-throne-present", "the great hall has no throne")
+		return
+	_pass("showcase-throne-present")
+	var views: Dictionary = game.get("views")
+	var crowned := false
+	for sq in views:
+		var pv = views[sq]
+		if is_instance_valid(pv) and int(pv.get("piece_type")) == PieceView.Type.KING \
+				and pv.find_child("Crown", true, false) != null:
+			crowned = true
+	if not crowned:
+		await _fail("showcase-king-crowned", "no crowned king on the field")
+		return
+	_pass("showcase-king-crowned")
+	var done := {"done": false}
+	var runner := func() -> void:
+		await game.start_championship_tableau()
+		done["done"] = true
+	runner.call()
+	var dd: Node = game.get("duel_director")
+	if not await _wait_until(func(): return dd.is_active(), 15.0):
+		await _fail("showcase-tableau-started", "championship tableau never started")
+		return
+	_pass("showcase-tableau-started")
+	if hall.get("dragon") == null:
+		await _fail("showcase-dragon-summoned", "no dragon above the throne")
+		return
+	_pass("showcase-dragon-summoned")
+	await _sleep(2.4)   # glide (1.5 s) done — inside the tableau hold
+	await _shot("throne_room")
+	if not await _wait_until(func(): return done["done"], 25.0):
+		await _fail("showcase-tableau-finished", "championship tableau never finished")
+		return
+	if not await _wait_until(func():
+		return not dd.is_active() and is_equal_approx(Engine.time_scale, 1.0), 10.0):
+		await _fail("showcase-tableau-clean",
+			"director active or time_scale=%f after the tableau" % Engine.time_scale)
+		return
+	_pass("showcase-throne-room-tableau")
 
 # ── Scenario: slowmo (duel director activation + skip contract) ────────────
 func _scenario_slowmo() -> void:

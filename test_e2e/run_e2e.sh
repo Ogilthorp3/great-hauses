@@ -17,7 +17,8 @@
 #   oracle-mock windowed: DS4-Oracle vs in-driver canned HTTP mock
 #   fullgame    windowed: complete two-rook-ladder game, sync + time_scale
 #               hygiene every ply                                — Gate D
-#   showcase    windowed 45 s zero-error soak + beauty shots     — Gate C
+#   showcase    windowed 45 s zero-error soak + beauty shots + the
+#               championship throne-room tableau                 — Gate C
 #
 # Every windowed scenario navigates the Hall of Banners (house select) by
 # synthesized clicks first — the select screen IS part of the tested flow.
@@ -199,7 +200,7 @@ for step in "${STEPS[@]}"; do
     oracle-mock) run_scenario oracle-mock "--e2e-timeout=80" || SUITE_RC=1 ;;
     fullgame)  SCENARIO_TIMEOUT=230 run_scenario fullgame \
                  "--e2e-fen=$FULLGAME_FEN" "--e2e-timeout=210" || SUITE_RC=1 ;;
-    showcase)  run_scenario showcase "--e2e-fen=$DUEL_FEN" "--e2e-timeout=70" \
+    showcase)  run_scenario showcase "--e2e-fen=$DUEL_FEN" "--e2e-timeout=90" \
                  || SUITE_RC=1 ;;
     *) note "unknown step '$step' (use preflight|tests|boot|move|duel|castle|promote|slowmo|tournament|oracle-mock|fullgame|showcase)"; SUITE_RC=1 ;;
   esac

@@ -2,8 +2,10 @@ class_name GreatHall
 extends Node3D
 ## Builds the torch-lit great hall around the chess board: stone floor and
 ## perimeter walls (MultiMesh — 1 draw call each), corner pillars, two feast
-## tables, eight flickering torches (src/env/torch.gd) and NINE wall banners
-## (src/env/banner.gd) awaiting the Great Houses' colors.
+## tables, eight flickering torches (src/env/torch.gd), NINE wall banners
+## (src/env/banner.gd) awaiting the Great Houses' colors, and the Throne of
+## Blades (custom prop) against the far wall. `summon_champion_dragon()` /
+## `dragon_wink()` stage the championship dragon above it — no extra lights.
 ##
 ## Everything is KayKit Dungeon Remastered (CC0), copied with its license to
 ## res://assets/kaykit-dungeon/. Board center is world origin; the hall
@@ -27,6 +29,8 @@ const FLOOR_SCENE: PackedScene = preload("res://assets/kaykit-dungeon/floor_tile
 const PILLAR_SCENE: PackedScene = preload("res://assets/kaykit-dungeon/pillar.gltf")
 const TABLE_SCENE: PackedScene = preload("res://assets/kaykit-dungeon/table_long.gltf")
 const CANDLE_SCENE: PackedScene = preload("res://assets/kaykit-dungeon/candle_triple.gltf")
+const THRONE_SCENE: PackedScene = preload("res://assets/custom-props/throne.glb")
+const DRAGON_SCENE: PackedScene = preload("res://assets/custom-props/dragon.glb")
 
 const TorchScript := preload("res://src/env/torch.gd")
 const BannerScript := preload("res://src/env/banner.gd")
@@ -35,7 +39,20 @@ const FLOOR_Y := -0.3         # hall floor top (plinth bottom)
 const WALL_HALF := 12.0       # wall centerline distance from board center
 const SEGMENT_XS := [-10.0, -6.0, -2.0, 2.0, 6.0, 10.0]  # 6 x 4u = 24u side
 
+## Throne of Blades (custom prop): 1.5 m plinth against the far wall (inner
+## face z = +11.5), base centered so the back edge nearly kisses the stone.
+const THRONE_POS := Vector3(0.0, FLOOR_Y, 10.7)
+## Championship dragon hover: above the throne, wings clearing the 4 u wall
+## line (the hall is open-topped) but well under the y≈7 ceiling. NOTE the
+## rig ships mid-flight: the body floats ~1.5-2 u above the armature root,
+## so the root sits low and the beast reads at ~y 4.
+const DRAGON_HOVER := Vector3(0.0, 2.2, 9.9)
+const DRAGON_SCALE := 1.15    # ~5 m wingspan next to ~1 m warriors
+
 var banners: Array[HallBanner] = []
+var throne: Node3D = null
+var dragon: Node3D = null              # summoned for the championship only
+var _dragon_anim: AnimationPlayer = null
 
 var _fps_probe := false
 var _fps_accum := 0.0
@@ -49,6 +66,7 @@ func _ready() -> void:
 	_build_tables()
 	_build_torches()
 	_build_banners()
+	_build_throne()
 	_build_fill_lights()
 	var args := OS.get_cmdline_user_args()
 	if args.has("--env-fps"):
@@ -235,6 +253,72 @@ func _build_banners() -> void:
 		banner.rotation.y = specs[i][1]
 		add_child(banner)
 		banners.append(banner)
+
+
+func _build_throne() -> void:
+	## The Throne of Blades stands against the far wall, seat opening turned
+	## toward the board (the GLB front faces +Z as imported — rotate PI).
+	## NO new lights: the 8-omni budget is full; the south-wall torch pair
+	## (±8, z=11.48) already rakes the blade fan.
+	throne = THRONE_SCENE.instantiate()
+	throne.name = "ThroneOfBlades"
+	throne.position = THRONE_POS
+	throne.rotation.y = PI
+	add_child(throne)
+
+
+## Championship staging: the dragon appears above the throne on a Flying_Idle
+## loop. Idempotent — returns the live dragon. Adds NO lights.
+func summon_champion_dragon() -> Node3D:
+	if dragon != null:
+		return dragon
+	dragon = DRAGON_SCENE.instantiate()
+	dragon.name = "ChampionDragon"
+	dragon.position = DRAGON_HOVER
+	dragon.rotation.y = PI    # face the hall (toward -Z / the camera side)
+	dragon.scale = Vector3.ONE * DRAGON_SCALE
+	add_child(dragon)
+	# The 8-omni budget is FULL — no light for the dragon. Lift it out of
+	# pure black with a faint warm material self-glow instead (no light nodes).
+	for mi: MeshInstance3D in dragon.find_children("*", "MeshInstance3D", true, false):
+		for s in mi.mesh.get_surface_count():
+			var src := mi.get_active_material(s)
+			if src is StandardMaterial3D:
+				var m: StandardMaterial3D = src.duplicate()
+				m.emission_enabled = true
+				m.emission = Color(0.22, 0.17, 0.13)   # dim torch-glow lift
+				mi.set_surface_override_material(s, m)
+	var anims := dragon.find_children("*", "AnimationPlayer", true, false)
+	_dragon_anim = anims[0] if not anims.is_empty() else null
+	if _dragon_anim != null and _dragon_anim.has_animation("Flying_Idle"):
+		_dragon_anim.get_animation("Flying_Idle").loop_mode = Animation.LOOP_LINEAR
+		_dragon_anim.play("Flying_Idle")
+	return dragon
+
+
+## The wink: one slow Yes nod toward the camera, then back to the hover loop.
+func dragon_wink() -> void:
+	if _dragon_anim == null or not _dragon_anim.has_animation("Yes"):
+		return
+	_dragon_anim.speed_scale = 0.55
+	_dragon_anim.play("Yes", 0.3)
+	await get_tree().create_timer(_dragon_anim.get_animation("Yes").length / 0.55).timeout
+	if not is_instance_valid(_dragon_anim):
+		return
+	_dragon_anim.speed_scale = 1.0
+	if _dragon_anim.has_animation("Flying_Idle"):
+		_dragon_anim.play("Flying_Idle", 0.4)
+
+
+## Framing anchor for the championship tableau (throne + dragon + dais).
+func throne_focus() -> Vector3:
+	return THRONE_POS + Vector3(0.0, 2.2, 0.0)
+
+
+## Where the champion stands: on the hall floor at the foot of the throne,
+## a step to the side so the blade fan stays unobstructed in the tableau.
+func throne_dais() -> Vector3:
+	return Vector3(0.55, FLOOR_Y, 9.6)
 
 
 func _build_fill_lights() -> void:

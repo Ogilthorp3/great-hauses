@@ -415,6 +415,41 @@ func _end_sequence(result: int, player_won: bool) -> void:
 		func(): await king_view.die())
 
 
+## The championship ending (the real champion branch fires this, and the e2e
+## showcase reuses it for the throne-room tableau): every banner falls to the
+## champion, the dragon appears above the Throne of Blades with a slow nod
+## toward the camera, the crowned champion king walks to the dais, and the
+## camera move ends parked framing the throne.
+func start_championship_tableau() -> void:
+	_dress_hall_championship()
+	var hall: GreatHall = get_node_or_null("GreatHall")
+	if hall == null or hall.throne == null:
+		return
+	hall.summon_champion_dragon()
+	hall.dragon_wink()   # the wink — fire and forget
+	while duel_director.is_active():   # let the checkmate death tail release
+		await get_tree().process_frame
+	var king := _champion_king_view()
+	if king != null:
+		var dais := hall.throne_dais()
+		await king.move_to(dais, clampf(king.position.distance_to(dais) * 0.28, 1.0, 3.0))
+		# move_to's fire-and-forget _face_home tween (0.18 s) would fight an
+		# immediate turn — let it finish, then face the hall for the tableau.
+		await get_tree().create_timer(0.25).timeout
+		king.face_attacker(dais + Vector3(0.0, 0.0, -6.0))
+	await duel_director.play_championship_tableau(hall.throne_focus())
+
+
+func _champion_king_view() -> PieceView:
+	## The player's king (the champion is always the player when this runs).
+	for sq in views:
+		var pv: PieceView = views[sq]
+		if is_instance_valid(pv) and pv.piece_type == PieceView.Type.KING \
+				and pv.side == PieceView.House.FROST:
+			return pv
+	return null
+
+
 func _on_victory_panel_requested(winning_house: String) -> void:
 	var player_won := state.get_result() == ChessState.RESULT.CHECKMATE and state.turn
 	_show_match_end(player_won, "Checkmate — %s triumphs" % winning_house)
@@ -432,7 +467,7 @@ func _show_match_end(player_won: bool, base_text: String) -> void:
 				"%s rules the Nine Houses." % _player_display, "“%s”" % motto]
 			_next_action = "hall"
 			btn_text = "Return to the Hall of Banners"
-			_dress_hall_championship()
+			start_championship_tableau()   # fire-and-forget coronation
 			Tournament.clear_saved()
 		elif player_won:
 			var round_name := _next_round_name(t)

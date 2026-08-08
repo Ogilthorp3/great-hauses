@@ -10,6 +10,7 @@ extends Node3D
 ##   play_duel(attacker, victim, meta, strike)
 ##   play_promotion(piece, meta)
 ##   play_checkmate(losing_king, winning_house, death, meta)
+##   play_championship_tableau(throne_focus)  Grand Final: park on the throne
 ##   skip()                                   snap presentation to end state
 ##   duel_context(attacker, victim, meta)     caption token dict (testable)
 ##   pick_kill_line(ctx) / format_line(...)   kill-line pool (testable)
@@ -55,6 +56,12 @@ const HOUSE_KEYS: Array[String] = ["FROST", "EMBER"]
 @export var checkmate_slow_scale := 0.15
 @export var checkmate_hold_wall := 3.0
 @export var checkmate_orbit_speed := 0.35   ## rad/s around the dying king
+@export var championship_glide_wall := 1.5  ## glide into the throne frame
+@export var championship_hold_wall := 3.2   ## hold on the tableau, panel up
+@export var championship_fov := 58.0
+## Camera offset from the throne focus for the championship frame — a low 3/4
+## hero angle from the board side that keeps dais, throne and dragon in shot.
+@export var championship_cam_offset := Vector3(1.9, 0.1, -7.2)
 @export var failsafe_wall_sec := 8.0    ## force-restore if a sequence overruns
 @export var handheld_amp := 0.035       ## handheld noise amplitude (world units)
 @export var duel_fov := 42.0
@@ -211,6 +218,30 @@ func play_checkmate(losing_king: Node3D, winning_house: String,
 			break
 		await tree.process_frame
 	_finish(seq, "checkmate")
+
+
+## Championship ending: glide from the current camera to a hero frame on the
+## Throne of Blades (throne_focus from GreatHall.throne_focus()), hold while
+## the championship panel is up, then PARK the camera there — the Grand Final
+## ends framing the throne. Touches neither time_scale nor audio; a click
+## (skip) mid-tableau returns to the gameplay camera instead of parking.
+## The next scene change (Return to the Hall of Banners / rematch) resets
+## the viewport camera as usual.
+func play_championship_tableau(throne_focus: Vector3, _meta: Dictionary = {}) -> void:
+	if _active or not is_inside_tree():
+		return
+	var seq := _begin("championship")
+	_arm_failsafe(seq, maxf(failsafe_wall_sec,
+		championship_glide_wall + championship_hold_wall + 3.0))
+	if _cam_take_viewport():
+		var cam_pos := throne_focus + championship_cam_offset
+		var target := Transform3D(
+			Basis.looking_at(throne_focus - cam_pos, Vector3.UP), cam_pos)
+		await _cam_glide(seq, target, championship_fov, championship_glide_wall, 0.3)
+	await _wall_wait(seq, championship_hold_wall)
+	if _cam_on and not _skip and _seq == seq:
+		_cam_park()
+	_finish(seq, "championship")
 
 
 # ── caption lines (public for tests / integrator) ──────────────────────────
@@ -541,6 +572,17 @@ func _cam_restore() -> void:
 	if is_instance_valid(_prev_cam):
 		_prev_cam.current = true
 	_cam.current = false
+	_cam_on = false
+	_prev_cam = null
+
+
+func _cam_park() -> void:
+	## Championship ending shot: leave the cine cam live on its final frame.
+	## Clearing _cam_on first makes _restore_presentation/_cam_restore no-ops,
+	## so _finish() releases the director without yanking the camera back.
+	_shake_target = 0.0
+	_shake = 0.0
+	_cam.global_transform = _cam_base   # settle any handheld residue
 	_cam_on = false
 	_prev_cam = null
 

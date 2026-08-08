@@ -1,0 +1,20 @@
+crown.glb, crown_frost.glb, throne.glb — license and provenance
+================================================================
+
+These three assets are ORIGINAL procedural geometry generated for the
+"Great Houses" battle-chess project on 2026-08-07, using headless
+Blender 4.0.2 and the committed scripts in tools/:
+
+  crown.glb / crown_frost.glb  <- tools/make_crown.py   (seed 77)
+  throne.glb                   <- tools/make_throne.py  (seed 41)
+
+No third-party models, scans, or textures were used; materials are plain
+Principled BSDF constants. The throne is an original design — a fan of
+procedurally generated tapered blades; only the general "chair made of
+blades" silhouette is evocative, no external geometry or art was copied.
+
+The scripts are deterministic (seeded RNG): re-running them reproduces the
+GLBs bit-for-bit equivalent geometry.
+
+License: these assets belong to the Great Houses project (Bertrand Nepveu).
+Internal project use; relicense as the project owner sees fit.

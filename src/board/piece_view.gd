@@ -47,7 +47,7 @@ const ANIM_DEATH := "Death_A"
 const ANIM_SPAWN := "Spawn_Ground"
 
 const CHARACTER_SCALE := 0.46
-const KING_SCALE := 0.56       # no crown prop in the free packs — the king reads by size
+const KING_SCALE := 0.56       # bigger than the ranks + a crown (custom prop, _attach_crown)
 const TOWER_SCALE := 0.78      # imported tower base is 1.0u tall + 0.3u crenellated top
 
 var piece_type: Type = Type.PAWN
@@ -257,10 +257,35 @@ func _build_character() -> void:
 	_model.add_child(_anim)  # root_node ".." = the character scene root
 	_anim.add_animation_library("", PieceAssets.shared_anims())
 	_tint_meshes(_model, _tint_for("piece"), _saturation_for())
+	if piece_type == Type.KING:
+		_attach_crown()
 	_anim.play(ANIM_IDLE)
 	# Desynchronize the armies' idles.
 	_anim.seek(randf() * PieceAssets.anim_length(ANIM_IDLE))
 	_anim.speed_scale = randf_range(0.94, 1.06)
+
+
+func _attach_crown() -> void:
+	## The king's crown (custom prop — measured numbers from the props'
+	## INTEGRATION.md): a BoneAttachment3D on the Rig_Medium `head` bone so
+	## the crown tracks idle, walk, and death animations for free. Attached
+	## AFTER _tint_meshes so the crown keeps its own gold/frost materials.
+	var skels := _model.find_children("*", "Skeleton3D", true, false)
+	if skels.is_empty():
+		return
+	var skel: Skeleton3D = skels[0]
+	if skel.find_bone("head") == -1:
+		return
+	var att := BoneAttachment3D.new()
+	att.name = "CrownMount"
+	att.bone_name = "head"
+	skel.add_child(att)
+	var crown: Node3D = PieceAssets.crown_scene(_tint_for("piece")).instantiate()
+	crown.name = "Crown"
+	crown.position = Vector3(0.0, 0.80, 0.0)   # ring at the brow line
+	crown.rotation.y = deg_to_rad(-20.0)       # battle-bent point toward the camera
+	crown.scale = Vector3.ONE * 5.3            # 0.18 m prop on the stylized skull
+	att.add_child(crown)
 
 
 func _build_tower() -> void:

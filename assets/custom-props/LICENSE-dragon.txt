@@ -1,0 +1,36 @@
+dragon.glb — license and provenance
+====================================
+
+Model:    "Dragon" (file Flying/FBX/Dragon.fbx) from the Quaternius
+          "Ultimate Monsters" pack, with its Atlas_Monsters.png palette
+          texture. Rigged (CharacterArmature) with 8 animation takes.
+Author:   Quaternius (https://quaternius.com)
+
+License:  CC0 1.0 Universal (Public Domain Dedication)
+          https://creativecommons.org/publicdomain/zero/1.0/
+          No attribution required; free for personal and commercial use.
+
+License verification (checked 2026-08-07):
+- The pack page https://quaternius.com/packs/ultimatemonsters.html states the
+  pack is CC0 and links https://creativecommons.org/publicdomain/zero/1.0/.
+- The License.txt shipped inside the pack's official download folder states:
+  "License: CC0 1.0 Universal (CC0 1.0) Public Domain Dedication" with the
+  same creativecommons.org URL. A verbatim copy of that file is kept at
+  source-dragon/License.txt.
+- The same model is listed as "Public Domain (CC0)" on poly.pizza:
+  https://poly.pizza/m/3rUm1cN3yp (Ultimate Monsters Bundle:
+  https://poly.pizza/bundle/Ultimate-Monsters-Bundle-5oyGWAmOB6).
+
+Download source used:
+  Official download linked from the quaternius.com pack page —
+  Google Drive folder id 18m4KpzpEzhC9wl7jzr6dUc0N8Jozr79C
+  (https://drive.google.com/drive/folders/18m4KpzpEzhC9wl7jzr6dUc0N8Jozr79C),
+  files Flying/FBX/Dragon.fbx, Flying/glTF/Atlas_Monsters.png, License.txt.
+
+Conversion: FBX -> GLB via headless Blender 4.0.2, script
+  tools/convert_dragon.py (armature + all 8 animations preserved; FBX take
+  names cleaned to: Death, Fast_Flying, Flying_Idle, Headbutt, HitReact,
+  No, Punch, Yes).
+
+CC0 places no restrictions on this redistribution or on use in the game.
+Quaternius accepts support at https://www.patreon.com/quaternius.
