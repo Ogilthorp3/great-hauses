@@ -1,0 +1,95 @@
+{
+	"version": 1,
+	"houses": [
+		{
+			"id": "winterfang",
+			"archetype": "wolf",
+			"name": "House Winterfang",
+			"seat": "Frosthollow",
+			"motto": "The wolf remembers.",
+			"colors": { "primary": "#8d99a6", "secondary": "#eef2f5", "accent": "#7fb0d4" },
+			"tints": { "piece": "#9fb4cc", "tower": "#8ca1b8", "saturation": 0.25 },
+			"sigil": "res://assets/sigils/winterfang.png"
+		},
+		{
+			"id": "goldclaw",
+			"archetype": "lion",
+			"name": "House Goldclaw",
+			"seat": "Gildenspire",
+			"motto": "A lion settles every account.",
+			"colors": { "primary": "#8e1f2c", "secondary": "#d9a441", "accent": "#f0c96a" },
+			"tints": { "piece": "#d4a43c", "tower": "#b8862f", "saturation": 0.25 },
+			"sigil": "res://assets/sigils/goldclaw.png"
+		},
+		{
+			"id": "hartcrown",
+			"archetype": "stag",
+			"name": "House Hartcrown",
+			"seat": "Stormrest",
+			"motto": "The storm answers to us.",
+			"colors": { "primary": "#1d1a17", "secondary": "#cfa63b", "accent": "#e8c866" },
+			"tints": { "piece": "#b09040", "tower": "#8d7333", "saturation": 0.25 },
+			"sigil": "res://assets/sigils/hartcrown.png"
+		},
+		{
+			"id": "ashwyrm",
+			"archetype": "dragon",
+			"name": "House Ashwyrm",
+			"seat": "Cinderhold",
+			"motto": "From ash, dominion.",
+			"colors": { "primary": "#171214", "secondary": "#b3282d", "accent": "#e04b3a" },
+			"tints": { "piece": "#b03a2e", "tower": "#93302a", "saturation": 0.25 },
+			"sigil": "res://assets/sigils/ashwyrm.png"
+		},
+		{
+			"id": "tidegrip",
+			"archetype": "kraken",
+			"name": "House Tidegrip",
+			"seat": "Brinehold",
+			"motto": "The tide takes what it pleases.",
+			"colors": { "primary": "#4c6357", "secondary": "#14181a", "accent": "#7d9c8d" },
+			"tints": { "piece": "#6f8a7d", "tower": "#5d7568", "saturation": 0.25 },
+			"sigil": "res://assets/sigils/tidegrip.png"
+		},
+		{
+			"id": "thornvale",
+			"archetype": "rose",
+			"name": "House Thornvale",
+			"seat": "Bloomhall",
+			"motto": "Every rose keeps its thorns.",
+			"colors": { "primary": "#2f5d3a", "secondary": "#d3b04a", "accent": "#8fbf6a" },
+			"tints": { "piece": "#79a04a", "tower": "#648540", "saturation": 0.25 },
+			"sigil": "res://assets/sigils/thornvale.png"
+		},
+		{
+			"id": "duskfire",
+			"archetype": "sun",
+			"name": "House Duskfire",
+			"seat": "Sunspire",
+			"motto": "The sun kneels for no one.",
+			"colors": { "primary": "#c96a1e", "secondary": "#a3282a", "accent": "#f0a03c" },
+			"tints": { "piece": "#e07b2f", "tower": "#c2691f", "saturation": 0.25 },
+			"sigil": "res://assets/sigils/duskfire.png"
+		},
+		{
+			"id": "swiftcrest",
+			"archetype": "falcon",
+			"name": "House Swiftcrest",
+			"seat": "Skyloft",
+			"motto": "Honor rides the high wind.",
+			"colors": { "primary": "#7fb3d9", "secondary": "#f2f6f9", "accent": "#4f86ad" },
+			"tints": { "piece": "#86b6e0", "tower": "#74a0c8", "saturation": 0.25 },
+			"sigil": "res://assets/sigils/swiftcrest.png"
+		},
+		{
+			"id": "silverbrook",
+			"archetype": "trout",
+			"name": "House Silverbrook",
+			"seat": "Rivergate",
+			"motto": "The river binds us all.",
+			"colors": { "primary": "#2c4d7c", "secondary": "#c9d3dc", "accent": "#8fb3d9" },
+			"tints": { "piece": "#6e8fc4", "tower": "#5d7aa9", "saturation": 0.25 },
+			"sigil": "res://assets/sigils/silverbrook.png"
+		}
+	]
+}
