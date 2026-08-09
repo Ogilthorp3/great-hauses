@@ -8,7 +8,11 @@ extends Node3D
 ## Owns: instancing assets/custom-props/dragon.glb, the no-new-lights
 ## emissive lift (the hall's 8-omni budget is FULL — glow comes from
 ## emission, never from Light3D), AnimationPlayer discovery, loop/one-shot
-## clip helpers, and the head-bone mouth mount used by the ashfall flame.
+## clip helpers, the head-bone mouth mount used by the ashfall flame, the
+## SLUMBER coil (`attach_slumber` / `slumber_default`) that folds a standing
+## clip into a sleeping one, and `set_ember_energy` — the banked-vs-kindled
+## throat coals, which are how this module sells "the eyes light" without a
+## Light3D it is not allowed to have.
 ##
 ## THE SERPENT-WYRM (dragon-v2, installed 2026-08-09) replaced the Quaternius
 ## chibi. Clips as they arrive GODOT-SIDE (probed, not assumed — Godot's
@@ -68,10 +72,19 @@ const BODY_RISE := 0.95
 const HEAD_BONE := "Head"
 const HEAD_END_BONE := "Head_end"
 
+## The chains the SLUMBER pose folds (measured names, asserted by
+## tests/test_dragon.gd against the live skeleton).
+const NECK_BONES: Array[String] = ["Neck", "Neck2", "Neck3", "Neck4", "Neck5", "Neck6"]
+const TAIL_BONES: Array[String] = ["Tail", "Tail2", "Tail3", "Tail4",
+	"Tail5", "Tail6", "Tail7", "Tail8"]
+const LEG_BONES: Array[String] = ["Thigh.L", "Thigh.R", "Shin.L", "Shin.R",
+	"Foot.L", "Foot.R"]
+
 var anim: AnimationPlayer = null
 var skeleton: Skeleton3D = null
 
 var _mouth: Node3D = null
+var _ember_mats: Array[StandardMaterial3D] = []
 
 
 ## Build a rig under `parent`. `pos`/`yaw`/`rig_scale` land on this wrapper
@@ -112,6 +125,24 @@ func _apply_emissive_lift(model: Node) -> void:
 				var m: StandardMaterial3D = src.duplicate()
 				_paint_for_hall(m)
 				mi.set_surface_override_material(s, m)
+				if m.resource_name.begins_with("dragon_ember"):
+					_ember_mats.append(m)
+
+
+## THE COALS, dimmed and kindled. The wyrm's throat/breast embers are the
+## only part of it that can carry LIGHT as a dramatic beat, because the hall's
+## 8-omni budget is full and this module may never add a Light3D: a sleeping
+## dragon banks its fire (0.4) and a waking one kindles it (2.6). Nothing here
+## creates or touches a light — it is the authored emission's energy
+## multiplier and nothing else. Safe no-op on a rig whose GLB has no
+## `dragon_ember*` material.
+func set_ember_energy(mult: float) -> void:
+	for m in _ember_mats:
+		m.emission_energy_multiplier = maxf(mult, 0.0)
+
+
+func ember_material_count() -> int:
+	return _ember_mats.size()
 
 
 static func _paint_for_hall(m: StandardMaterial3D) -> void:
@@ -217,6 +248,195 @@ func seek_clip(t: float) -> void:
 	if anim == null:
 		return
 	anim.seek(maxf(t, 0.0), true)
+
+
+# -- THE SLUMBER POSE ------------------------------------------------------
+# `Perch_Idle` is a SETTLED pose, not a SLEEPING one: wings furled and breath
+# slow, but the neck still carries the gothic arc and the head rides at
+# y 1.91 (rig scale 1.0) — an animal standing watch. A dragon that is already
+# alert has nowhere to escalate to, which is the whole reason the wake exists.
+#
+# This modifier folds the clip into a coil: neck down over the forefeet,
+# chin toward the stone, tail curled around the flank, haunches couched, plus
+# a slow breathing swell. It runs in the skeleton's modification stack, i.e.
+# AFTER the AnimationPlayer has written its pose, and POST-multiplies each
+# bone's local rotation — so it rides on top of any clip instead of fighting
+# it, and `weight` cross-fades the coil in and out (1 = asleep, 0 = the clip
+# as authored). Every angle below is applied about the BONE's own axes, whose
+# world orientation was measured off the shipped GLB, not guessed.
+
+
+class Slumber:
+	extends SkeletonModifier3D
+
+	var weight := 1.0            ## 1 = fully coiled, 0 = the clip untouched
+	var breath_rate := 0.55      ## rad/s of the breathing sine
+	var breath_amp := 0.0        ## radians of chest swell at weight 1
+
+	var _bends: Array = []       ## [[bone_index, Vector3 euler], ...]
+	var _breath_bone := -1
+	var _t := 0.0
+	var calls := 0               ## the stack ran this many times
+
+	## THE ONLY PLACE THE COILED POSE EXISTS. Godot runs the modifier stack,
+	## hands the result to the skin, then RESTORES the animation pose — so
+	## `skeleton.get_bone_global_pose()` read from _process/_ready reports the
+	## clip's pose and a coil that never moved a vertex would look identical to
+	## one that did. Name bones here and the modifier writes their post-coil
+	## skeleton-space origins into `sampled` from inside its own pass; that is
+	## what tests/test_dragon.gd asserts against, and what the pose was
+	## calibrated with.
+	var sample_bones: Array = []
+	var sampled: Dictionary = {}
+
+	func build(sk: Skeleton3D, table: Array, breath_bone: String) -> void:
+		_bends.clear()
+		if sk == null:
+			return
+		for e: Array in table:
+			var i := sk.find_bone(str(e[0]))
+			if i != -1:
+				_bends.append([i, e[1] as Vector3])
+		_breath_bone = sk.find_bone(breath_bone)
+
+	func bend_count() -> int:
+		return _bends.size()
+
+	## Godot 4.5+ drives the stack through the delta form; the base class's
+	## compatibility path is what would otherwise call `_process_modification`.
+	func _process_modification_with_delta(delta: float) -> void:
+		calls += 1
+		var sk := get_skeleton()
+		if sk == null:
+			return
+		if weight > 0.0005:
+			_t += delta
+			for b: Array in _bends:
+				var i: int = b[0]
+				sk.set_bone_pose_rotation(i, sk.get_bone_pose_rotation(i)
+					* Quaternion.from_euler((b[1] as Vector3) * weight))
+			if _breath_bone != -1 and breath_amp > 0.0:
+				var s := sin(_t * breath_rate) * breath_amp * weight
+				sk.set_bone_pose_rotation(_breath_bone,
+					sk.get_bone_pose_rotation(_breath_bone)
+					* Quaternion.from_euler(Vector3(s, 0.0, 0.0)))
+		# Sampled at EVERY weight, including 0 — a test that compares the
+		# coiled pose against the clip's own pose needs both halves.
+		for bn in sample_bones:
+			var bi := sk.find_bone(bn)
+			if bi != -1:
+				sampled[bn] = _chain(sk, bi).origin
+
+	## Skeleton-space transform of `idx` walked by hand up the parent chain.
+	## `get_bone_global_pose()` may NOT be called from inside the stack — it
+	## forces a full transform update, which re-enters the modifier list and
+	## hangs the process (measured, 2026-08-09).
+	static func _chain(sk: Skeleton3D, idx: int) -> Transform3D:
+		var t := sk.get_bone_pose(idx)
+		var p := sk.get_bone_parent(idx)
+		while p != -1:
+			t = sk.get_bone_pose(p) * t
+			p = sk.get_bone_parent(p)
+		return t
+
+
+## THE COIL, in degrees, calibrated on the shipped rig (see the probe note in
+## `Slumber.sampled` for why it had to be measured from inside the stack).
+##
+## `NECK` is an S, not an arc, and that is the whole trick. The clip's neck
+## already climbs steeply (bone elevations +36°, +59°, +70°, +65°, +42°, +19°
+## measured), so a UNIFORM fold big enough to bring the head down to the stone
+## also rolls the skull 126° past level and the wyrm sleeps upside-down — the
+## first calibration pass did exactly that. The head's final pitch is the SUM
+## of the profile, so the profile sums to ~+7°: down hard through the base,
+## back up through the crown. Result (rig scale 1.0): head origin y 1.91 ->
+## ~0.7, snout laid forward on the stone, skull level.
+const SLUMBER_NECK := [44.0, 36.0, 18.0, -22.0, -36.0, -34.0]
+const SLUMBER_HEAD := 6.0        ## a last nose-down onto the stone
+const SLUMBER_TORSO := 8.0       ## shoulders slump forward
+const SLUMBER_TAIL_DOWN := 8.0   ## per tail joint — the whip onto the floor
+const SLUMBER_TAIL_CURL := 16.0  ## per tail joint — curled around the flank
+const SLUMBER_THIGH := 45.0      ## couched: knees up, haunches down…
+const SLUMBER_SHIN := -38.0
+const SLUMBER_FOOT := 25.0
+## THE WINGS, mantled. `Perch_Idle`'s "furled" still tents the elbows 0.31
+## above the spine, and from the gameplay camera (which looks DOWN at ~49°)
+## that tent is the loudest shape the beast has — the first render of the
+## sleeper read as a folded umbrella. X drops the elbow to the line of the
+## back, Z draws the whole wing in against the flank; mirrored per side.
+const SLUMBER_WING1 := Vector3(-12.0, 0.0, 20.0)
+const SLUMBER_WING2 := Vector3(-22.0, 0.0, 0.0)
+## …which lifts the toe claws 0.325 in rig-local units, so the node drops by
+## the same amount and the claws stay ON the stone instead of floating.
+## Measured landing at this drop: snout y +0.03, tail belly y 0.00, chest
+## y 0.63 — chin and tail on the floor, body couched over its own feet.
+const SLUMBER_ROOT_DROP := 0.32
+
+
+## Build the coil's per-bone angle table (radians in, so the probe can sweep).
+## The neck carries NO lateral term on purpose: a sideways tuck (head curled
+## around to the flank, the other classic sleeping shape) was built, measured
+## and dropped — every degree of sweep it gains it pays for in chin height,
+## and the chin ON THE STONE is the strongest "asleep" signal the pose has.
+## Signs come from the measured bone frames: every neck bone and the head
+## carry local X ~ world -X, so a NEGATIVE rotation about local X folds them
+## forward and down; the tail bones carry local Z ~ world +Y, so their Z term
+## is a horizontal curl and their X term drops the tail onto the stone.
+static func slumber_table(neck: Array, head: float, torso: float,
+		tail_down: float, tail_curl: float,
+		thigh: float, shin: float, foot: float,
+		wing1 := Vector3.ZERO, wing2 := Vector3.ZERO) -> Array:
+	var table: Array = []
+	# The wings are MIRRORED, so the left side takes the negated yaw/roll
+	# terms; only the pitch (X, the fold) is common to both.
+	for w: Array in [["Wing1.R", wing1], ["Wing1.L", _mirror(wing1)],
+			["Wing2.R", wing2], ["Wing2.L", _mirror(wing2)]]:
+		if (w[1] as Vector3).length_squared() > 0.0:
+			table.append([w[0], w[1]])
+	table.append(["Torso", Vector3(-torso, 0.0, 0.0)])
+	for i in NECK_BONES.size():
+		var a: float = float(neck[i]) if i < neck.size() else 0.0
+		table.append([NECK_BONES[i], Vector3(-a, 0.0, 0.0)])
+	table.append([HEAD_BONE, Vector3(-head, 0.0, 0.0)])
+	for b in TAIL_BONES:
+		table.append([b, Vector3(-tail_down, 0.0, tail_curl)])
+	for b in ["Thigh.L", "Thigh.R"]:
+		table.append([b, Vector3(thigh, 0.0, 0.0)])
+	for b in ["Shin.L", "Shin.R"]:
+		table.append([b, Vector3(shin, 0.0, 0.0)])
+	for b in ["Foot.L", "Foot.R"]:
+		table.append([b, Vector3(foot, 0.0, 0.0)])
+	return table
+
+
+static func _mirror(e: Vector3) -> Vector3:
+	return Vector3(e.x, -e.y, -e.z)
+
+
+## The calibrated coil, ready to hand to `attach_slumber`.
+static func slumber_default() -> Array:
+	var d := PI / 180.0
+	var neck: Array = []
+	for a in SLUMBER_NECK:
+		neck.append(float(a) * d)
+	return slumber_table(neck, SLUMBER_HEAD * d, SLUMBER_TORSO * d,
+		SLUMBER_TAIL_DOWN * d, SLUMBER_TAIL_CURL * d,
+		SLUMBER_THIGH * d, SLUMBER_SHIN * d, SLUMBER_FOOT * d,
+		SLUMBER_WING1 * d, SLUMBER_WING2 * d)
+
+
+## Attach (once) the slumber modifier to this rig's skeleton. Returns null on
+## a rig with no skeleton — every caller must stay duck-safe.
+func attach_slumber(table: Array, breath_amp: float, breath_rate: float) -> Slumber:
+	if skeleton == null:
+		return null
+	var s := Slumber.new()
+	s.name = "SlumberCoil"
+	s.breath_amp = breath_amp
+	s.breath_rate = breath_rate
+	skeleton.add_child(s)
+	s.build(skeleton, table, "Chest")
+	return s
 
 
 # -- emissive particle builder (shared: ashfall flame, ember drift) --------

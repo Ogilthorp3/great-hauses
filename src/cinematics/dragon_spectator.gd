@@ -1,24 +1,45 @@
 class_name DragonSpectator
 extends Node3D
-## DRAGON SPECTATOR + ASHFALL — the dragon watches the whole war from a
-## perch above the far wall, reacts to the play, and delivers the checkmate
-## execution: a swoop over the beaten army and a river of fire (ASHFALL).
+## DRAGON SPECTATOR + ASHFALL — the dragon SLEEPS on the stone beside the
+## board through the whole war, stirs at what happens on it, and WAKES ONCE:
+## at checkmate, to deliver the execution — a roar, a swoop over the beaten
+## army and a river of fire (ASHFALL).
 ##
 ## Presentation only: it never touches game state. Pieces are duck-typed
 ## Node3D (PieceView works out of the box via its `side` / `piece_type`
 ## ints; mocks only need the same two fields).
 ##
-## Perch: slow Flying_Idle + gentle bob above the far wall — out of the
-## default camera's frame (orbit pitch -0.85), in view when the player
-## orbits upward. Occasional head glance (LookAtModifier3D on the Head
-## bone) toward the last-moved piece.
+## THE WYRM SLEEPS (rebuilt 2026-08-09). It used to hover on a perch above
+## the far wall running `Flying_Idle` for the entire match — which is a
+## dramatic dead end: a creature that is ALREADY FLYING cannot take flight.
+## The arc is now rest -> stir -> wake -> burn:
+##
+##   REST     coiled ON THE GROUND at `rest_position`, in the east aisle
+##            beside the board — clear of the camera's orbit ring (the ring
+##            is 2.5-11.5 m out and 1.4-11.2 m up; a couched wyrm at 6.9 m
+##            out and 1 m tall is never near it) and clear of the board.
+##            `Perch_Idle` at `rest_idle_speed` (0.3) under DragonRig's
+##            SLUMBER coil: neck folded forward, chin on the stone, tail
+##            curled around the flank, haunches couched, slow breathing
+##            swell, throat coals BANKED (`rest_ember_energy`).
+##   STIR     a blunder / brilliancy / capture is a sleeping animal being
+##            DISTURBED, never a wakening: the coil eases back only to
+##            `stir_slumber_floor` (never 0), the head comes up, the coals
+##            blink, the clip plays slow, and it settles back. Same rate
+##            limit and duel-cam gate as before.
+##   WAKE     checkmate only. Head rises and the coals kindle -> it hauls
+##            itself up (`Land_Settle` run BACKWARDS) and unfurls -> it
+##            ROARS on the ground (`Roar`) -> only THEN the wings go
+##            (`Fast_Flying`) and the bank climbs off the floor into the
+##            existing ceremony. The roar lands before the wings by
+##            construction: they are separate phases.
 ##
 ## Reaction API (integrator connects signals to these; each returns true
 ## when the reaction actually played):
 ##   notice_move(world_pos)     call once per ply — feeds the rate limiter
 ##                              and the idle glance target
-##   react_blunder()            'No' head-shake
-##   react_brilliant()          'Yes' nod
+##   react_blunder()            'No' head-shake, slowed
+##   react_brilliant()          'Yes' nod, slowed
 ##   react_capture(square)      'HitReact' flinch + look at the square
 ##                              (square: Vector3 world pos, or Vector2i via
 ##                              the `board` reference)
@@ -28,15 +49,18 @@ extends Node3D
 ## ASHFALL (awaitable): play_ashfall(losing_side[, winning_house, losers,
 ##   championship]) — THE CEREMONY (rebuilt 2026-08-08, two tiers):
 ##
-##   MATCH (any checkmate, wall <= 12 s): launch from the perch -> one
-##   sweeping Fast_Flying bank around the hall (inside walls and pillars,
-##   above y~3) filmed by a low-angle camera pushing in from below (the awe
+##   MATCH (any checkmate, wall <= 13 s): THE WAKE off the stone (stir ->
+##   rise -> roar, ~2.65 s) -> one sweeping Fast_Flying bank that CLIMBS off
+##   the floor and laps the hall (inside walls and pillars, above y~3) filmed
+##   by a low-angle camera pushing in from below (the awe
 ##   shot) -> flare to a wing-spread hover above the board center
 ##   (Flying_Idle at 0.6 reads as a mighty hover), ONE beat of stillness
 ##   (the inhale) -> the fire sweep over the beaten army with a long ember
-##   and drifting-ash tail (particles linger 3-4 s after the breath).
-##   Dragon scale swells to ~1.4 for the ceremony and returns to the perch
-##   at 1.15. MORTAL-KOMBAT INCINERATION: each warrior the jet touches
+##   and drifting-ash tail (particles linger 3-4 s after the breath) -> and,
+##   when the ash settles, it flies BACK DOWN to `rest_position`, lands
+##   (`Land_Settle`) and re-coils into slumber. Dragon scale swells to ~1.4
+##   for the ceremony and returns to 1.15 on the stone.
+##   MORTAL-KOMBAT INCINERATION: each warrior the jet touches
 ##   flashes white-hot, burns down to its charred KayKit skeleton (local
 ##   cast table below) standing in its exact spot and facing, smolders
 ##   ~1.2 s under sparse grey wisps, then falls (Death_A via the shared
@@ -103,6 +127,20 @@ const BREATH_CLIP_END := 2.25     ## recoil complete
 ## the fire sweeps under.
 const BREATH_LUNGE_FRAC := 0.25
 
+## THE RISE, in clip time of `Land_Settle` (2.50 s, authored flare -> touch-
+## down -> wings fold). Played BACKWARDS between these two marks it is the
+## opposite motion, which is exactly the one the wake needs: the folded wings
+## open and the beast hauls its weight up off the stone. It is deliberately
+## NOT run back past ~1.6 s — before that the clip is airborne (measured: the
+## feet are 0.6 u off the ground at t 1.15), and a "rise" whose last frames
+## have the feet dangling reads as a puppet lifted by a wire, not a beast
+## standing up.
+const RISE_CLIP_SETTLED := 2.46   ## fully folded, weight down: where rest lives
+const RISE_CLIP_UP := 1.62        ## unfurled, still on its feet
+## The roar's peak (jaw widest, head highest) sits early in the 1.67 s clip;
+## the phase holds through it rather than to the clip's end.
+const ROAR_CLIP_LEN := 1.67
+
 ## MORTAL-KOMBAT remains cast — the module's OWN local table (PieceAssets
 ## stays untouched by doctrine). Keyed by duck piece_type; anything not
 ## listed (queens, tower garrisons, unknowable ducks) rises as a Rogue.
@@ -122,15 +160,42 @@ const ASHFALL_LINES: Array[String] = [
 	"Kneel or be kindling — so decrees {wh}.",
 ]
 
-## Perch pose (world space of this node's parent). Defaults match
-## GreatHall.spectator_perch() with the board at the origin.
-## Root y values below all carry the +1.15 × rig_scale lift the ground-origin
-## serpent-wyrm needs (DragonRig.BODY_RISE); each keeps the beast's BODY at
-## exactly the screen height the old mid-air-root rig read at.
+## THE RESTING PLACE — where the wyrm sleeps, on the hall floor beside the
+## board. Chosen against the real gameplay camera (pivot (0,0.4,0), yaw PI,
+## pitch -0.85, fov 50, 16:9), not by eye on a preview render:
+##   * the EAST aisle, x 6.6 — outside the board (±4) and inside the feast
+##     table at x 9; it lands 18% across the frame and dead level with the
+##     board's middle, i.e. LOOMING beside it and not covering one square;
+##   * the camera's orbit ring never gets near it: the tightest zoom step that
+##     can reach the wyrm's radius at all still puts the eye 3.5 m up, and at
+##     the default 11.5/-0.85 the eye is 9 m up (test_dragon.gd solves this
+##     rather than sampling it);
+##   * yaw -0.3PI turns the head toward the board's east flank AND puts the
+##     beast BROADSIDE to the camera. That last one is not decoration: at the
+##     first yaw tried (-3PI/4) the camera looked down the wyrm's spine and
+##     the whole animal read as a folded umbrella; in profile the neck, the
+##     mantled wing and the curled tail are three separate readable shapes.
+##     Checked on the rendered boot frame, not reasoned about.
+## No hall anchor exists for this yet (GreatHall is another module's file) —
+## see INTEGRATION-dragon.md for the `GreatHall.dragon_rest()` request.
+@export var rest_position := Vector3(6.6, -0.3, 0.6)   ## y = GreatHall.FLOOR_Y
+@export var rest_yaw := -PI * 0.30
+@export var rest_idle_speed := 0.30    ## Perch_Idle, slowed under the coil
+@export var rest_ember_energy := 0.40  ## the throat coals, BANKED
+@export var wake_ember_energy := 2.60  ## …and kindled (emissive only)
+@export var stir_slumber_floor := 0.42 ## a stir NEVER uncoils past this
+
+## Airborne anchor above the far wall. Nothing perches here any more — it is
+## kept because the integrator feeds it from GreatHall.spectator_perch() (the
+## e2e asserts the two agree) and the breath phase uses it as the fixed
+## reference for which side of the beaten army the wyrm hovers on, which is
+## what keeps the ceremony's framing identical to the one that was tuned.
+## Root y carries the +1.15 × rig_scale lift the ground-origin serpent-wyrm
+## needs (DragonRig.BODY_RISE).
 @export var perch_position := Vector3(0.0, 6.02, 11.2)   ## 4.70 + 1.15×1.15
 @export var perch_yaw := PI            ## face the board (-Z)
 @export var dragon_scale := 1.15
-@export var idle_speed := 0.55         ## slow Flying_Idle loop at the perch
+@export var idle_speed := 0.55         ## slow Flying_Idle loop in the air
 @export var bob_amplitude := 0.14
 @export var bob_speed := 0.8           ## rad/s of the bob sine
 @export var reaction_every_moves := 2  ## max 1 reaction per N moves
@@ -138,19 +203,25 @@ const ASHFALL_LINES: Array[String] = [
 @export var glance_max_gap := 10.0
 
 # CEREMONY wall-clock timings (exported so tests can shrink them).
-# MATCH budget: ramp .25 + bank 2.6 + flare .7 + inhale .6 + breath 2.8
-#   + linger 1.6 + return .9 ≈ 9.5 s (last remains resolve inside the
-#   linger's bounded wait) <= 12 s.
+# MATCH budget: stir .55 + rise .9 + roar 1.2 (THE WAKE, 2.65) + bank 2.0
+#   + flare .7 + inhale .6 + breath 2.8 + linger 1.6 + return 1.1 ≈ 11.5 s,
+#   worst case 12.7 with the linger's bounded +1.2 wait for the last remains.
+#   The slow-mo dip runs CONCURRENTLY with the stir and costs nothing.
+#   (Was 11.65 worst before the wake; the bank gave back 0.6 and the linger's
+#   bail 1.0 — the arc costs the budget ~1 s net, and is the point of it.)
 # CHAMPIONSHIP: match minus return, plus crown-bank 1.3 + settle 1.4
-#   + caption beats ~1.7 ≈ 12.3 s <= 16 s.
-@export var ash_ramp_wall := 0.25      ## slow-mo dip in
-@export var ash_bank_wall := 2.6       ## one sweeping bank around the hall
+#   + caption beats ~1.7 ≈ 15.9 s <= 16 s.
+@export var ash_stir_wall := 0.55      ## the head comes off the stone
+@export var ash_rise_wall := 0.9       ## Land_Settle backwards: it stands up
+@export var ash_roar_wall := 1.2       ## THE ROAR — on the ground, before the wings
+@export var ash_ramp_wall := 0.25      ## slow-mo dip in (rides the stir)
+@export var ash_bank_wall := 2.0       ## takeoff climb + one lap of the hall
 @export var ash_flare_wall := 0.7      ## bank -> wing-spread hover, board center
 @export var ash_inhale_wall := 0.6     ## ONE beat of stillness — the inhale
 @export var ash_swoop_wall := 1.3      ## championship: the crown-bank to the throne
 @export var ash_breath_wall := 2.8     ## the fire sweep across the army
 @export var ash_linger_wall := 1.6     ## jet cut; embers/ash drift, bones fall
-@export var ash_return_wall := 0.9     ## match: back to the wall perch
+@export var ash_return_wall := 1.1     ## match: down to the stone and land
 @export var ash_settle_wall := 1.4     ## championship: slow wing-settle on the throne
 @export var ash_flash_wall := 0.12     ## ignition flash before the skeleton swap
 @export var ash_smolder_wall := 1.2    ## smoldering beat between swap and collapse
@@ -164,7 +235,7 @@ const ASHFALL_LINES: Array[String] = [
 @export var champ_scale := 1.6         ## …and larger still upon the throne
 @export var bank_radius := 8.6         ## inside the ±12 walls and 10.6-radius pillars
 @export var bank_height := 5.11        ## bank floor root y (3.50 + 1.15×1.4)
-@export var failsafe_wall_sec := 18.0
+@export var failsafe_wall_sec := 20.0   ## > the championship worst case (15.9)
 
 ## Integrator references (both duck-typed, both optional):
 ## anything with is_active() gates reactions off the duel-cam;
@@ -182,6 +253,14 @@ var _glance_in := 4.0
 var _gaze_id := 0
 var _look: LookAtModifier3D = null
 var _gaze_target: Node3D = null
+
+## THE SLEEPER. `_slumber` is DragonRig's coil modifier; its `weight` is the
+## whole rest/stir/wake state in one number (1 = coiled asleep, 0 = the clip
+## as authored). `_slumber_id` cancels an in-flight ramp the way `_gaze_id`
+## cancels a glance — a stir that lands mid-settle must not fight it.
+var _slumber = null                    # DragonRig.Slumber
+var _slumber_id := 0
+var _ember := 0.0                      # current throat-coal energy
 
 ## World points the ceremony caption must never cover (the throne, the
 ## crowned king on the dais). The integrator fills this; the ceremony adds
@@ -211,6 +290,8 @@ var _end_pos := Vector3.ZERO           # tier-aware ceremony end pose
 var _end_yaw := PI
 var _end_scale := 1.15
 var _end_idle_speed := 0.55
+var _end_clip := "Perch_Idle"
+var _end_slumber := 1.0                # match: re-coils; championship: awake
 
 var _cine_cam: Camera3D = null         # the ceremony camera (windowed only)
 var _cam_prev: Camera3D = null
@@ -222,11 +303,16 @@ var _cam_look := Vector3.ZERO          # smoothed look point (fast — never los
 
 func _ready() -> void:
 	rig = DragonRigScript.spawn(self, "SpectatorDragon", Vector3.ZERO, 0.0, dragon_scale)
-	position = perch_position
-	rotation.y = perch_yaw
-	rig.play_loop("Flying_Idle", idle_speed)
+	position = rest_position
+	rotation.y = rest_yaw
+	# THE COIL. Built before the first clip so no frame of the match ever
+	# shows the beast standing to attention.
+	_slumber = rig.attach_slumber(DragonRigScript.slumber_default(), 0.05, 0.55)
+	_set_slumber(1.0)
+	rig.play_loop("Perch_Idle", rest_idle_speed)
 	if rig.anim != null:   # desync from the championship dragon's flap
-		rig.anim.seek(randf() * rig.clip_length("Flying_Idle"))
+		rig.anim.seek(randf() * rig.clip_length("Perch_Idle"))
+	_set_ember(rest_ember_energy)
 	caption = CaptionScript.new()
 	caption.name = "AshfallCaption"
 	add_child(caption)
@@ -235,31 +321,48 @@ func _ready() -> void:
 	_cine_cam.top_level = true   # ignores the perch/bank motion of this node
 	_cine_cam.current = false
 	add_child(_cine_cam)
-	_end_pos = perch_position
-	_end_yaw = perch_yaw
+	_end_pos = rest_position
+	_end_yaw = rest_yaw
 	_end_scale = dragon_scale
-	_end_idle_speed = idle_speed
+	_end_idle_speed = rest_idle_speed
+	_end_clip = "Perch_Idle"
+	_end_slumber = 1.0
 	_build_gaze()
 	_glance_in = randf_range(glance_min_gap, glance_max_gap)
 
 
 func _process(delta: float) -> void:
+	# THE COUCH. The coil folds the legs, which lifts the toe claws 0.32
+	# rig-local units — so the rig node sinks by exactly that much times its
+	# scale and the claws stay ON the stone instead of hovering over it. It
+	# tracks `weight`, so standing up during the wake also physically raises
+	# the body. Runs before the ceremony early-out: the wake needs it.
+	if rig != null and is_instance_valid(rig):
+		rig.position.y = -DragonRigScript.SLUMBER_ROOT_DROP \
+			* rig.scale.x * _slumber_weight()
 	if _ash_active:
 		# Keep the ceremony caption sliding clear of what it is filming.
 		if caption != null and is_instance_valid(caption):
 			caption.avoid_points = _caption_avoid()
 		return
-	# Gentle bob at the roost (wall clock — the perch ignores slow-mo).
-	# After a championship the roost IS the throne perch, not the wall.
-	var home := THRONE_PERCH if _champ_mode else perch_position
-	var t := float(Time.get_ticks_msec()) / 1000.0
-	position = home + Vector3.UP * (sin(t * bob_speed * TAU * 0.5) * bob_amplitude)
-	# Occasional head turn toward the last-moved piece.
+	if _champ_mode:
+		# After a championship the roost IS the throne perch — still airborne,
+		# so it keeps the gentle bob (wall clock: the perch ignores slow-mo).
+		var t := float(Time.get_ticks_msec()) / 1000.0
+		position = THRONE_PERCH \
+			+ Vector3.UP * (sin(t * bob_speed * TAU * 0.5) * bob_amplitude)
+	else:
+		# A sleeping animal on stone does not bob. Its breathing lives in the
+		# clip and in the coil's own swell — putting a hover sine on a beast
+		# that is lying down is precisely the tell that it is not.
+		position = rest_position
+	# Occasional head turn toward the last-moved piece. Asleep this is a
+	# half-glance — one eye cracked at the board, not a look.
 	_glance_in -= clampf(delta / maxf(Engine.time_scale, 0.05), 0.0, 0.1)
 	if _glance_in <= 0.0:
 		_glance_in = randf_range(glance_min_gap, glance_max_gap)
 		if _last_move_pos.is_finite() and not _reacting and not _duel_cam_active():
-			_gaze_pulse(_last_move_pos, 0.75, 1.2)
+			_gaze_pulse(_last_move_pos, 0.4 if is_asleep() else 0.75, 1.4)
 
 
 # ── spectator API ──────────────────────────────────────────────────────────
@@ -289,17 +392,23 @@ func can_react() -> bool:
 
 
 func react_blunder() -> bool:
-	return _react("No", 0.7, Vector3.INF)
+	return _react("No", 0.45, Vector3.INF)
 
 
 func react_brilliant() -> bool:
-	return _react("Yes", 0.7, Vector3.INF)
+	return _react("Yes", 0.45, Vector3.INF)
 
 
 func react_capture(square: Variant = null) -> bool:
-	return _react("HitReact", 1.0, _to_world(square))
+	return _react("HitReact", 0.7, _to_world(square))
 
 
+## THE STIR — a sleeping beast disturbed, never woken. The coil eases back
+## only as far as `stir_slumber_floor` (the head lifts, the shoulders come
+## off the stone, the tail stays curled), the throat coals blink, the clip
+## runs at roughly half its authored speed, and then it settles back down.
+## The floor is the contract: NOTHING that happens on the board — not a
+## queen taken, not a mate threat — fully wakes it. Only checkmate does.
 func _react(clip: String, speed: float, look_pos: Vector3) -> bool:
 	if not can_react():
 		return false
@@ -308,15 +417,87 @@ func _react(clip: String, speed: float, look_pos: Vector3) -> bool:
 	if look_pos.is_finite():
 		_last_move_pos = look_pos
 		_gaze_pulse(look_pos, 0.9, 0.8)
+	_slumber_ramp(stir_slumber_floor, 0.35)
+	_ember_blink()
 	var dur := rig.play_once(clip, speed)
 	var runner := func() -> void:
 		await _wall_sleep(maxf(dur, 0.1))
 		if is_instance_valid(self) and is_inside_tree():
 			_reacting = false
 			if not _ash_active:
-				rig.play_loop("Flying_Idle", idle_speed, 0.4)
+				rig.play_loop("Perch_Idle", rest_idle_speed, 0.5)
+				_slumber_ramp(1.0, 1.1)   # …and settles back
 	runner.call()
 	return true
+
+
+## True while the wyrm is coiled on the stone (its whole-match state). False
+## from the instant the wake begins and, after a championship, for good.
+func is_asleep() -> bool:
+	return not _ash_active and not _champ_mode and _slumber_weight() > 0.05
+
+
+## The coil's blend, 1 = fully asleep. THE probe for "did a capture wake it?"
+func slumber_weight() -> float:
+	return _slumber_weight()
+
+
+func _slumber_weight() -> float:
+	return float(_slumber.weight) if _slumber != null else 0.0
+
+
+func _set_slumber(w: float) -> void:
+	_slumber_id += 1   # any in-flight ramp loses
+	if _slumber != null:
+		_slumber.weight = clampf(w, 0.0, 1.0)
+
+
+## Cross-fade the coil to `to` over `dur` wall seconds. Fire-and-forget; a
+## later ramp (or a hard _set_slumber) cancels this one via _slumber_id.
+func _slumber_ramp(to: float, dur: float) -> void:
+	if _slumber == null:
+		return
+	_slumber_id += 1
+	var my_id := _slumber_id
+	var from: float = _slumber.weight
+	var runner := func() -> void:
+		var t0 := Time.get_ticks_msec()
+		while _slumber_id == my_id and is_instance_valid(self) and _slumber != null:
+			var u := clampf(float(Time.get_ticks_msec() - t0) / (dur * 1000.0), 0.0, 1.0)
+			_slumber.weight = lerpf(from, to, _ease_cubic(u))
+			if u >= 1.0:
+				return
+			var tree := get_tree()
+			if tree == null:
+				return
+			await tree.process_frame
+	runner.call()
+
+
+func _set_ember(v: float) -> void:
+	_ember = v
+	if rig != null and is_instance_valid(rig):
+		rig.set_ember_energy(v)
+
+
+## One slow blink of the banked coals: a dim, then back. The wyrm's eye
+## sockets are authored as holes (`dragon_void`), so the coals ARE its eye —
+## and they are emission, never a Light3D (the hall's 8 omnis are all torches).
+func _ember_blink() -> void:
+	var base := _ember
+	var runner := func() -> void:
+		var t0 := Time.get_ticks_msec()
+		while is_instance_valid(self) and not _ash_active:
+			var u := clampf(float(Time.get_ticks_msec() - t0) / 900.0, 0.0, 1.0)
+			_set_ember(base * (1.0 + 0.9 * sin(u * PI)))
+			if u >= 1.0:
+				_set_ember(base)
+				return
+			var tree := get_tree()
+			if tree == null:
+				return
+			await tree.process_frame
+	runner.call()
 
 
 func _duel_cam_active() -> bool:
@@ -400,35 +581,83 @@ func play_ashfall(losing_side: int, winning_house: String = "",
 	_ash_skip = false
 	_champ_mode = championship
 	_prev_time_scale = Engine.time_scale
-	_end_pos = THRONE_PERCH if championship else perch_position
-	_end_yaw = PI if championship else perch_yaw
+	_end_pos = THRONE_PERCH if championship else rest_position
+	_end_yaw = PI if championship else rest_yaw
 	_end_scale = champ_scale if championship else dragon_scale
-	_end_idle_speed = 0.45 if championship else idle_speed
+	_end_idle_speed = 0.45 if championship else rest_idle_speed
+	_end_clip = "Flying_Idle" if championship else "Perch_Idle"
+	_end_slumber = 0.0 if championship else 1.0
 	_ash_losers = []
 	for p in (losers if not losers.is_empty() else _collect_losers(losing_side)):
 		if is_instance_valid(p) and p is Node3D and not p.is_queued_for_deletion():
 			_ash_losers.append(p)
-	_ash_phase = "launch"
+	_ash_phase = "wake"
 	_jet_lit = false
 	ashfall_started.emit()
 	_arm_failsafe(seq)
 	_gaze_off()
 	_cam_take()   # windowed only: the ceremony camera (no-op headless)
 
-	# ── I. THE LAUNCH — cinematic dip, the mark, wings up ──
-	await _wall_lerp(seq, _set_ts, Engine.time_scale, ashfall_slow_scale, ash_ramp_wall)
+	# ── I. THE WAKE ───────────────────────────────────────────────────────
+	# The one moment the whole match has been building to, and the reason the
+	# wyrm spends the match on the floor: it has somewhere to go. Three beats,
+	# in this order, ON THE GROUND. The roar lands BEFORE the wings by
+	# construction — they are separate phases and the wings do not move until
+	# the bank.
+	#
+	# I.a THE STIR — the head comes up off the stone and the coals kindle.
+	# The slow-mo dip rides this beat instead of costing its own (detached:
+	# _wall_lerp bails on seq/skip, so a click here still snaps cleanly).
+	_ts_ramp(seq, ashfall_slow_scale, ash_ramp_wall)
+	var wake_pos := position
+	var stir := func(u: float) -> void:
+		_set_slumber(1.0 - _ease_cubic(u))
+		_set_ember(lerpf(rest_ember_energy, wake_ember_energy, u))
+		# THE WAKE DOLLY drops to the floor and pushes in over the three
+		# beats. Every mark stands in the NEAR AISLE (z <= -4.9, past the
+		# board's near rank) — the same scar the bank's dolly carries: a
+		# ceremony camera that stands ON the board shoots every frame from
+		# inside somebody's helmet.
+		_cam_track(Vector3(0.9, 1.75, -7.2), _body_pos())
+	rig.play_loop("Perch_Idle", 0.85, 0.35)
+	await _wall_lerp(seq, stir, 0.0, 1.0, ash_stir_wall)
 	if _ash_seq != seq or _ash_skip:
 		return
+	# I.b THE RISE — `Land_Settle` run BACKWARDS: folded wings open, the
+	# weight comes up off the haunches. Driven by hand (see DragonRig.
+	# play_manual) because no playback speed plays a clip in reverse.
+	var rising := rig.play_manual("Land_Settle")
+	var rise := func(u: float) -> void:
+		if rising:
+			rig.seek_clip(lerpf(RISE_CLIP_SETTLED, RISE_CLIP_UP, _ease_cubic(u)))
+		position = wake_pos + Vector3.UP * (0.12 * u)
+		_cam_track(Vector3(1.7, 1.45, -6.1), _body_pos())
+	await _wall_lerp(seq, rise, 0.0, 1.0, ash_rise_wall)
+	if _ash_seq != seq or _ash_skip:
+		return
+	# I.c THE ROAR — head up, jaw wide, still standing on the hall floor.
+	# This is where the caption's mark lands: the sound, then the flight.
+	_ash_phase = "roar"
+	rig.play_once("Roar", 1.0, 0.25)
 	caption.show_line("ASHFALL.")
-	rig.play_loop("Fast_Flying", 0.75)   # slow, heavy wingbeats — a mountain flying
+	var roar_pos := position
+	var roar := func(u: float) -> void:
+		position = roar_pos + Vector3.UP * (0.10 * sin(u * PI))
+		_cam_track(Vector3(2.6, 1.15, -4.9), _body_pos() + Vector3.UP * 0.95)
+	await _wall_lerp(seq, roar, 0.0, 1.0, ash_roar_wall)
+	if _ash_seq != seq or _ash_skip:
+		return
+	rig.play_loop("Fast_Flying", 1.15)   # NOW the wings — hard beats off the floor
 	_scale_ramp(seq, ceremony_scale, ash_bank_wall + ash_flare_wall)   # swells, never pops
 
-	# ── II. THE BANK — one sweeping pass around the hall, filmed from
-	# below: the low-angle camera pushes in as the wyrm thunders overhead.
+	# ── II. THE BANK — the takeoff climb straight into one sweeping pass
+	# around the hall, filmed from below: the low-angle camera pushes in as
+	# the wyrm thunders overhead.
 	_ash_phase = "bank"
 	var start_pos := position
 	var th0 := atan2(start_pos.x, start_pos.z)
 	var prev_p := start_pos
+	var beats_eased := false
 	var t0 := Time.get_ticks_msec()
 	while true:
 		if _ash_seq != seq or _ash_skip:
@@ -439,13 +668,20 @@ func play_ashfall(losing_side: int, winning_house: String = "",
 		var r := lerpf(bank_radius, 5.2, e)
 		var h := lerpf(bank_height + 1.0, bank_height, e)
 		var target := Vector3(sin(th) * r, h, cos(th) * r)
-		var p := start_pos.lerp(target, clampf(u / 0.15, 0.0, 1.0))
+		# THE CLIMB. The bank no longer starts from a perch already in the
+		# air: it starts on the hall floor, so the first third of the lap IS
+		# the takeoff, blended over 0.35 (was 0.15 — at 0.15 the wyrm did not
+		# leave the ground, it teleported off it).
+		var p := start_pos.lerp(target, _ease_cubic(clampf(u / 0.35, 0.0, 1.0)))
 		var v := p - prev_p
 		prev_p = p
 		position = p
 		if v.length() > 0.001:
 			rotation.y = lerp_angle(rotation.y, atan2(v.x, v.z), 0.35)
 		rotation.z = -0.35 * sin(u * PI)   # lean into the turn
+		if not beats_eased and u >= 0.4:
+			beats_eased = true   # off the floor: hard beats settle into cruise
+			rig.play_loop("Fast_Flying", 0.8, 0.5)
 		# The awe shot: a low camera pulled back from the board — the wyrm
 		# wheels across the hall as a winged SILHOUETTE (this asset's
 		# majesty lives in its wingspan at distance, never in close-ups).
@@ -591,15 +827,25 @@ func play_ashfall(losing_side: int, winning_house: String = "",
 		return
 
 	if not championship:
-		# ── VII. THE RETURN — back to the wall perch, size and clock restored ──
+		# ── VII. THE RETURN — down to the stone it slept on, and LAND.
+		# Size and clock restored on the way. `Land_Settle` is played forward
+		# here (the wake ran it backwards) from 40% of the descent, so the
+		# flare and touchdown land under the beast as it arrives; _ash_finish
+		# then blends Perch_Idle in and the coil ramps back over 1.2 s.
 		_ash_phase = "return"
 		rig.play_loop("Fast_Flying", 1.0, 0.3)
 		_scale_ramp(seq, dragon_scale, ash_return_wall)
 		var from := position
 		var from_yaw := rotation.y
+		var touched := {"v": false}
 		var back := func(u: float) -> void:
-			position = from.lerp(perch_position, u) + Vector3.UP * sin(u * PI) * 0.8
-			rotation.y = lerp_angle(from_yaw, perch_yaw, u)
+			position = from.lerp(rest_position, _ease_cubic(u)) \
+				+ Vector3.UP * sin(u * PI) * 0.8
+			rotation.y = lerp_angle(from_yaw, rest_yaw, u)
+			rotation.z = lerpf(rotation.z, 0.0, 0.15)
+			if not touched["v"] and u >= 0.4:
+				touched["v"] = true
+				rig.play_once("Land_Settle", 1.5, 0.35)
 			_cam_home(u)
 		await _wall_lerp(seq, back, 0.0, 1.0, ash_return_wall)
 	else:
@@ -688,13 +934,20 @@ func _ash_finish(seq: int) -> void:
 			n.queue_free()
 	_remains.clear()
 	_cam_release()
-	# Tier-aware end pose: match ends back on the wall perch at 1.15;
-	# championship ends on the throne perch at 1.6 with the ember drift on.
+	# Tier-aware end pose: a match ends back ASLEEP on the stone at 1.15;
+	# a championship ends awake on the throne perch at 1.6 with the ember
+	# drift on — it has just crowned a house, it does not go back to bed.
 	position = _end_pos
 	rotation = Vector3(0.0, _end_yaw, 0.0)
 	if rig != null:
 		rig.scale = Vector3.ONE * _end_scale
-		rig.play_loop("Flying_Idle", _end_idle_speed, 0.3)
+		rig.play_loop(_end_clip, _end_idle_speed, 0.3)
+	if _end_slumber > 0.0 and not _ash_skip:
+		_set_slumber(0.0)          # start from awake…
+		_slumber_ramp(_end_slumber, 1.2)   # …and re-coil, visibly
+	else:
+		_set_slumber(_end_slumber)   # the skip is a snap, by contract
+	_set_ember(rest_ember_energy if _end_slumber > 0.0 else wake_ember_energy)
 	if _champ_mode:
 		_ensure_drift()
 	ashfall_finished.emit()
@@ -748,6 +1001,17 @@ func _arm_failsafe(seq: int) -> void:
 
 func _set_ts(v: float) -> void:
 	Engine.time_scale = v
+
+
+## The cinematic slow-mo dip, DETACHED so it can ride the wake's first beat
+## instead of costing the budget a phase of its own. Same seq/skip discipline
+## as every other _wall_lerp: a click during the dip returns without writing,
+## and _ash_finish has already restored the clock by then.
+func _ts_ramp(seq: int, to: float, dur: float) -> void:
+	var from := Engine.time_scale
+	var runner := func() -> void:
+		await _wall_lerp(seq, _set_ts, from, to, dur)
+	runner.call()
 
 
 # ── ashfall internals ──────────────────────────────────────────────────────

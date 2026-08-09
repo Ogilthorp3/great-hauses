@@ -3430,6 +3430,23 @@ func _scenario_dragon_live() -> void:
 		await _fail("dragon-glance-idle", "glance target set before any ply")
 		return
 	_pass("dragon-idle-ready (can_react, no glance target yet)")
+	# ── THE SLEEPER, PHOTOGRAPHED FROM THE PLAYER'S OWN SEAT ──
+	# The dragon spends the whole match coiled on the stone beside the board.
+	# This shot is taken BEFORE any cinematic camera exists, so it is the
+	# gameplay camera and nothing else — the only frame that can honestly
+	# answer "does it read as a sleeping animal in the game?".
+	if not bool(spectator.call("is_asleep")):
+		await _fail("dragon-asleep", "the wyrm is not asleep at the board")
+		return
+	var rest_pos: Vector3 = spectator.get("rest_position")
+	if rest_pos.y > 0.0 or absf(rest_pos.x) < 4.6:
+		await _fail("dragon-rests-on-the-floor",
+			"rest_position %s is not on the floor beside the board" % str(rest_pos))
+		return
+	_pass("dragon-asleep (coiled at %s, slumber %.2f)"
+		% [str(rest_pos), float(spectator.call("slumber_weight"))])
+	await _sleep(1.0)   # let the coil, torches and breathing settle
+	await _shot("dragon_resting")
 	var state: Object = game.get("state")
 	if not await _wait_until(func():
 		return game.get("busy") == false and state.turn == false, 15.0):
@@ -3478,6 +3495,25 @@ func _scenario_dragon_live() -> void:
 	# Every shot below waits on the ceremony's PHASE, never on a stopwatch the
 	# ceremony is bending (see _sleep_wall). The wide silhouette shot is the
 	# bank; the fire shots are gated on the jet actually burning.
+	# THE WAKE comes first: the wyrm is still on the floor, head up, jaw wide.
+	# Gated on the phase for the same reason as the fire — a stopwatch would
+	# photograph whatever the bent clock happened to be showing.
+	if not await _wait_until(func():
+		return str(spectator.call("ashfall_phase")) == "roar", 8.0):
+		await _fail("dragon-wake-roar", "the wyrm never roared (phase=%s)"
+			% str(spectator.call("ashfall_phase")))
+		return
+	await _sleep_wall(0.35)   # into the roar: head up, jaw at its widest
+	await _shot("wake_roar")
+	if not (spectator.get("position") as Vector3).is_equal_approx(
+			spectator.get("rest_position") as Vector3):
+		var dy: float = absf((spectator.get("position") as Vector3).y
+			- (spectator.get("rest_position") as Vector3).y)
+		if dy > 0.6:
+			await _fail("dragon-roars-on-the-ground",
+				"the wyrm was already %.2f m airborne when it roared" % dy)
+			return
+	_pass("dragon-wake-roar (roared on the stone, before the wings)")
 	if not await _wait_until(func():
 		return str(spectator.call("ashfall_phase")) == "bank", 4.0):
 		await _fail("dragon-ashfall-bank", "the ceremony never reached the bank")
@@ -3542,6 +3578,18 @@ func _scenario_dragon_live() -> void:
 		await _fail("dragon-victory-flow", "victory panel never appeared")
 		return
 	_pass("dragon-victory-flow")
+	# THE ARC CLOSES. It flew back down to the same stone, landed, and coiled
+	# up again — so the next match starts from rest and the wake still has
+	# somewhere to go. Photographed AFTER the coil is back, not during it.
+	if not await _wait_until(func():
+		return bool(spectator.call("is_asleep")) \
+			and float(spectator.call("slumber_weight")) > 0.9, 8.0):
+		await _fail("dragon-resettles",
+			"the wyrm never went back to sleep (slumber %.2f at %s)"
+				% [float(spectator.call("slumber_weight")),
+					str(spectator.get("position"))])
+		return
+	_pass("dragon-resettles (asleep again on its own stone)")
 	await _shot("after_ashfall")
 	_finish(0)
 

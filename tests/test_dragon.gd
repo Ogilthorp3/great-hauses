@@ -2,17 +2,21 @@ extends SceneTree
 
 # Headless unit tests for the DRAGON SPECTATOR + ASHFALL module — focused on
 # the module's hard contracts:
+#   - THE WYRM SLEEPS: it rests coiled on the ground, a stir never fully
+#     wakes it, and only checkmate does (rest -> stir -> wake -> burn)
 #   - reaction rate limit (max 1 per 2 moves) + the duel-cam gate
 #   - ASHFALL Engine.time_scale hygiene on EVERY exit path (normal end,
 #     skip, spectator freed mid-sequence)
 #   - loser-piece cleanup is complete (explicit list AND duck-scan), and
 #     the king / winners are never touched
 #   - NO Light3D node is added by any module code path (asserted by
-#     counting the whole tree before/after)
+#     counting the whole tree before/after) — including the wake, whose
+#     "the eyes light" is emissive coals and nothing else
 # Run: /Applications/Godot.app/Contents/MacOS/Godot --headless --path <project> -s res://tests/test_dragon.gd
 # Exit code 0 = all green, 1 = failures.
 
 const Spectator := preload("res://src/cinematics/dragon_spectator.gd")
+const Rig := preload("res://src/cinematics/dragon_rig.gd")
 const DD := preload("res://src/cinematics/duel_director.gd")
 const GH := preload("res://src/env/great_hall.gd")
 
@@ -22,7 +26,7 @@ var checks_run := 0
 ## A hard-erroring test function aborts silently at the error and its await
 ## resumes as if it finished — the floor turns silent aborts into a loud
 ## failure (same guard as test_cinematics.gd).
-const MIN_EXPECTED_CHECKS := 133
+const MIN_EXPECTED_CHECKS := 225
 
 ## THE SERPENT-WYRM CONTRACT (dragon-v2, installed 2026-08-09). Asserted
 ## against the names GODOT ends up with, never the ones the GLB was authored
@@ -75,6 +79,9 @@ func _main() -> void:
 	_test_kill_lines()
 	_test_ceremony_budgets()
 	_test_origin_moved()
+	await _test_slumber_pose()
+	await _test_rest_and_stir()
+	await _test_the_wake()
 	await _test_rig_contract()
 	await _test_fire_wiring()
 	await _test_rate_limit_and_gate()
@@ -118,6 +125,9 @@ func _light_count() -> int:
 
 func _fast_spectator() -> DragonSpectator:
 	var s: DragonSpectator = Spectator.new()
+	s.ash_stir_wall = 0.08
+	s.ash_rise_wall = 0.1
+	s.ash_roar_wall = 0.12
 	s.ash_ramp_wall = 0.05
 	s.ash_bank_wall = 0.2
 	s.ash_flare_wall = 0.08
@@ -171,6 +181,208 @@ func _alive(arr: Array) -> int:
 ## Tests ##
 
 
+## ── THE WYRM SLEEPS ───────────────────────────────────────────────────────
+## The dramatic fault this suite now guards: a dragon that spends the match
+## already airborne has nowhere to escalate to at checkmate. These check the
+## resting STATE (not just that some numbers exist) — the pose is measured
+## out of the skeleton, and the rest spot is checked against the real
+## gameplay camera's geometry rather than eyeballed.
+
+
+## The coil must actually move bones, and it must move them the right way.
+## Sampled from INSIDE the modifier stack: Godot restores the animation pose
+## the moment the stack finishes, so a coil that never touched a vertex reads
+## identically to one that did from _process (learned the hard way).
+func _test_slumber_pose() -> void:
+	var s := _fast_spectator()
+	await process_frame
+	await process_frame
+	var coil = s.get("_slumber")
+	check("slumber: the coil is attached to the skeleton", true, coil != null)
+	check("slumber: it bends the neck, head, tail and legs", true,
+			coil != null and coil.bend_count() >= 20)
+	check("slumber: asleep at rest", true, s.is_asleep())
+	check("slumber: full weight at rest", true,
+			is_equal_approx(s.slumber_weight(), 1.0))
+	# Measure the coiled pose against the standing clip pose.
+	coil.sample_bones = ["Head", "Head_end", "Chest", "Tail6", "Toe.L"]
+	await process_frame
+	await process_frame
+	var down: Dictionary = (coil.sampled as Dictionary).duplicate()
+	coil.weight = 0.0
+	await process_frame
+	await process_frame
+	var up: Dictionary = (coil.sampled as Dictionary).duplicate()
+	coil.weight = 1.0
+	check("slumber: sampled inside the stack (both poses read)", true,
+			down.has("Head") and up.has("Head"))
+	if down.has("Head") and up.has("Head"):
+		check("slumber: the head comes DOWN a body's height", true,
+				(up["Head"] as Vector3).y - (down["Head"] as Vector3).y > 1.0)
+		check("slumber: the snout ends near the stone (y=%.2f)"
+				% (down["Head_end"] as Vector3).y, true,
+				(down["Head_end"] as Vector3).y < 0.55)
+		check("slumber: the skull stays upright (snout FORWARD, not folded back)",
+				true, (down["Head_end"] as Vector3).z > (down["Head"] as Vector3).z)
+		check("slumber: the tail is curled around the flank, not trailing", true,
+				absf((down["Tail6"] as Vector3).x) > 0.6)
+		check("slumber: the tail lies on the floor", true,
+				(down["Tail6"] as Vector3).y < 0.45)
+		check("slumber: the haunches couch (the claws lift, so the node sinks)",
+				true, (down["Toe.L"] as Vector3).y - (up["Toe.L"] as Vector3).y > 0.2)
+		check("slumber: the node sinks by what the couch lifted", true,
+				absf((down["Toe.L"] as Vector3).y - (up["Toe.L"] as Vector3).y
+					- Rig.SLUMBER_ROOT_DROP) < 0.06)
+	s.free()
+	await process_frame
+
+
+## Rest geometry against the REAL gameplay camera (game.tscn: pivot
+## (0, 0.4, 0), yaw PI, pitch -0.85, fov 50, 16:9) and the real hall.
+## A resting spot is only "beside the board, clear of the orbit ring" if the
+## numbers say so from the seat the player actually sits in.
+func _test_rest_and_stir() -> void:
+	var s: DragonSpectator = Spectator.new()
+	var rest: Vector3 = s.rest_position
+	check("rest: on the hall floor, not in the air", true,
+			absf(rest.y - (-0.3)) < 0.01)
+	check("rest: outside the 8-unit board", true, absf(rest.x) > 4.6)
+	check("rest: inside the walls and clear of the feast table at x 9", true,
+			absf(rest.x) < 8.2 and absf(rest.z) < 8.0)
+	# THE ORBIT RING, solved rather than sampled. OrbitCamera puts the eye at
+	# horizontal radius d*cos(pitch) and height 0.4 + d*sin|pitch|; the pitch
+	# clamp is -1.35..-0.12 and the zoom is a 1.12 geometric ladder from 11.5
+	# between 4 and 13. So for each REACHABLE zoom step, the moment the ring's
+	# radius equals the wyrm's, the eye is exactly 0.4 + sqrt(d^2 - r^2) up —
+	# and the coiled wyrm stands ~1.1 m. The tightest case is the 7.31 zoom
+	# step at the shallowest pitch, and it still clears by over a metre.
+	var radius: float = Vector2(rest.x, rest.z).length()
+	var worst_cam_y := 99.0
+	var dists: Array[float] = []
+	for k in range(-6, 4):
+		var d: float = 11.5 * pow(1.12, float(k))
+		if d >= 4.0 and d <= 13.0:
+			dists.append(d)
+	for dist in dists:
+		var c: float = radius / dist
+		if c > cos(0.12) or c < cos(1.35):
+			continue   # this zoom step can never sit at the wyrm's radius
+		worst_cam_y = minf(worst_cam_y, 0.4 + sqrt(dist * dist - radius * radius))
+	check("rest: the orbit ring always clears the sleeper (closest %.2f m up)"
+			% worst_cam_y, true, worst_cam_y >= 2.2)
+	# …and it is IN FRAME from the default camera, on the board's flank.
+	var cam := Vector3(0.0, 0.4, 0.0) + Vector3(0.0, 8.638, -7.590)
+	var fwd := Vector3(0.0, -0.7513, 0.6600)
+	var right := Vector3(-1.0, 0.0, 0.0)
+	var up := Vector3(0.0, 0.6600, 0.7513)
+	var v: Vector3 = rest - cam
+	var depth: float = v.dot(fwd)
+	var sx: float = 0.5 * (1.0 + (v.dot(right) / depth) / 0.8290)
+	var sy: float = 0.5 * (1.0 - (v.dot(up) / depth) / 0.4663)
+	check("rest: in frame from the default camera", true,
+			sx > 0.05 and sx < 0.95 and sy > 0.05 and sy < 0.95)
+	check("rest: off the board's flank, not over it (screen x %.2f < 0.30)" % sx,
+			true, sx < 0.30)
+	check("rest: and it is not hiding in a corner (screen y %.2f mid-frame)" % sy,
+			true, sy > 0.25 and sy < 0.75)
+	s.free()
+
+	# THE STIR: a capture disturbs the sleeper; it must NEVER wake it.
+	var sp := _fast_spectator()
+	await process_frame
+	check("stir: asleep before anything happens", true, sp.is_asleep())
+	check("stir: a capture is allowed", true, sp.react_capture(Vector3(1.0, 0.0, 1.0)))
+	check("stir: it plays the flinch", "HitReact", sp.rig.anim.assigned_animation)
+	var floor_w: float = sp.stir_slumber_floor
+	var lowest := {"v": 1.0}
+	var sampler := func() -> void:
+		var t0 := Time.get_ticks_msec()
+		while is_instance_valid(sp) and Time.get_ticks_msec() - t0 < 2500:
+			lowest["v"] = minf(lowest["v"], sp.slumber_weight())
+			await process_frame
+	sampler.call()
+	await _wait_wall(2.6)
+	check("stir: the coil DID ease (the head came up)", true, lowest["v"] < 0.95)
+	check("stir: but it never fully woke for a capture", true,
+			lowest["v"] >= floor_w - 0.02)
+	check("stir: still asleep after", true, sp.is_asleep())
+	var settled: bool = await _wait_until(
+			func() -> bool: return sp.slumber_weight() > 0.9, 3.0)
+	check("stir: it settles back into the coil", true, settled)
+	check("stir: back on Perch_Idle", "Perch_Idle", sp.rig.anim.assigned_animation)
+	sp.free()
+	await process_frame
+
+
+## THE WAKE — the beat the whole match builds to. Order is the contract:
+## the head comes up and the coals kindle, it hauls itself up, it ROARS on
+## the ground, and only THEN the wings move. A roar that lands after the
+## wings is the same dramatic failure as a dragon that was already flying.
+func _test_the_wake() -> void:
+	var lights_before := _light_count()
+	var s := _fast_spectator()
+	s.ash_stir_wall = 0.25
+	s.ash_rise_wall = 0.3
+	s.ash_roar_wall = 0.4
+	await process_frame
+	var losers := _spawn_army(1, 3, 1.5)
+	var seen: Array[String] = []
+	var clips: Dictionary = {}
+	var ember := {"lo": 99.0, "hi": 0.0}
+	var awake_at := {"v": ""}
+	check("wake: the coals are BANKED while it sleeps", true,
+			is_equal_approx(float(s.get("_ember")), s.rest_ember_energy))
+	var runner := func() -> void:
+		await s.play_ashfall(1, "Haus Winterfang", losers)
+	runner.call()
+	var sampler := func() -> void:
+		while is_instance_valid(s) and s.is_ashfall_active():
+			var ph: String = s.ashfall_phase()
+			if not ph.is_empty() and (seen.is_empty() or seen[-1] != ph):
+				seen.append(ph)
+			if not clips.has(ph):
+				clips[ph] = s.rig.anim.assigned_animation
+			var e := float(s.get("_ember"))
+			ember["lo"] = minf(ember["lo"], e)
+			ember["hi"] = maxf(ember["hi"], e)
+			if awake_at["v"].is_empty() and s.slumber_weight() < 0.02:
+				awake_at["v"] = ph
+			await process_frame
+	sampler.call()
+	var done: bool = await _wait_until(func() -> bool: return not s.is_ashfall_active(), 12.0)
+	check("wake: ceremony completed", true, done)
+	check("wake: the first beat of the ceremony IS the wake", "wake",
+			seen[0] if not seen.is_empty() else "<none>")
+	var i_roar := seen.find("roar")
+	var i_bank := seen.find("bank")
+	check("wake: it roars", true, i_roar >= 0)
+	check("wake: THE ROAR LANDS BEFORE THE WINGS", true,
+			i_roar >= 0 and i_bank > i_roar)
+	check("wake: the roar phase plays the Roar clip", "Roar", clips.get("roar", "<none>"))
+	check("wake: the wake phase does NOT flap", true,
+			clips.get("wake", "") != "Fast_Flying")
+	check("wake: the wings only come out for the bank", "Fast_Flying",
+			clips.get("bank", "<none>"))
+	check("wake: it was fully awake by the roar, not before the stir", true,
+			awake_at["v"] == "wake" or awake_at["v"] == "roar")
+	check("wake: the coals KINDLE (eyes light, emissive only)", true,
+			ember["hi"] >= s.wake_ember_energy - 0.01)
+	check("wake: and they were banked at the start", true,
+			ember["lo"] <= s.rest_ember_energy + 0.01)
+	check("wake: NO Light3D anywhere on the wake path", lights_before, _light_count())
+	# …and afterwards it goes back to sleep on the same stone.
+	await process_frame
+	check("wake: back on the resting stone", true, _perched(s, s.rest_position))
+	var recoiled: bool = await _wait_until(
+			func() -> bool: return s.slumber_weight() > 0.9, 4.0)
+	check("wake: it re-coils into slumber after the burn", true, recoiled)
+	check("wake: asleep again", true, s.is_asleep())
+	check("wake: the coals are banked again", true,
+			float(s.get("_ember")) <= s.rest_ember_energy + 0.01)
+	s.free()
+	await process_frame
+
+
 func _test_kill_lines() -> void:
 	check("lines: pool present", true, Spectator.ASHFALL_LINES.size() >= 3)
 	var all_have_token := true
@@ -186,7 +398,8 @@ func _test_rate_limit_and_gate() -> void:
 	var s := _fast_spectator()
 	await process_frame
 	check("rig: dragon spawned", true, s.rig != null and s.rig.anim != null)
-	check("rig: idles on Flying_Idle", "Flying_Idle", s.rig.anim.assigned_animation)
+	check("rig: idles on Perch_Idle (not a hover)", "Perch_Idle",
+			s.rig.anim.assigned_animation)
 
 	check("rate: first reaction allowed", true, s.react_brilliant())
 	check("rate: reaction plays Yes", "Yes", s.rig.anim.assigned_animation)
@@ -299,15 +512,25 @@ func _perched(s: DragonSpectator, home: Vector3) -> bool:
 
 func _test_ceremony_budgets() -> void:
 	## Static arithmetic on the DEFAULT exported phase walls; worst case
-	## includes the linger's bounded +2.2 s wait and both caption beats.
+	## includes the linger's bounded +1.2 s wait and both caption beats.
+	## The slow-mo dip is NOT in the sum: it rides the wake's stir beat.
 	var s: DragonSpectator = Spectator.new()   # never enters the tree
-	var match_worst: float = s.ash_ramp_wall + s.ash_bank_wall + s.ash_flare_wall \
-		+ s.ash_inhale_wall + s.ash_breath_wall + s.ash_linger_wall + 2.2 \
+	var wake: float = s.ash_stir_wall + s.ash_rise_wall + s.ash_roar_wall
+	check("budget: the wake is a real beat, not a flourish (>= 2 s)", true, wake >= 2.0)
+	check("budget: the wake fits inside 3 s", true, wake <= 3.0)
+	check("budget: the roar owns its own phase before the wings", true,
+			s.ash_roar_wall >= 1.0)
+	check("budget: the slow-mo dip rides the stir (costs no phase)", true,
+			s.ash_ramp_wall <= s.ash_stir_wall)
+	var match_worst: float = wake + s.ash_bank_wall + s.ash_flare_wall \
+		+ s.ash_inhale_wall + s.ash_breath_wall + s.ash_linger_wall + 1.2 \
 		+ s.ash_return_wall
-	check("budget: match ceremony defaults <= 12 s", true, match_worst <= 12.0)
+	check("budget: match ceremony defaults <= 13 s", true, match_worst <= 13.0)
 	var champ_worst: float = match_worst - s.ash_return_wall + s.ash_swoop_wall \
 		+ s.ash_settle_wall + 0.4 + 1.3
 	check("budget: championship defaults <= 16 s", true, champ_worst <= 16.0)
+	check("budget: the failsafe outlasts the championship worst case", true,
+			s.failsafe_wall_sec > champ_worst)
 	check("budget: throne perch synced with the hall", true,
 			Spectator.THRONE_PERCH == GH.DRAGON_HOVER)
 	check("budget: champ scale matches the hall dragon", true,
@@ -446,8 +669,10 @@ func _test_skip_every_phase() -> void:
 		check("skip@%.2f: remains cleaned" % delay, 0, s.remains_count())
 		check("skip@%.2f: match end scale" % delay, true,
 				is_equal_approx(s.rig.scale.x, s.dragon_scale))
-		check("skip@%.2f: back on the wall perch" % delay, true,
-				_perched(s, s.perch_position))
+		check("skip@%.2f: back on the resting stone" % delay, true,
+				_perched(s, s.rest_position))
+		check("skip@%.2f: snapped straight back into the coil" % delay, true,
+				is_equal_approx(s.slumber_weight(), 1.0))
 		check("skip@%.2f: inactive" % delay, false, s.is_ashfall_active())
 		s.free()
 		await process_frame
@@ -470,6 +695,8 @@ func _test_skip_every_phase() -> void:
 				_perched(s2, Spectator.THRONE_PERCH))
 		check("champ-skip@%.1f: champ scale 1.6" % delay, true,
 				is_equal_approx(s2.rig.scale.x, s2.champ_scale))
+		check("champ-skip@%.1f: awake on the throne, not coiled" % delay, true,
+				is_equal_approx(s2.slumber_weight(), 0.0))
 		s2.free()
 		await process_frame
 
@@ -485,6 +712,9 @@ func _test_championship_tier() -> void:
 	await process_frame
 	check("champ: completed under 6 s at test speeds", true, wall < 6.0)
 	check("champ: throne perch pose", true, _perched(s, Spectator.THRONE_PERCH))
+	check("champ: stays awake on the throne (no coil)", true,
+			is_equal_approx(s.slumber_weight(), 0.0))
+	check("champ: not asleep after a crowning", false, s.is_asleep())
 	check("champ: settles at scale 1.6", true, is_equal_approx(s.rig.scale.x, s.champ_scale))
 	check("champ: ember drift over the tableau", true,
 			s.rig.get_node_or_null("TableauEmberDrift") != null)
@@ -506,7 +736,7 @@ func _test_match_defaults_budget() -> void:
 	await s.play_ashfall(1, "Haus Winterfang", losers)
 	var wall := float(Time.get_ticks_msec() - t0) / 1000.0
 	print("  (default-timing match ceremony wall=%.2fs)" % wall)
-	check("defaults: match ceremony <= 12 s wall", true, wall <= 12.0)
+	check("defaults: match ceremony <= 13 s wall", true, wall <= 13.0)
 	check("defaults: scale returns to perch size", true,
 			is_equal_approx(s.rig.scale.x, s.dragon_scale))
 	check("defaults: time_scale restored", true, is_equal_approx(Engine.time_scale, 1.0))
@@ -542,7 +772,6 @@ func _test_ashfall_free_restore() -> void:
 ## the beast in the floor or parks it in the rafters, and neither shows up as
 ## a failing assertion anywhere else.
 func _test_origin_moved() -> void:
-	var Rig := preload("res://src/cinematics/dragon_rig.gd")
 	check("origin: BODY_RISE is the measured mass centre", true,
 			is_equal_approx(Rig.BODY_RISE, 0.95))
 	var s: DragonSpectator = Spectator.new()   # never enters the tree

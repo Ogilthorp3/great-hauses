@@ -4,6 +4,57 @@ Module delivered 2026-08-08. Per the module boundary it touches **no game
 code**: `game.gd` / `game.tscn` / `duel_director.gd` / `piece_view.gd` are
 unmodified. Everything below is what the integrator wires up.
 
+## THE WYRM SLEEPS (2026-08-09) — rest → stir → wake → burn
+
+The spectator no longer hovers on a perch above the far wall. It **sleeps
+coiled on the hall floor beside the board** for the whole match and wakes
+exactly once, at checkmate. The dramatic fault this fixes: a creature that is
+already flying cannot dramatically take flight, so the old ceremony opened at
+its own ceiling.
+
+| Beat | What the player sees | Driven by |
+|------|----------------------|-----------|
+| REST | coiled on the stone at `rest_position` (east aisle, x 6.6): neck folded, chin on the floor, wings mantled, tail curled, throat coals BANKED | `Perch_Idle` at 0.30 under `DragonRig`'s slumber coil |
+| STIR | a blunder / brilliancy / capture disturbs it — head lifts, coals blink, it settles back. It **never** fully wakes for a move | `_react` eases the coil to `stir_slumber_floor` (0.42) and back |
+| WAKE | head up + coals kindle → hauls itself up (`Land_Settle` **backwards**) → **ROARS on the ground** → only then the wings | ashfall phases `wake` → `roar` → `bank` |
+| BURN | the existing ceremony, unchanged: bank, flare, inhale, dracarys, linger | unchanged |
+| REST | flies back down to the same stone, lands (`Land_Settle`), re-coils | match tier only; a championship stays awake on the throne |
+
+**Nothing in the integration changed.** `play_ashfall(...)` has the same
+signature, the same await, the same signals, the same skip contract, and the
+same `time_scale` hygiene. New read-only probes: `is_asleep()`,
+`slumber_weight()`, and two new `ashfall_phase()` values, `"wake"` and
+`"roar"`.
+
+Wall clock: the default MATCH ceremony measured **12.01 s** (was 10.01 s) —
+the wake costs ~2.0 s net, and the budget line moved 12 s → 13 s. The
+championship worst case stays inside 16 s.
+
+### ASK: a hall anchor for the resting spot
+
+`rest_position` currently carries its own default because `great_hall.gd`
+belongs to another module. It wants the same treatment `spectator_perch()`
+got:
+
+```gdscript
+# src/env/great_hall.gd
+## Where the spectator wyrm sleeps: on the floor in the east aisle, clear of
+## the board (±4) and of the feast table at x 9.
+func dragon_rest() -> Vector3:
+    return Vector3(6.6, FLOOR_Y, 0.6)
+```
+
+…and one line in `game.gd`'s `_setup_spectator`, beside the existing perch line:
+
+```gdscript
+if hall.has_method("dragon_rest"):
+    spectator.rest_position = hall.dragon_rest()
+```
+
+Until then the module's default matches those numbers exactly, and
+`tests/test_dragon.gd` asserts the spot against the real gameplay camera
+(in frame, off the board, and never inside the orbit ring).
+
 ## Files
 
 | File | What |
