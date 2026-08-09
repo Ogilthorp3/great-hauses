@@ -8,7 +8,10 @@
 #               time-restore, DS4 opponent (mock+live, 3 modes),
 #               UciEngine/stockfish client, music (104), banter (93),
 #               dragon spectator/ASHFALL, duel face-off, costumes
-#               (273 — mounted knights and pawn helms included)   — Gate A
+#               (273 — mounted knights and pawn helms included),
+#               head-to-head protocol (110 — host authority, the
+#               illegal-move-from-client refusal, the cinematic
+#               gate)                                             — Gate A
 #   boot        windowed: select flows to game, 32 pieces, banners+HUD dyed
 #   orientation windowed: --debug-coords labeled overlay from the default
 #               player camera, saved as labeled.png — the permanent
@@ -46,8 +49,16 @@
 #   dragon-live windowed: spectator perched + fed, reactions gated under the
 #               duel cam, scripted mate → ASHFALL burns the losers, clock +
 #               views restored, victory flow reached
+#   net-hall    windowed: the Play a Friend door — banner, "Play a Friend",
+#               Host (side choice, a real listening socket, the addresses to
+#               share), Esc hangs up, then a join to a dead port shows the
+#               human-readable "could not reach …" line
 #   fullgame    windowed: complete two-rook-ladder game, sync + time_scale
 #               hygiene every ply                                — Gate D
+#
+# HEAD-TO-HEAD is a SEPARATE runner: ./run_net_e2e.sh launches TWO Godot
+# instances that play a real game against each other and diffs their per-ply
+# FENs. It is not part of this suite because it needs two windows side by side.
 #   showcase    windowed 45 s zero-error soak + beauty shots + the
 #               championship throne-room tableau                 — Gate C
 #
@@ -241,7 +252,7 @@ if [ ! -x "$GODOT" ]; then note "Godot binary missing: $GODOT"; exit 2; fi
 STEPS=("$@")
 [ ${#STEPS[@]} -eq 0 ] && STEPS=(preflight tests boot orientation board-truth \
   board-moves move duel castle enpassant promote slowmo music banter \
-  dragon-live tournament oracle-mock oracle-modes undo fullgame showcase)
+  dragon-live tournament oracle-mock oracle-modes undo net-hall fullgame showcase)
 
 SUITE_RC=0
 for step in "${STEPS[@]}"; do
@@ -258,6 +269,7 @@ for step in "${STEPS[@]}"; do
       run_suite dragon-suite res://tests/test_dragon.gd || SUITE_RC=1
       run_suite duel-facing-suite res://tests/test_duel_facing.gd || SUITE_RC=1
       run_suite costumes-suite res://tests/test_costumes.gd || SUITE_RC=1
+      run_suite net-suite res://tests/test_net.gd || SUITE_RC=1
       ;;
     boot)      run_scenario boot || SUITE_RC=1 ;;
     orientation) run_scenario orientation "--debug-coords" || SUITE_RC=1 ;;
@@ -283,12 +295,15 @@ for step in "${STEPS[@]}"; do
                  # 4 scripted duel rounds + a 4 s held oracle reply
     fullgame)  SCENARIO_TIMEOUT=230 run_scenario fullgame \
                  "--e2e-fen=$FULLGAME_FEN" "--e2e-timeout=210" || SUITE_RC=1 ;;
+    net-hall)  SCENARIO_TIMEOUT=120 run_scenario net-hall "--e2e-timeout=100" \
+                 || SUITE_RC=1 ;;
+                 # the unreachable-host error takes ENet's own connect timeout
     showcase)  SCENARIO_TIMEOUT=170 run_scenario showcase "--e2e-fen=$DUEL_FEN" \
                  "--e2e-timeout=150" || SUITE_RC=1 ;;
                  # 45 s soak + tableau is ~56 s alone but needs headroom at
                  # the tail of a full sequential run (watchdogged at 90 s
                  # under end-of-suite load, 2026-08-08)
-    *) note "unknown step '$step' (use preflight|tests|boot|orientation|board-truth|board-moves|move|duel|castle|enpassant|promote|slowmo|music|banter|dragon-live|tournament|oracle-mock|oracle-modes|undo|fullgame|showcase)"; SUITE_RC=1 ;;
+    *) note "unknown step '$step' (use preflight|tests|boot|orientation|board-truth|board-moves|move|duel|castle|enpassant|promote|slowmo|music|banter|dragon-live|tournament|oracle-mock|oracle-modes|undo|net-hall|fullgame|showcase)"; SUITE_RC=1 ;;
   esac
 done
 

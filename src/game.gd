@@ -19,6 +19,13 @@ extends Node3D
 ##                                   the ENGINE'S OWN square beliefs (the
 ##                                   orientation tiebreaker — see e2e
 ##                                   'orientation' scenario)
+##
+## HEAD-TO-HEAD (Session.mode == "network", src/net/**). The same board, the
+## same duels, one difference that reaches everywhere: THE PLAYER IS NOT
+## ALWAYS WHITE. `player_color` (false = White) replaces every bare
+## `state.turn` test, the camera sits behind whichever army is the player's,
+## and the rival's plies arrive from the wire instead of from ChessAI.
+## Take-backs are disabled outright in a network match — see `_request_undo`.
 
 const PieceScene: PackedScene = preload("res://scenes/piece_view.tscn")
 const MAIN_SCENE := "res://scenes/main.tscn"
@@ -64,6 +71,22 @@ var player_house_id := ""            # "" = legacy Frost/Ember skin
 var rival_house_id := ""
 var _player_display := "House Frost"
 var _rival_display := "House Ember"
+
+# -- which army is MINE ------------------------------------------------------
+# Single player is always White, and for four months "the player's turn" was
+# spelled `not state.turn` in a dozen places. Head-to-head broke that: the
+# host may choose Black. `player_color` is the one fact those dozen places now
+# ask, and it defaults to White so every single-player path is untouched.
+var player_color := false            # false = White, true = Black
+var net: NetMatch = null             # non-null only in a head-to-head match
+var _net_disconnected := false
+var _net_status: Label
+var _net_panel: PanelContainer
+var _net_panel_label: Label
+## e2e evidence: one entry per ply that completed the full network round trip.
+var net_plies: Array[String] = []    # "seq|uci|fen"
+var net_rejections: Array[String] = []
+signal net_ply_settled(seq: int, fen: String)
 
 var views: Dictionary = {}          # Vector2i (board sq) -> PieceView
 var selected: Variant = null        # Vector2i, or null
@@ -139,6 +162,11 @@ func _ready() -> void:
 	_resolve_identity()
 	if Session.configured and Session.mode == "tournament":
 		_undos_left = TOURNAMENT_UNDO_LIMIT
+	if Session.is_network():
+		# The HOST's position is the only position. Its --e2e-fen rode across
+		# the wire in match_ready, so the joiner never reads its own flag.
+		fen = Session.net_start_fen
+		_undos_left = 0             # take-backs are off online (see _request_undo)
 	state = ChessState.new()
 	if not fen.is_empty() and not state.set_fen(fen):
 		push_error("invalid --e2e-fen '%s' — using the standard lineup" % fen)
@@ -169,6 +197,7 @@ func _ready() -> void:
 	_setup_banter()     # after the HUD — the opening pool line arrives synchronously
 	_spawn_from_state()
 	_refresh_turn_moves()
+	_setup_network()    # after the state exists — the host hands it to NetMatch
 	_update_turn_label()
 	board.square_clicked.connect(_on_square_clicked)
 	board.square_hovered.connect(_on_square_hovered)
@@ -179,8 +208,38 @@ func _ready() -> void:
 		_smoke()
 	elif args.has("--dump-tree"):
 		_dump_tree()
-	if state.turn and not game_over:
+	if net == null and state.turn != player_color and not game_over:
 		_kick_ai_opening()
+
+
+# -- head-to-head wiring ----------------------------------------------------
+
+
+func _setup_network() -> void:
+	## Bind the live connection (opened back in the Hall of Banners) to this
+	## match. The HOST hands NetMatch its authoritative ChessState here — that
+	## reference is what every incoming move request is validated against.
+	if not Session.is_network():
+		return
+	net = NetMatch.get_active(get_tree())
+	if net == null:
+		push_error("network match with no live NetMatch — falling back to a local board")
+		return
+	if net.is_host:
+		net.attach_state(state)
+	net.move_applied.connect(_on_net_move_applied)
+	net.move_rejected.connect(_on_net_move_rejected)
+	net.opponent_left.connect(_on_net_opponent_left)
+	net.desync.connect(_on_net_desync)
+	# The camera sits behind the player's OWN army. yaw = PI is behind White
+	# (the rig's default); a Black player looks down the board from the far end.
+	if player_color:
+		var rig: Node = get_node_or_null("CameraRig")
+		if rig != null:
+			rig.set("yaw", 0.0)
+			rig.set("_target_yaw", 0.0)
+			if rig.has_method("_apply"):
+				rig.call("_apply", 1.0)   # snap, don't swing through the hall
 
 
 # -- wave-3 module setup (spectator dragon + rival banter) ------------------
@@ -243,6 +302,8 @@ func _on_cinematic_started(kind: String) -> void:
 func _resolve_identity() -> void:
 	if not Session.configured:
 		return
+	if Session.is_network():
+		player_color = Session.net_my_color
 	player_house_id = Session.player_house
 	rival_house_id = Session.rival_house()
 	if rival_house_id.is_empty():
@@ -315,8 +376,10 @@ func _spawn_from_state() -> void:
 		var c = state.pieces[idx]
 		if c == null:
 			continue
-		var piece_side := PieceView.House.EMBER if ChessState.piece_color(c) \
-			else PieceView.House.FROST
+		# FROST is always "my army", EMBER always the rival's — so a Black
+		# player's own pieces still wear their own house's dye.
+		var piece_side := PieceView.House.FROST \
+			if ChessState.piece_color(c) == player_color else PieceView.House.EMBER
 		_spawn(CHAR_TO_TYPE[str(c).to_lower()], piece_side, sq_of(idx))
 
 
@@ -349,12 +412,13 @@ func _kick_ai_opening() -> void:
 
 
 func _on_square_clicked(sq: Vector2i) -> void:
-	if busy or game_over or state == null or state.turn \
+	if busy or game_over or state == null or state.turn != player_color \
+			or _net_disconnected \
 			or (duel_director != null and duel_director.is_active()):
 		return  # not interactive during animations/cinematics, after the end, or on the rival's turn
 	var idx := idx_of(sq)
 	var piece = state.pieces[idx]
-	var is_own: bool = piece != null and not ChessState.piece_color(piece)
+	var is_own: bool = piece != null and ChessState.piece_color(piece) == player_color
 	if selected == null:
 		if is_own:
 			_select(sq)
@@ -453,19 +517,122 @@ func _play_turn(move) -> void:
 	## One full round: the player's ply, then (if the game goes on) the rival's.
 	## An undo mid-round bumps _turn_gen; every await below re-checks it and a
 	## stale continuation drops out without touching busy (the undo owns it).
+	if net != null and net.is_active():
+		# HEAD-TO-HEAD: our own click is a REQUEST, exactly like the joiner's.
+		# Nothing moves — not even on the host's own screen — until the host's
+		# validated broadcast comes back through _on_net_move_applied. One code
+		# path, one order of events, no "the host sees it first" class of bug.
+		busy = true
+		_clear_selection()
+		_update_turn_label()
+		net.request_move(move)
+		return
 	busy = true
 	_push_undo_checkpoint()
 	var gen := _turn_gen
 	await _execute_ply(move)
 	if gen != _turn_gen:
 		return
-	if not game_over and state.turn:
+	if not game_over and state.turn != player_color:
 		await _ai_ply()
 		if gen != _turn_gen:
 			return
 	busy = false
 	_update_turn_label()
 	_update_undo_button()
+
+
+# -- head-to-head turn flow -------------------------------------------------
+
+
+func _on_net_move_applied(payload: Dictionary) -> void:
+	## The host has spoken: this ply is law on both machines. Both sides
+	## animate it locally from THIS data — same move, same metadata, same duel.
+	var seq: int = int(payload.get("seq", -1))
+	var move = NetProtocol.decode_move(payload.get("move", {}))
+	if move == null:
+		push_error("network: malformed move payload for ply %d" % seq)
+		return
+	busy = true
+	_clear_selection()
+	var gen := _turn_gen
+	await _execute_ply(move)
+	if gen != _turn_gen:
+		return
+	# The host told us the FEN this ply MUST produce. A board that quietly
+	# diverges is the one failure a chess client may never ship with.
+	var fen_now := str(state.get_fen())
+	var fen_want := str(payload.get("fen_after", fen_now))
+	if fen_now != fen_want:
+		if net != null and is_instance_valid(net):
+			net.report_desync(fen_now, fen_want)
+		return
+	net_plies.append("%d|%s|%s" % [seq, move.to_uci(), fen_now])
+	print("NET PLY seq=%d uci=%s fen=%s" % [seq, move.to_uci(), fen_now])
+	# THE CINEMATIC BARRIER (see net_ply_gate.gd). A capture duel runs for
+	# seconds; the turn may not advance while the other player is still
+	# watching it. We report finished, then wait for the host to confirm both
+	# sides are.
+	if net != null and is_instance_valid(net):
+		net.ack_ply(seq)
+		await _await_net_gate(seq, gen)
+	if gen != _turn_gen:
+		return
+	busy = false
+	_update_turn_label()
+	_update_undo_button()
+	net_ply_settled.emit(seq, fen_now)
+
+
+func _await_net_gate(seq: int, gen: int) -> void:
+	## Block turn flow until BOTH sides have finished watching ply `seq`.
+	## Bounded: the host's own failsafe opens the gate at GATE_TIMEOUT_SEC, and
+	## this wait outlives that by a margin so a lost gate packet still releases
+	## the board instead of freezing the match forever.
+	var deadline := Time.get_ticks_msec() \
+		+ int((NetProtocol.GATE_TIMEOUT_SEC + 10.0) * 1000.0)
+	while net != null and is_instance_valid(net) and not net.gate_is_open(seq):
+		if gen != _turn_gen or _net_disconnected:
+			return
+		if Time.get_ticks_msec() > deadline:
+			push_warning("network: ply %d gate never opened — releasing the board" % seq)
+			return
+		var tree := get_tree()
+		if tree == null:
+			return
+		await tree.process_frame
+
+
+func _on_net_move_rejected(reason: String) -> void:
+	## The host refused our move. Say why, in the words it gave us, and hand
+	## the board back — never leave the player staring at a frozen screen.
+	net_rejections.append(reason)
+	print("NET REJECTED %s" % reason)
+	_clear_selection()
+	busy = false
+	_flash_oracle("the host refused that move — %s" % reason, 4.0)
+	_update_turn_label()
+
+
+func _on_net_opponent_left(reason: String) -> void:
+	if _net_disconnected:
+		return
+	_net_disconnected = true
+	_turn_gen += 1          # every in-flight await for this match is now void
+	busy = false
+	_clear_selection()
+	_show_net_panel("Your friend has left the field.\n%s" % reason)
+	_update_turn_label()
+	_update_undo_button()
+
+
+func _on_net_desync(why: String) -> void:
+	if _net_disconnected:
+		return
+	_net_disconnected = true
+	_turn_gen += 1
+	busy = false
+	_show_net_panel("The two boards no longer agree — the match cannot go on.\n%s" % why)
 
 
 func _ai_ply() -> void:
@@ -488,7 +655,7 @@ func _ai_ply() -> void:
 
 func _execute_ply(move) -> void:
 	## Engine first (authoritative), then the choreography catches up.
-	var mover_is_ember: bool = state.turn
+	var mover_is_ember: bool = state.turn != player_color   # the RIVAL is moving
 	var fen_before := "" if mover_is_ember else str(state.get_fen())
 	_record_san(move)
 	state.apply_move(move)
@@ -602,6 +769,17 @@ func _push_undo_checkpoint() -> void:
 
 func _request_undo() -> void:
 	## HUD button + Cmd/Ctrl+Z land here.
+	##
+	## TAKE-BACKS ARE OFF IN A NETWORK MATCH. There is no correct unilateral
+	## answer to "rewind the board out from under my opponent's hand": the host
+	## would have to rewind a position the joiner has already seen and may
+	## already have replied to, and every capture duel both players just
+	## watched would have to be un-watched. Consent-based take-backs are a real
+	## feature and not this one; until then the honest thing is to disable the
+	## control and SAY SO rather than let the button lie.
+	if net != null and net.is_active():
+		_flash_oracle("take-backs are off in a match against a friend", 3.0)
+		return
 	if game_over or _undo_checkpoints.is_empty() or _undos_left == 0:
 		return
 	_undo_pending = true
@@ -620,7 +798,7 @@ func _try_undo() -> void:
 	var cancel_thinking := busy and _ai_waiting
 	if busy and not cancel_thinking:
 		return   # mid move animation — wait for the board to settle
-	if not busy and state.turn:
+	if not busy and state.turn != player_color:
 		return   # defensive: settled but rival to move — nothing safe to pop
 	_undo_pending = false
 	_perform_undo()
@@ -657,6 +835,13 @@ func _perform_undo() -> void:
 
 func _update_undo_button() -> void:
 	if _undo_btn == null:
+		return
+	if Session.is_network():
+		# Obvious, in the HUD, from the first frame: this control is not a
+		# take-back you have run out of — it does not exist in this match.
+		_undo_btn.text = "↶ no take-backs online"
+		_undo_btn.tooltip_text = "Take-backs are disabled in a match against a friend"
+		_undo_btn.disabled = true
 		return
 	var label := "↶ undo"
 	if _undos_left >= 0:
@@ -760,7 +945,8 @@ func _finish_game() -> void:
 	_update_undo_button()
 	_clear_selection()
 	var result: int = state.get_result()
-	var player_won := result == ChessState.RESULT.CHECKMATE and state.turn
+	# The side TO MOVE is the mated one; the player won if that side is not his.
+	var player_won := result == ChessState.RESULT.CHECKMATE and state.turn != player_color
 	if Session.configured and Session.mode == "tournament" and Session.tournament != null:
 		Session.tournament.report_result(player_won)  # a draw eliminates the player
 	if banter != null and result == ChessState.RESULT.CHECKMATE:
@@ -777,7 +963,8 @@ func _end_sequence(result: int, player_won: bool) -> void:
 		_show_match_end(false, RESULT_TEXT.get(result, "The war is over"))
 		return
 	# The mated king falls under the checkmate cinematic's slow orbit.
-	var loser := PieceView.House.EMBER if state.turn else PieceView.House.FROST
+	var loser := PieceView.House.FROST if state.turn == player_color \
+		else PieceView.House.EMBER
 	var king_view: PieceView = null
 	var king_sq := Vector2i.ZERO
 	for sq in views:
@@ -898,7 +1085,8 @@ func _on_victory_panel_requested(winning_house: String) -> void:
 	if _victory_held:
 		_victory_pending = winning_house   # the ceremony still owns the frame
 		return
-	var player_won := state.get_result() == ChessState.RESULT.CHECKMATE and state.turn
+	var player_won := state.get_result() == ChessState.RESULT.CHECKMATE \
+		and state.turn != player_color
 	_show_match_end(player_won, "Checkmate — %s triumphs" % winning_house)
 
 
@@ -914,7 +1102,15 @@ func _show_match_end(player_won: bool, base_text: String) -> void:
 	var lines: Array[String] = [base_text]
 	_next_action = "rematch"
 	var btn_text := "Rematch"
-	if Session.configured and Session.mode == "tournament" and Session.tournament != null:
+	if Session.is_network():
+		# No unilateral rematch online: reloading the scene on one machine
+		# would leave the other holding a finished board. The way out of a
+		# network match is the Hall of Banners, for both of you.
+		lines.append("%s played %s." % [_rival_display,
+			NetProtocol.color_name(not player_color)])
+		_next_action = "hall"
+		btn_text = "Return to the Hall of Banners"
+	elif Session.configured and Session.mode == "tournament" and Session.tournament != null:
 		var t: Tournament = Session.tournament
 		if t.is_champion():
 			var motto := str(HouseRegistry.get_house(player_house_id).get("motto", ""))
@@ -966,6 +1162,9 @@ func _continue_pressed() -> void:
 
 
 func _return_to_hall() -> void:
+	if net != null and is_instance_valid(net):
+		net.shutdown()   # hang up before the scene goes — no orphan socket
+		net = null
 	Session.reset()
 	get_tree().change_scene_to_file(MAIN_SCENE)
 
@@ -980,6 +1179,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		return  # the director owns input mid-cinematic (click/Esc = skip)
 	match event.keycode:
 		KEY_R:
+			if Session.is_network():
+				return   # a one-sided reload would strand the other player
 			if _victory_shown and _next_action != "rematch":
 				_continue_pressed()
 			else:
@@ -988,7 +1189,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			if _victory_shown:
 				_continue_pressed()
 		KEY_ESCAPE:
-			if game_over:
+			if game_over or _net_disconnected:
 				_return_to_hall()
 
 
@@ -1275,6 +1476,19 @@ func _build_hud() -> void:
 	ctx.position = Vector2(16, 14)
 	hud.add_child(ctx)
 
+	if Session.is_network():
+		# The three things a player needs to know at a glance in a head-to-head
+		# match: that it IS one, which army is theirs, and who they are facing.
+		_net_status = Label.new()
+		_net_status.name = "NetStatus"
+		_net_status.text = "⚔ head-to-head · you play %s · %s vs %s" % [
+			NetProtocol.color_name(player_color), _player_display, _rival_display]
+		_net_status.add_theme_font_size_override("font_size", 12)
+		_net_status.add_theme_color_override("font_color", HUD_GOLD)
+		_outline(_net_status, 4)
+		_net_status.position = Vector2(16, 34)
+		hud.add_child(_net_status)
+
 	if oracle != null:
 		# The Oracle's mode, named under the opponent label.
 		var mode_lbl := Label.new()
@@ -1350,6 +1564,8 @@ func _build_hud() -> void:
 	# listed here; captions and the victory card are deliberately absent.
 	_hud_chrome.append_array([title, mottos, _turn_label, ctx,
 		_oracle_flash, _undo_btn, _move_list, _oracle_caption])
+	if _net_status != null:
+		_hud_chrome.append(_net_status)
 	if oracle != null:
 		var ml := hud.get_node_or_null("OracleMode") as Control
 		if ml != null:
@@ -1423,18 +1639,74 @@ func _build_hud() -> void:
 	vbox.add_child(_continue_btn)
 	hud.add_child(_victory_panel)
 
+	if Session.is_network():
+		_build_net_panel(hud)
+
+
+func _build_net_panel(hud: CanvasLayer) -> void:
+	## The "something went wrong with the connection" card. Never a code, never
+	## an error number: a plain sentence and the one action that still works.
+	_net_panel = PanelContainer.new()
+	_net_panel.name = "NetPanel"
+	_net_panel.visible = false
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.07, 0.03, 0.03, 0.94)
+	style.border_color = Color(0.72, 0.32, 0.22)
+	style.set_border_width_all(2)
+	style.set_content_margin_all(24)
+	_net_panel.add_theme_stylebox_override("panel", style)
+	_net_panel.set_anchors_preset(Control.PRESET_CENTER)
+	_net_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_net_panel.grow_vertical = Control.GROW_DIRECTION_BOTH
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 16)
+	_net_panel.add_child(vbox)
+	_net_panel_label = Label.new()
+	_net_panel_label.name = "NetPanelText"
+	_net_panel_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_net_panel_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_net_panel_label.custom_minimum_size = Vector2(520, 0)
+	_net_panel_label.add_theme_font_size_override("font_size", 20)
+	_net_panel_label.add_theme_color_override("font_color", HUD_TEXT)
+	vbox.add_child(_net_panel_label)
+	var back := Button.new()
+	back.name = "NetPanelButton"
+	back.text = "Return to the Hall of Banners"
+	back.flat = true
+	back.focus_mode = Control.FOCUS_NONE
+	back.add_theme_font_size_override("font_size", 18)
+	back.add_theme_color_override("font_color", HUD_GOLD)
+	back.add_theme_color_override("font_hover_color", Color(1.0, 0.82, 0.45))
+	back.pressed.connect(_return_to_hall)
+	vbox.add_child(back)
+	hud.add_child(_net_panel)
+
+
+func _show_net_panel(text: String) -> void:
+	print("NET PANEL %s" % text.replace("\n", " · "))
+	if _net_panel == null or _net_panel_label == null:
+		return
+	_net_panel_label.text = "%s\n\nPress Esc, or use the button below." % text
+	_net_panel.visible = true
+
 
 func _update_turn_label(ai_thinking := false) -> void:
 	if _turn_label == null:
 		return
 	_turn_label.modulate.a = 1.0
-	if game_over:
+	if _net_disconnected:
+		_turn_label.text = "the connection is gone"
+	elif game_over:
 		_turn_label.text = "the field falls silent"
-	elif ai_thinking or state.turn:
-		if oracle != null:
+	elif ai_thinking or state.turn != player_color:
+		if net != null:
+			_turn_label.text = "%s is deciding..." % _rival_display
+		elif oracle != null:
 			_turn_label.text = Ds4Opponent.THINKING_TEXT
 		else:
 			_turn_label.text = "%s is thinking..." % _rival_display
+	elif busy and net != null:
+		_turn_label.text = "sending your move..."
 	else:
 		_turn_label.text = "%s to move" % _player_display
 

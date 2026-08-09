@@ -147,7 +147,7 @@ func _ready() -> void:
 		# autoload _ready runs before the main scene loads, so this is early
 		# enough — and each e2e launch is its own process, nothing leaks.
 		_start_mock_oracle()
-	elif scenario in ["music", "banter", "dragon-live"]:
+	elif scenario in ["music", "banter", "dragon-live", "net-host", "net-join", "net-hall"]:
 		# Deterministic offline: BanterEngine shares the Oracle's endpoint
 		# family — a dead port makes its LLM path fail instantly so the
 		# canned pools answer synchronously.
@@ -216,6 +216,12 @@ func _run() -> void:
 			await _scenario_fullgame()
 		"showcase":
 			await _scenario_duel(true)
+		"net-host":
+			await _scenario_net(true)
+		"net-join":
+			await _scenario_net(false)
+		"net-hall":
+			await _scenario_net_hall()
 		_:
 			await _fail("scenario", "unknown scenario '%s'" % scenario)
 
@@ -2270,6 +2276,392 @@ func _view_census(game: Node) -> String:
 			int(pv.get("piece_type")), int(pv.get("side"))])
 	rows.sort()
 	return ",".join(rows)
+
+
+# ══ Scenarios: head-to-head multiplayer ════════════════════════════════════
+##
+## THE GATE IS THE TWO-INSTANCE GAME, not these functions. `net-host` and
+## `net-join` are the two HALVES of one test: test_e2e/run_net_e2e.sh launches
+## a real pair of Godot processes on this Mac, one of each, and they play a
+## real game against each other through the real click path. The runner then
+## diffs the `E2E NETFEN` lines the two processes printed — if the two boards
+## ever disagreed by one ply, the diff says so. A green unit suite proves the
+## protocol; only this proves multiplayer.
+##
+## The scripted game (NET_FEN, verified against the engine before it was
+## written down) is chosen to walk every path that matters:
+##   ply 0  White  Rh7    a normal move from the host
+##   ply 1  Black  c6     a normal move from the joiner
+##   ply 2  White  exd5   a CAPTURE — the slow-motion duel, on both screens
+##   ply 3  Black  c5     play continues after the cinematic gate reopens
+##   ply 4  White  Ra8#   CHECKMATE — the ceremony, and the verdict card
+const NET_FEN := "4k3/1pp5/8/3p4/4P3/8/8/R3K2R w KQ - 0 1"
+const NET_LINE_WHITE: Array[String] = ["h1h7", "e4d5", "a1a8"]
+const NET_LINE_BLACK: Array[String] = ["c7c6", "c6c5"]
+const NET_TOTAL_PLIES := 5
+
+var _net_duel_shot := false
+var _net_first_move_shot := false
+
+
+func _scenario_net(host_role: bool) -> void:
+	var tag := "host" if host_role else "join"
+	# main.gd dials before it swaps scenes, and a command-line joiner retries
+	# (the two processes are launched seconds apart), so this wait is long.
+	if not await _wait_until(func(): return _game() != null, 90.0):
+		await _fail("net-%s-connected" % tag,
+			"the match never started — no game scene after 90 s")
+		return
+	var game := await _boot_game(0)
+	if game == null:
+		return
+	var netm: Node = game.get("net")
+	if netm == null:
+		await _fail("net-%s-connected" % tag, "the game scene has no NetMatch node")
+		return
+	if not netm.is_active():
+		await _fail("net-%s-connected" % tag,
+			"NetMatch is not in a match (state=%d, '%s') — the other instance "
+				% [int(netm.get("state")), str(netm.get("detail"))]
+			+ "probably died before this one was seated")
+		return
+	_pass("net-%s-connected" % tag)
+
+	# Seating: who am I, which army is mine, and does the HUD say so.
+	var my_color: bool = bool(game.get("player_color"))
+	var want_color: bool = not host_role       # host is White in this scenario
+	if my_color != want_color:
+		await _fail("net-%s-seated" % tag, "player_color=%s, expected %s"
+			% [str(my_color), str(want_color)])
+		return
+	if bool(netm.get("is_host")) != host_role:
+		await _fail("net-%s-seated" % tag, "is_host=%s on the %s instance"
+			% [str(netm.get("is_host")), tag])
+		return
+	_pass("net-%s-seated (%s)" % [tag, NetProtocol.color_name(my_color)])
+
+	var status: Label = game.find_child("NetStatus", true, false)
+	var want_word := NetProtocol.color_name(my_color)
+	if status == null or not status.text.contains(want_word):
+		await _fail("net-%s-hud" % tag, "HUD NetStatus missing or silent about the side: '%s'"
+			% (status.text if status != null else "<absent>"))
+		return
+	_pass("net-%s-hud (%s)" % [tag, status.text])
+
+	# Take-backs are OFF online, and the control has to SAY so — a disabled
+	# button that still reads "undo · 3 left" is a lie in the HUD.
+	var undo_btn: Button = game.find_child("UndoButton", true, false)
+	if undo_btn == null or not undo_btn.disabled or not undo_btn.text.contains("no take-backs"):
+		await _fail("net-%s-undo-off" % tag, "undo button: text='%s' disabled=%s"
+			% [undo_btn.text if undo_btn != null else "<absent>",
+				str(undo_btn.disabled) if undo_btn != null else "?"])
+		return
+	# ...and the key press is inert too, not merely the button.
+	var state: Object = game.get("state")
+	var fen_before_undo := str(state.get_fen())
+	await _press_cmd_z()
+	await _sleep(0.4)
+	if int(game.get("undo_count")) != 0 or str(state.get_fen()) != fen_before_undo:
+		await _fail("net-%s-undo-off" % tag, "Cmd/Ctrl+Z moved the board in a network match")
+		return
+	_pass("net-%s-undo-off" % tag)
+
+	# Every settled ply, printed on BOTH instances — the runner diffs these.
+	game.connect("net_ply_settled", func(s: int, fen: String) -> void:
+		print("E2E NETFEN %d %s" % [s, fen]))
+	_net_duel_watch(game)      # fire and forget: photograph the duel when it starts
+	await _shot("seated")
+
+	if not host_role:
+		# Ply 0 belongs to White. The joiner asks for a move that WOULD be legal
+		# on its own turn (b7b6, and never part of the scripted game) — and is
+		# told, in words, that it is not its turn.
+		if not await _net_illegal_probe(game, netm, "wrong-turn",
+				"b7", "b6", "not your turn", false):
+			return
+
+	var my_line: Array[String] = NET_LINE_WHITE if host_role else NET_LINE_BLACK
+	var probed_illegal := host_role   # the joiner also probes on its own turn
+	for i in my_line.size():
+		if not host_role and not probed_illegal:
+			# Wait for our turn, THEN ask for something illegal: this proves the
+			# refusal is about legality, not about turn order.
+			if not await _wait_until(func():
+				return not bool(game.get("busy")) and bool(state.turn) == my_color, 90.0):
+				await _fail("net-join-illegal-geometry", "our turn never came")
+				return
+			if not await _net_illegal_probe(game, netm, "geometry", "e8", "e5",
+					"not a legal move", true):
+				return
+			probed_illegal = true
+		if not await _net_play(game, tag, my_line[i]):
+			return
+	# The last ply may be the opponent's; wait for the whole game either way.
+	if not await _wait_until(func():
+		return (game.get("net_plies") as Array).size() >= NET_TOTAL_PLIES, 120.0):
+		await _fail("net-%s-plies" % tag, "only %d of %d plies completed"
+			% [(game.get("net_plies") as Array).size(), NET_TOTAL_PLIES])
+		return
+	_pass("net-%s-plies (%d)" % [tag, (game.get("net_plies") as Array).size()])
+
+	# The duel ran here, not only on the other machine.
+	if (game.get("death_log") as Array).is_empty():
+		await _fail("net-%s-duel" % tag, "no death animation played on this instance")
+		return
+	_pass("net-%s-duel (%s)" % [tag, str((game.get("death_log") as Array).back())])
+	if not await _wait_until(func(): return _net_duel_shot, 20.0):
+		await _fail("net-%s-duel-photographed" % tag,
+			"the capture duel was never photographed on this instance")
+		return
+	_pass("net-%s-duel-photographed" % tag)
+
+	# Checkmate: the same verdict on both screens, and no unilateral rematch.
+	if not await _wait_until(func(): return bool(game.get("game_over")), 60.0):
+		await _fail("net-%s-checkmate" % tag, "the game never ended")
+		return
+	if state.get_result() != ChessState.RESULT.CHECKMATE:
+		await _fail("net-%s-checkmate" % tag, "result=%d, expected CHECKMATE"
+			% state.get_result())
+		return
+	_pass("net-%s-checkmate" % tag)
+	if not await _wait_until(func(): return bool(game.get("_victory_shown")), 70.0):
+		await _fail("net-%s-verdict" % tag, "the verdict card never opened")
+		return
+	var cont: Button = game.find_child("ContinueButton", true, false)
+	if cont == null or not cont.text.contains("Hall of Banners"):
+		await _fail("net-%s-verdict" % tag,
+			"the network verdict card offers '%s' — it must send both players home, "
+			% (cont.text if cont != null else "<absent>") + "never a one-sided rematch")
+		return
+	_pass("net-%s-verdict (%s)" % [tag, cont.text])
+	await _shot("checkmate")
+
+	# The final board, printed last so the runner can pin the end state too.
+	print("E2E NETFINAL %s" % str(state.get_fen()))
+	print("E2E NETREJECTS %d" % (game.get("net_rejections") as Array).size())
+	_finish(0)
+
+
+## Photograph the capture duel the moment the director takes the camera —
+## fire-and-forget, because the main flow is busy waiting for the ply to land.
+func _net_duel_watch(game: Node) -> void:
+	var dd: Node = game.get("duel_director")
+	if dd == null:
+		return
+	if not await _wait_until(func(): return dd.is_active(), 150.0):
+		return
+	await _sleep_wall(1.1)   # wall clock: the duel BENDS Engine.time_scale
+	await _shot("mid_duel")
+	_net_duel_shot = true
+
+
+## HOST AUTHORITY, live on the wire: hand the transport a move the host must
+## refuse, and prove (a) it is refused with a reason, (b) the board does not
+## move, on this instance or the other one.
+## `check_board` is false for the wrong-turn probe: it fires while the OPPONENT
+## legitimately owns the move, so the FEN is allowed to change under it — what
+## must never happen is OUR uci appearing in the applied-ply log, and that is
+## asserted in both cases.
+func _net_illegal_probe(game: Node, netm: Node, label: String, from_name: String,
+		to_name: String, want_reason: String, check_board: bool) -> bool:
+	var state: Object = game.get("state")
+	var fen_before := str(state.get_fen())
+	var uci := from_name + to_name
+	var rejects_before: int = (game.get("net_rejections") as Array).size()
+	var bad := ChessMove.new()
+	bad.from_square = ChessState.square_index_from_name(from_name)
+	bad.to_square = ChessState.square_index_from_name(to_name)
+	netm.request_move(bad)
+	if not await _wait_until(func():
+		return (game.get("net_rejections") as Array).size() > rejects_before, 15.0):
+		await _fail("net-illegal-%s" % label,
+			"the host ACCEPTED %s — a client forced an illegal move" % uci)
+		return false
+	var reason: String = str((game.get("net_rejections") as Array).back())
+	if not want_reason.is_empty() and not reason.contains(want_reason):
+		await _fail("net-illegal-%s" % label,
+			"refused, but for the wrong reason: '%s'" % reason)
+		return false
+	await _sleep(0.5)
+	for entry in (game.get("net_plies") as Array):
+		if str(entry).contains("|%s|" % uci):
+			await _fail("net-illegal-%s" % label,
+				"the refused move %s was applied anyway (%s)" % [uci, str(entry)])
+			return false
+	if check_board and str(state.get_fen()) != fen_before:
+		await _fail("net-illegal-%s" % label,
+			"the board moved on a refused request (%s -> %s)"
+				% [fen_before, str(state.get_fen())])
+		return false
+	_pass("net-illegal-%s refused (%s)" % [label, reason])
+	return true
+
+
+## One scripted ply, played the way a human plays it: click the piece, click
+## the square. Nothing is applied locally — the host's broadcast is what moves
+## the board, on both machines.
+func _net_play(game: Node, tag: String, uci: String) -> bool:
+	var state: Object = game.get("state")
+	var my_color: bool = bool(game.get("player_color"))
+	if not await _wait_until(func():
+		return not bool(game.get("busy")) and bool(state.turn) == my_color \
+			and not bool(game.get("game_over")), 120.0):
+		await _fail("net-%s-turn-%s" % [tag, uci], "our turn for %s never came" % uci)
+		return false
+	var from_idx := ChessState.square_index_from_name(uci.substr(0, 2))
+	var to_idx := ChessState.square_index_from_name(uci.substr(2, 2))
+	if not await _select_square(game, game.sq_of(from_idx)):
+		await _fail("net-%s-select-%s" % [tag, uci], "could not select %s" % uci.substr(0, 2))
+		return false
+	await _click_square(game, game.sq_of(to_idx))
+	if not await _wait_until(func(): return state.pieces[from_idx] == null, 25.0):
+		await _fail("net-%s-applied-%s" % [tag, uci],
+			"the host never broadcast %s back" % uci)
+		return false
+	_pass("net-%s-played (%s)" % [tag, uci])
+	if not _net_first_move_shot:
+		_net_first_move_shot = true
+		await _shot("after_%s" % uci)
+	return true
+
+
+# ── Scenario: net-hall (the Play a Friend panel, through real clicks) ──────
+## The two-instance gate proves the MATCH; this proves the DOOR. Every step is
+## a synthesized click on the real Hall of Banners: pick a banner, pick "Play a
+## Friend", host (addresses appear, the socket is really listening), back out,
+## then dial an address nobody is answering and read the error a human gets.
+func _scenario_net_hall() -> void:
+	if not await _wait_until(func(): return _select_screen() != null, 20.0):
+		await _fail("hall-present", "the Hall of Banners never appeared")
+		return
+	var sel: Control = _select_screen()
+	await _sleep(0.4)
+	var crest: Node = sel.find_child("Crest_%s" % DEFAULT_HOUSE, true, false)
+	if crest == null:
+		await _fail("hall-crest", "no crest for house '%s'" % DEFAULT_HOUSE)
+		return
+	if not await _click_until(crest.get_node("Sigil"),
+			func(): return int(sel.get("phase")) == 1, "crest"):
+		await _fail("hall-crest", "crest clicks never advanced to the opponent phase")
+		return
+	_pass("hall-house")
+
+	var friend_btn := _find_button(sel, "Play a Friend")
+	if friend_btn == null:
+		await _fail("hall-friend-entry", "no 'Play a Friend' entry in the opponent panel")
+		return
+	# Phase.NET is 4 (appended last so HOUSE/OPPONENT/MODE/DONE keep their ids).
+	if not await _click_until(friend_btn,
+			func(): return int(sel.get("phase")) == 4, "play-a-friend"):
+		await _fail("hall-friend-entry", "'Play a Friend' never opened the network panel")
+		return
+	_pass("hall-friend-entry")
+	await _shot("play_a_friend")
+
+	var host_btn := _find_button(sel, "Host a Match")
+	if host_btn == null:
+		await _fail("hall-host-button", "no 'Host a Match' button")
+		return
+	await _click_control(host_btn)
+	await _sleep(0.3)
+	var side_btn := _find_button(sel, "You ride for Black")
+	if side_btn == null:
+		await _fail("hall-side-choice", "the host panel offers no side choice")
+		return
+	await _click_control(side_btn)
+	_pass("hall-side-choice")
+	var gates := _find_button(sel, "Open the Gates")
+	if gates == null:
+		await _fail("hall-open-gates", "no 'Open the Gates' button")
+		return
+	await _click_control(gates)
+	if not await _wait_until(func():
+		var n := NetMatch.get_active(get_tree())
+		return n != null and n.state == NetMatch.State.HOSTING, 10.0):
+		await _fail("hall-hosting", "the host never started listening")
+		return
+	var live := NetMatch.get_active(get_tree())
+	if bool(live.get("my_color")) != NetProtocol.COLOR_BLACK:
+		await _fail("hall-side-choice", "chose Black but the host seated itself as White")
+		return
+	var share: Label = sel.find_child("NetShare", true, false)
+	if share == null or not share.visible or not share.text.contains(":%d"
+			% NetProtocol.DEFAULT_PORT):
+		await _fail("hall-share-address",
+			"the host panel never showed an address to send a friend: '%s'"
+				% (share.text if share != null else "<absent>"))
+		return
+	_pass("hall-hosting (%s)" % share.text.replace("\n", " | "))
+	await _shot("hosting_addresses")
+
+	# Back out: the panel must HANG UP, not just hide — otherwise the next
+	# Host attempt would collide with its own listening socket.
+	await _press_key(KEY_ESCAPE)
+	if not await _wait_until(func():
+		return int(sel.get("phase")) == 1 and NetMatch.get_active(get_tree()) == null, 8.0):
+		await _fail("hall-cancel", "Esc did not close the room (phase=%d, net=%s)"
+			% [int(sel.get("phase")), str(NetMatch.get_active(get_tree()))])
+		return
+	_pass("hall-cancel-hangs-up")
+
+	# The error a human actually gets: dial a port nobody is listening on.
+	friend_btn = _find_button(sel, "Play a Friend")
+	if not await _click_until(friend_btn,
+			func(): return int(sel.get("phase")) == 4, "play-a-friend-2"):
+		await _fail("hall-rejoin", "could not reopen the network panel")
+		return
+	var join_btn := _find_button(sel, "Join a Match")
+	await _click_control(join_btn)
+	await _sleep(0.3)
+	var field: LineEdit = sel.find_child("NetAddress", true, false)
+	if field == null:
+		await _fail("hall-join-field", "no address field in the join panel")
+		return
+	field.grab_focus()
+	await _type_text("127.0.0.1:7899")
+	if field.text != "127.0.0.1:7899":
+		await _fail("hall-join-field", "typing did not land in the field: '%s'" % field.text)
+		return
+	_pass("hall-join-field-typed")
+	var ride := _find_button(sel, "Ride Out")
+	await _click_control(ride)
+	var status: Label = sel.find_child("NetStatus", true, false)
+	if status == null:
+		await _fail("hall-join-error", "the join panel has no status line")
+		return
+	if not await _wait_until(func():
+		return status.text.contains("could not reach"), 25.0):
+		await _fail("hall-join-error",
+			"an unreachable host produced no actionable message: '%s'" % status.text)
+		return
+	if not status.text.contains("127.0.0.1:7899"):
+		await _fail("hall-join-error",
+			"the error does not name the address that failed: '%s'" % status.text)
+		return
+	_pass("hall-join-error (%s)" % status.text)
+	await _shot("join_error")
+	_finish(0)
+
+
+## Type a string through the REAL input pipeline (unicode-carrying key events),
+## so a LineEdit is filled the way a player fills it.
+func _type_text(text: String) -> void:
+	for i in text.length():
+		var ch := text[i]
+		var down := InputEventKey.new()
+		down.pressed = true
+		down.unicode = ch.unicode_at(0)
+		down.keycode = ch.to_upper().unicode_at(0) as Key
+		down.physical_keycode = down.keycode
+		Input.parse_input_event(down)
+		await get_tree().process_frame
+		var up := InputEventKey.new()
+		up.pressed = false
+		up.unicode = ch.unicode_at(0)
+		up.keycode = down.keycode
+		up.physical_keycode = down.keycode
+		Input.parse_input_event(up)
+		await get_tree().process_frame
 
 
 # ── Scenario: music (playlists, mute, duck + sting through real signals) ───

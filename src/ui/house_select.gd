@@ -10,12 +10,23 @@ extends Control
 ##   house_chosen(house_id)                          - crest clicked/accepted
 ##   opponent_chosen(opponent)                       - opponent Dictionary
 ##   selection_complete(house_id, opponent, mode)    - mode: "tournament"|"single"
+##                                                     |"network"
 ##
 ## opponent Dictionary shapes:
 ##   {"kind":"engine", "level":"casual"|"seasoned"|"master",
 ##    "difficulty": ChessAI.Difficulty.*, "label": String}
 ##   {"kind":"ds4_oracle", "level":"max_thinking",
 ##    "oracle_mode":"pure"|"counseled"|"maester", "label": String}
+##   {"kind":"network", "level":"friend", "label": String}
+##
+## PLAY A FRIEND. Picking the network opponent opens a fourth panel instead of
+## the war-type list: Host (shows the addresses to share, and which side you
+## want) or Join (address entry, remembered between sessions). This screen owns
+## the PANEL only — it emits net_host_requested / net_join_requested and shows
+## whatever status the integrator hands back, because main.gd owns scene flow
+## and src/net owns the socket. Phase.NET is appended LAST in the enum on
+## purpose: HOUSE/OPPONENT/MODE/DONE keep the integer values every existing
+## test and probe already asserts against.
 ##
 ## Keyboard: Left/Right rotate the ring (Up/Down move in opponent lists),
 ## Enter/Space accept, Esc steps back a phase.
@@ -23,8 +34,14 @@ extends Control
 signal house_chosen(house_id: String)
 signal opponent_chosen(opponent: Dictionary)
 signal selection_complete(house_id: String, opponent: Dictionary, mode: String)
+## The player asked to host, playing `side` ("white"|"black"|"random").
+signal net_host_requested(side: String)
+## The player asked to join `address` (may carry ":port").
+signal net_join_requested(address: String)
+## The player backed out of the network panel — hang up whatever is open.
+signal net_cancelled()
 
-enum Phase { HOUSE, OPPONENT, MODE, DONE }
+enum Phase { HOUSE, OPPONENT, MODE, DONE, NET }
 
 const RING_RADIUS_FRAC := 0.36    # of the shorter viewport axis
 const CREST_SIZE := Vector2(96, 118)
@@ -45,6 +62,12 @@ const OPPONENTS: Array[Dictionary] = [
 		"label": "Counseled Oracle"},
 	{"kind": "ds4_oracle", "level": "max_thinking", "oracle_mode": "maester",
 		"label": "Oracle + Grand Maester"},
+	{"kind": "network", "level": "friend", "label": "Play a Friend"},
+]
+const NET_SIDES: Array[Dictionary] = [
+	{"id": "white", "label": "You ride for White"},
+	{"id": "black", "label": "You ride for Black"},
+	{"id": "random", "label": "Let the gods decide"},
 ]
 const MODES: Array[Dictionary] = [
 	{"id": "tournament", "label": "Begin Tournament"},
@@ -77,6 +100,18 @@ var _mode_buttons: Array[Button] = []
 var _footer: Label
 var _done_label: Label
 
+# -- Play a Friend panel ----------------------------------------------------
+var _net_panel: PanelContainer
+var _net_choice: VBoxContainer     # Host / Join
+var _net_host_box: VBoxContainer   # side buttons + Open the Gates
+var _net_join_box: VBoxContainer   # address entry + Ride Out
+var _net_side_buttons: Array[Button] = []
+var _net_side_index := 0
+var _net_address: LineEdit
+var _net_status_label: Label
+var _net_share_label: Label
+var _net_busy := false             # a socket is open — buttons stop re-firing
+
 
 func _ready() -> void:
 	_house_ids = HouseRegistry.house_ids()
@@ -89,6 +124,7 @@ func _ready() -> void:
 			_on_opponent_pressed, Vector2(0.5, 0.5))
 	_mode_panel = _build_list_panel("HOW WILL YOU FIGHT?", MODES, _mode_buttons,
 			_on_mode_pressed, Vector2(0.5, 0.5))
+	_build_net_panel()
 	_build_footer()
 	_done_label = null
 	resized.connect(_layout_ring)
@@ -197,6 +233,13 @@ func _step_back() -> void:
 	elif phase == Phase.MODE:
 		selected_opponent = {}
 		_set_phase(Phase.OPPONENT)
+	elif phase == Phase.NET:
+		# Backing out of the network panel must HANG UP, not just hide the UI —
+		# a listening socket left behind would refuse the next Host attempt.
+		net_cancelled.emit()
+		_net_busy = false
+		selected_opponent = {}
+		_set_phase(Phase.OPPONENT)
 
 
 # -- phase flow -------------------------------------------------------------
@@ -219,6 +262,9 @@ func _on_opponent_pressed(i: int) -> void:
 	_set_opp_index(i)
 	selected_opponent = OPPONENTS[i].duplicate()
 	opponent_chosen.emit(selected_opponent)
+	if str(selected_opponent.get("kind", "")) == "network":
+		_set_phase(Phase.NET)
+		return
 	_set_phase(Phase.MODE)
 
 
@@ -235,6 +281,7 @@ func _set_phase(p: Phase) -> void:
 	phase = p
 	_opp_panel.visible = p == Phase.OPPONENT
 	_mode_panel.visible = p == Phase.MODE
+	_net_panel.visible = p == Phase.NET
 	_preview.visible = p == Phase.HOUSE
 	_refresh_crest_highlights()
 	if p == Phase.HOUSE:
@@ -246,6 +293,9 @@ func _set_phase(p: Phase) -> void:
 	elif p == Phase.MODE:
 		_set_mode_index(_mode_index)
 		_footer.text = "Choose your war · Enter to accept · Esc back"
+	elif p == Phase.NET:
+		_net_show_choice()
+		_footer.text = "Host a match, or join your friend's · Esc back"
 	elif p == Phase.DONE:
 		_footer.text = ""
 		_show_done_banner()
@@ -523,6 +573,202 @@ func _build_list_panel(heading: String, entries: Array[Dictionary],
 		buttons.append(b)
 	add_child(panel)
 	return panel
+
+
+# -- Play a Friend panel ----------------------------------------------------
+
+
+func _build_net_panel() -> void:
+	_net_panel = PanelContainer.new()
+	_net_panel.name = "PlayAFriend"
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.05, 0.04, 0.045, 0.96)
+	style.border_color = Color(0.55, 0.4, 0.2)
+	style.set_border_width_all(2)
+	style.set_content_margin_all(24)
+	_net_panel.add_theme_stylebox_override("panel", style)
+	_net_panel.set_anchors_preset(Control.PRESET_CENTER)
+	_net_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_net_panel.grow_vertical = Control.GROW_DIRECTION_BOTH
+	_net_panel.visible = false
+	var root := VBoxContainer.new()
+	root.add_theme_constant_override("separation", 12)
+	_net_panel.add_child(root)
+
+	var head := Label.new()
+	head.text = "PLAY A FRIEND"
+	head.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	head.add_theme_font_size_override("font_size", 19)
+	head.add_theme_color_override("font_color", TEXT_WARM)
+	root.add_child(head)
+
+	# -- choice: host or join
+	_net_choice = VBoxContainer.new()
+	_net_choice.name = "NetChoice"
+	_net_choice.add_theme_constant_override("separation", 8)
+	root.add_child(_net_choice)
+	_net_choice.add_child(_net_button("Host a Match", _net_choose_host))
+	_net_choice.add_child(_net_button("Join a Match", _net_choose_join))
+
+	# -- host: which side, then open the gates
+	_net_host_box = VBoxContainer.new()
+	_net_host_box.name = "NetHost"
+	_net_host_box.visible = false
+	_net_host_box.add_theme_constant_override("separation", 8)
+	root.add_child(_net_host_box)
+	for i in NET_SIDES.size():
+		var b := _net_button(str(NET_SIDES[i]["label"]), _on_net_side_pressed.bind(i))
+		_net_side_buttons.append(b)
+		_net_host_box.add_child(b)
+	_net_host_box.add_child(_net_button("⚔  Open the Gates", _on_net_host_pressed))
+
+	# -- join: where is your friend
+	_net_join_box = VBoxContainer.new()
+	_net_join_box.name = "NetJoin"
+	_net_join_box.visible = false
+	_net_join_box.add_theme_constant_override("separation", 8)
+	root.add_child(_net_join_box)
+	var hint := Label.new()
+	hint.text = "Your friend's address (they can read it off their screen)"
+	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint.add_theme_font_size_override("font_size", 13)
+	hint.add_theme_color_override("font_color", TEXT_DIM)
+	_net_join_box.add_child(hint)
+	_net_address = LineEdit.new()
+	_net_address.name = "NetAddress"
+	# Sample text in an empty field: it shows a player the SHAPE of an address.
+	# ip-allow: UI placeholder text — resolves to nothing and reaches nothing.
+	_net_address.placeholder_text = "100.72.4.11  or  192.168.1.24:7777"
+	_net_address.custom_minimum_size = Vector2(380, 0)
+	_net_address.alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_net_address.text_submitted.connect(func(_t: String) -> void: _on_net_join_pressed())
+	_net_join_box.add_child(_net_address)
+	_net_join_box.add_child(_net_button("⚔  Ride Out", _on_net_join_pressed))
+
+	# -- the words: addresses to share, and what the connection is doing
+	_net_share_label = Label.new()
+	_net_share_label.name = "NetShare"
+	_net_share_label.visible = false
+	_net_share_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_net_share_label.add_theme_font_size_override("font_size", 15)
+	_net_share_label.add_theme_color_override("font_color", GOLD)
+	root.add_child(_net_share_label)
+
+	_net_status_label = Label.new()
+	_net_status_label.name = "NetStatus"
+	_net_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_net_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_net_status_label.custom_minimum_size = Vector2(420, 0)
+	_net_status_label.add_theme_font_size_override("font_size", 14)
+	_net_status_label.add_theme_color_override("font_color", TEXT_DIM)
+	root.add_child(_net_status_label)
+
+	add_child(_net_panel)
+
+
+func _net_button(label: String, on_pressed: Callable) -> Button:
+	var b := Button.new()
+	b.set_meta("label", label)
+	b.flat = true
+	b.focus_mode = Control.FOCUS_NONE
+	b.add_theme_font_size_override("font_size", 17)
+	b.add_theme_color_override("font_color", TEXT_DIM)
+	b.add_theme_color_override("font_hover_color", GOLD)
+	b.text = label
+	b.pressed.connect(on_pressed)
+	return b
+
+
+func _net_show_choice() -> void:
+	_net_choice.visible = true
+	_net_host_box.visible = false
+	_net_join_box.visible = false
+	_net_share_label.visible = false
+	_net_status_label.text = "Two copies of Great Houses, one match. " \
+		+ "One of you hosts; the other joins by address."
+	_set_net_side_index(_net_side_index)
+
+
+func _net_choose_host() -> void:
+	_net_choice.visible = false
+	_net_host_box.visible = true
+	_net_status_label.text = "Pick your side, then open the gates and send " \
+		+ "your friend the address."
+
+
+func _net_choose_join() -> void:
+	_net_choice.visible = false
+	_net_join_box.visible = true
+	_net_status_label.text = "Type the address your friend sent you."
+	_net_address.grab_focus()
+
+
+func _on_net_side_pressed(i: int) -> void:
+	_set_net_side_index(i)
+
+
+func _set_net_side_index(i: int) -> void:
+	_net_side_index = clampi(i, 0, NET_SIDES.size() - 1)
+	for j in _net_side_buttons.size():
+		_style_list_button(_net_side_buttons[j], j == _net_side_index)
+
+
+func _on_net_host_pressed() -> void:
+	if _net_busy:
+		return
+	_net_busy = true
+	net_host_requested.emit(str(NET_SIDES[_net_side_index]["id"]))
+
+
+func _on_net_join_pressed() -> void:
+	if _net_busy:
+		return
+	var addr := _net_address.text.strip_edges()
+	if addr.is_empty():
+		_net_status_label.text = "Type the address your friend gave you first."
+		return
+	_net_busy = true
+	net_join_requested.emit(addr)
+
+
+# -- Play a Friend: integrator-facing API -----------------------------------
+
+
+## One sentence about the connection, in words a player can act on.
+func net_status(text: String) -> void:
+	if _net_status_label != null:
+		_net_status_label.text = text
+
+
+## The addresses a host should read out to their friend (best first).
+func net_share_lines(lines: Array) -> void:
+	if _net_share_label == null:
+		return
+	if lines.is_empty():
+		_net_share_label.visible = false
+		return
+	_net_share_label.text = "Send your friend:\n" + "\n".join(lines)
+	_net_share_label.visible = true
+
+
+## Pre-fill the join box with the address this machine used last time.
+func net_remembered_address(addr: String) -> void:
+	if _net_address != null and not addr.is_empty():
+		_net_address.text = addr
+
+
+## The connection failed or dropped — let the player try again.
+func net_release() -> void:
+	_net_busy = false
+
+
+## Both sides are seated: leave the hall.
+func finish_network() -> void:
+	if phase == Phase.DONE:
+		return
+	selected_mode = "network"
+	_set_phase(Phase.DONE)
+	selection_complete.emit(selected_house, selected_opponent, selected_mode)
 
 
 func _build_footer() -> void:
