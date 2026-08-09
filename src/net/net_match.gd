@@ -451,15 +451,15 @@ func _rpc_request_move(req_seq: int, from_idx: int, to_idx: int, promo: String) 
 func _handle_request(sender_id: int, req_seq: int, from_idx: int, to_idx: int,
 		promo: String) -> void:
 	if not is_active():
-		_reject(sender_id, "the match is not running")
+		_reject(sender_id, NetProtocol.match_not_running_text())
 		return
 	if req_seq != seq:
 		# Generation guard: a request written for a position that has already
 		# been played past. Dropping it is the whole point.
-		_reject(sender_id, "that move was for an earlier position — the board has moved on")
+		_reject(sender_id, NetProtocol.stale_request_text())
 		return
 	if not _gate.accepting():
-		_reject(sender_id, "hold on — the duel is still playing on your opponent's screen")
+		_reject(sender_id, NetProtocol.gate_held_text())
 		return
 	var mover_color := my_color if sender_id == 1 else not my_color
 	var verdict := NetProtocol.validate_request(_state_ref, mover_color, from_idx, to_idx, promo)

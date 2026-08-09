@@ -52,6 +52,7 @@ func _initialize() -> void:
 	_test_seating()
 	_test_addresses()
 	_test_undo_policy()
+	_test_refusal_texts()
 	_test_ply_gate()
 	_test_request_clock()
 	_test_enet_transport()
@@ -410,6 +411,47 @@ func _test_addresses() -> void:
 func _test_undo_policy() -> void:
 	check("undo: take-backs are off in a network match", false, NetProtocol.UNDO_ALLOWED)
 	check("undo: the gate failsafe is armed", true, NetProtocol.GATE_TIMEOUT_SEC > 0.0)
+
+
+## THE FLAKY GATE, PINNED (verifier defect P5's second face, 2026-08-09).
+##
+## The two-instance e2e's wrong-turn probe fires while the OPPONENT legitimately
+## owns the move, so it races the opponent's ply and has TWO correct answers: it
+## arrives first and the validator says "not your turn", or the ply beats it and
+## the generation guard says "an earlier position". Demanding only the first made
+## a CORRECT game fail about one run in three (and cascade into the other
+## instance). The probe accepts both now — which means a reword of either string
+## could silently drift that gate back into flakiness, so both are pinned HERE,
+## headless, together with the driver's accepted list.
+func _test_refusal_texts() -> void:
+	var stale := NetProtocol.stale_request_text()
+	var wrong := NetProtocol.wrong_turn_text()
+	check("refuse: the wrong-turn text is what the validator returns", wrong,
+			str(NetProtocol.validate_request(_state(START), NetProtocol.COLOR_BLACK,
+				ChessState.square_index_from_name("e7"),
+				ChessState.square_index_from_name("e5"))["reason"]))
+	check("refuse: every refusal is a sentence, not a code", true,
+			stale.length() > 20 and wrong.length() > 10)
+	check("refuse: the gate-held text names the duel", true,
+			NetProtocol.gate_held_text().contains("duel"))
+
+	# The e2e probe must accept BOTH outcomes of that race. Read its source and
+	# say so out loud — this is the assertion that keeps the gate a gate.
+	var driver := FileAccess.get_file_as_string("res://test_e2e/e2e_driver.gd")
+	if driver.is_empty():
+		check("refuse: the e2e driver is readable from this build", true, false)
+		return
+	# The probe call is `_net_illegal_probe(game, netm, "wrong-turn", "b7", "b6",
+	# [...])` — take the window after the label and read the list it passes.
+	var at := driver.find("\"wrong-turn\", \"b7\", \"b6\",")
+	check("refuse: the wrong-turn probe is where the test thinks it is", true, at > 0)
+	var probe_call := driver.substr(at, 160) if at > 0 else ""
+	check("refuse: the wrong-turn probe accepts the validator's answer", true,
+			probe_call.contains("not your turn"))
+	check("refuse: ...AND the generation guard's answer (the 1-in-3 flake)", true,
+			probe_call.contains("earlier position"))
+	check("refuse: both accepted strings really are the host's own", true,
+			wrong.contains("not your turn") and stale.contains("earlier position"))
 
 
 # ── The cinematic gate ─────────────────────────────────────────────────────

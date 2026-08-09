@@ -138,7 +138,7 @@ static func validate_request(state, mover_color: bool, from_idx: int,
 	if from_idx == to_idx:
 		return _no("a move must leave the square it started on")
 	if bool(state.turn) != mover_color:
-		return _no("it is not your turn")
+		return _no(wrong_turn_text())
 	var piece = state.pieces[from_idx]
 	if piece == null:
 		return _no("no piece stands on %s" % ChessMove.square_name(from_idx))
@@ -513,6 +513,32 @@ static func unreachable_text(address: String, port: int) -> String:
 static func host_bind_failed_text(port: int) -> String:
 	return ("could not open port %d — another copy of the game may already be "
 		+ "hosting. Close it and try again.") % port
+
+
+# The host's three refusals of a request it will not even look at. They live
+# here, next to the validator's own reasons, because the two-instance e2e's
+# wrong-turn probe RACES the opponent's ply and must accept either
+# `wrong_turn_text` or `stale_request_text` — a reword in one place used to be
+# able to drift that gate back into flakiness silently, so both are pinned by
+# tests/test_net.gd.
+
+## The generation guard: a request written for a position already played past.
+static func stale_request_text() -> String:
+	return "that move was for an earlier position — the board has moved on"
+
+
+## The validator's answer when the requester does not own the move.
+static func wrong_turn_text() -> String:
+	return "it is not your turn"
+
+
+## The cinematic barrier is still holding the previous ply.
+static func gate_held_text() -> String:
+	return "hold on — the duel is still playing on your opponent's screen"
+
+
+static func match_not_running_text() -> String:
+	return "the match is not running"
 
 
 static func protocol_mismatch_text(theirs: int) -> String:

@@ -2395,9 +2395,20 @@ func _scenario_net(host_role: bool) -> void:
 	if not host_role:
 		# Ply 0 belongs to White. The joiner asks for a move that WOULD be legal
 		# on its own turn (b7b6, and never part of the scripted game) — and is
-		# told, in words, that it is not its turn.
-		if not await _net_illegal_probe(game, netm, "wrong-turn",
-				"b7", "b6", "not your turn", false):
+		# refused, in words a human can read.
+		#
+		# THIS PROBE RACES THE HOST BY CONSTRUCTION, and the race has TWO correct
+		# answers (verifier defect P5's second face, caught on the 6th
+		# consecutive run, 2026-08-09). The request is written for the seq we
+		# hold; the host may legitimately play ply 0 while it is in flight. So:
+		#   * it arrives first  -> "it is not your turn" (the validator),
+		#   * ply 0 beats it    -> "that move was for an earlier position"
+		#     (the generation guard, which is if anything the stronger refusal).
+		# Demanding only the first made a CORRECT game fail about one run in
+		# three. What must hold in BOTH cases — and is asserted in both — is that
+		# the move was refused with a reason and never, ever applied.
+		if not await _net_illegal_probe(game, netm, "wrong-turn", "b7", "b6",
+				["not your turn", "earlier position"], false):
 			return
 
 	var my_line: Array[String] = NET_LINE_WHITE if host_role else NET_LINE_BLACK
@@ -2405,13 +2416,15 @@ func _scenario_net(host_role: bool) -> void:
 	for i in my_line.size():
 		if not host_role and not probed_illegal:
 			# Wait for our turn, THEN ask for something illegal: this proves the
-			# refusal is about legality, not about turn order.
+			# refusal is about legality, not about turn order. NOT a race — on
+			# our own turn the host cannot advance the ply counter under us, it
+			# is waiting for exactly this move — so this one stays strict.
 			if not await _wait_until(func():
 				return not bool(game.get("busy")) and bool(state.turn) == my_color, 90.0):
 				await _fail("net-join-illegal-geometry", "our turn never came")
 				return
 			if not await _net_illegal_probe(game, netm, "geometry", "e8", "e5",
-					"not a legal move", true):
+					["not a legal move"], true):
 				return
 			probed_illegal = true
 		if not await _net_play(game, tag, my_line[i]):
@@ -2505,8 +2518,13 @@ func _net_duel_watch(game: Node) -> void:
 ## legitimately owns the move, so the FEN is allowed to change under it — what
 ## must never happen is OUR uci appearing in the applied-ply log, and that is
 ## asserted in both cases.
+##
+## `want_reasons` is a LIST because some probes race the opponent's own ply and
+## have more than one correct refusal (see the wrong-turn probe). Any one of
+## them passes, and the one actually observed is printed in the PASS line, so a
+## drift in which branch fires is visible in the log instead of silent.
 func _net_illegal_probe(game: Node, netm: Node, label: String, from_name: String,
-		to_name: String, want_reason: String, check_board: bool) -> bool:
+		to_name: String, want_reasons: Array, check_board: bool) -> bool:
 	var state: Object = game.get("state")
 	var fen_before := str(state.get_fen())
 	var uci := from_name + to_name
@@ -2521,9 +2539,15 @@ func _net_illegal_probe(game: Node, netm: Node, label: String, from_name: String
 			"the host ACCEPTED %s — a client forced an illegal move" % uci)
 		return false
 	var reason: String = str((game.get("net_rejections") as Array).back())
-	if not want_reason.is_empty() and not reason.contains(want_reason):
+	var matched := want_reasons.is_empty()
+	for want in want_reasons:
+		if reason.contains(str(want)):
+			matched = true
+			break
+	if not matched:
 		await _fail("net-illegal-%s" % label,
-			"refused, but for the wrong reason: '%s'" % reason)
+			"refused, but for none of the reasons this probe accepts %s: '%s'"
+				% [str(want_reasons), reason])
 		return false
 	await _sleep(0.5)
 	for entry in (game.get("net_plies") as Array):
