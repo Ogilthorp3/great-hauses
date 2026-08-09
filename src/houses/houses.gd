@@ -8,10 +8,12 @@ extends RefCounted
 ## static-var-holding-Resources shutdown crash documented in piece_assets.gd
 ## does not apply here).
 ##
-## Piece tinting: `get_house_tint(house, side_role)` returns a Color meant to
-## be fed straight into `PieceAssets.tinted_material(src, tint, saturation)`
-## (same multiply-tint pipeline PieceView uses for its FROST/EMBER tints);
-## `get_tint_saturation(house)` supplies the matching saturation argument.
+## Piece colouring: `get_house_tint(house, "kit")` is the house's JERSEY — the
+## one saturated colour its kit is painted in (PieceAssets.kit_material);
+## `get_house_tint(house, "piece"/"tower")` is the faint whisper natural
+## surfaces take (PieceAssets.natural_material); `get_house_coat(house)` names
+## the horse's natural coat. Which surface gets which is decided by
+## PieceAssets.MATERIAL_ROLES, never here.
 
 const DATA_PATH := "res://src/houses/houses.json"
 
@@ -76,20 +78,41 @@ static func get_colors(house) -> Dictionary:
 	}
 
 
-## The multiply-tint Color for a house's pieces, per side role.
-## `side_role` accepts "piece"/"character" (default) or anything containing
-## "tower"/"rook" for the static tower rook. Compatible with
-## PieceAssets.tinted_material(src, tint, saturation).
+## A house tint by role.
+##   "kit"          THE JERSEY — the one saturated colour the house paints its
+##                  KIT in (tabard, cloak, hood, shield face, caparison, helm,
+##                  crest). Loud on purpose: since the material-ROLE pass it is
+##                  no longer painted on steel, skin, leather, bone or horse.
+##   "tower"/"rook" the whisper the rook's masonry takes.
+##   "piece"        (default) the whisper every other natural surface takes.
+## Houses written before the kit tint existed fall back to their piece tint, so
+## an incomplete houses.json degrades to the old look rather than to white.
 static func get_house_tint(house, side_role: String = "piece") -> Color:
 	var h := _resolve(house)
 	if h.is_empty():
 		return Color.WHITE
 	var role := side_role.to_lower()
-	var key := "tower" if (role.contains("tower") or role.contains("rook")) else "piece"
-	return Color.html(h["tints"][key])
+	var key := "piece"
+	if role.contains("tower") or role.contains("rook"):
+		key = "tower"
+	elif role.contains("kit"):
+		key = "kit"
+	var tints: Dictionary = h["tints"]
+	if not tints.has(key):
+		key = "piece"
+	return Color.html(tints[key])
 
 
-## Saturation argument matching get_house_tint for PieceAssets.tinted_material.
+## The house's horse COAT name (PieceAssets.COAT_PALETTES) — bay, chestnut,
+## black, white_grey, dun and their variants. Never a house hue: a mount's
+## house identity is worn on the caparison, not grown on the animal.
+static func get_house_coat(house) -> String:
+	var h := _resolve(house)
+	return str(h.get("coat", "bay"))
+
+
+## Legacy saturation argument (the pre-role multiply pipeline). Kept because
+## houses.json still carries the field; nothing in the costume path reads it.
 static func get_tint_saturation(house) -> float:
 	var h := _resolve(house)
 	if h.is_empty():

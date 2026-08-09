@@ -17,8 +17,9 @@ extends Node3D
 ##   Instantiates EVERY house×type combo (plus legacy both sides), runs
 ##   validate_piece on each, prints a summary, quits 0/1.
 ##
-## validate_piece is the shared assembly validator — tests/test_costumes.gd
-## calls it too, so the gate logic lives in exactly one place.
+## validate_piece is the shared assembly validator and role_offenders the
+## shared MATERIAL-ROLE gate — tests/test_costumes.gd calls both, so the gate
+## logic lives in exactly one place.
 
 const PieceScene := preload("res://scenes/piece_view.tscn")
 
@@ -198,130 +199,214 @@ static func _validate_helm(pv: PieceView, piece_type: int, house_id: String,
 	return errs
 
 
-# ── palette envelope (defects #6/#7) ───────────────────────────────────────
+# ── THE ROLE GATE ──────────────────────────────────────────────────────────
 #
-# The bug these constants exist to prevent: a material that never went through
-# the house dye still renders, and a stock pack color becomes the loudest thing
-# in the frame. Nine armies shipped with a fluorescent MAGENTA grimoire, a LIME
-# staff orb, a SALMON shield rim, a FOREST-GREEN queen's hood and an ORANGE-TAN
-# bow, in every house, because signature gear was attached after _tint_meshes
-# "so it keeps its own colors".
+# This replaced the PALETTE ENVELOPE on 2026-08-09, and the two failures it
+# stands between are opposite ones.
 #
-# A surface is legal when BOTH hold:
-#   1. its albedo TEXTURE is desaturated to the ceiling — no texel can shout
-#      louder than PALETTE_TEXEL_LOUDNESS (saturation x value in HSV);
-#   2. its flat albedo lands on a house hue (or is neutral / near-black, which
-#      every palette contains — iron, bone, leather, shadow).
+# The envelope was written after a critic found un-tinted marketplace props: a
+# fluorescent MAGENTA grimoire on every bishop, a LIME staff orb, a SALMON
+# shield rim, an ORANGE-TAN bow, in all nine houses, because signature gear was
+# attached after the tint "so it keeps its own colors". Its rule was absolute —
+# EVERY rendered surface must sit on the house hue — and to make that survivable
+# on skin, steel and horsehide the saturation ceiling was driven to 0.10 and
+# then to 0.00. Nine monochrome armies. The owner, looking at them:
+#
+#   "The figurines [are] too much mono color, should be like a hockey team
+#    jersey — colors of the team/house, but NOT everywhere. Horse should be
+#    brown, black or white, something majestic."
+#
+# So the gate now asks the same question the pipeline does — WHAT IS THIS
+# SURFACE — and holds each role to its own law:
+#
+#   KIT       must be ON one of the house's own colours (jersey, primary,
+#             secondary or accent — a jersey is allowed its charge) and must
+#             carry real chroma. A stripped dye leaves a stock pack colour, and
+#             that is what goes red.
+#   NATURAL   must be inside its material's own range AND must NOT be the
+#             house's kit colour. Steel and stone are near-achromatic; leather,
+#             wood, skin, bone and horse coats live in the pack's warm-brown
+#             band or are neutral. Paint a horse blue and it leaves the band.
+#   REGALIA   must stay metal — gold or steel, never the jersey.
+#   HERALDRY  carries its own artwork; exempt by role, not by a name list.
+#   UNCLASS.  is a failure. No surface may render without the table naming it.
+#
+# tests/test_costumes.gd runs BOTH negative controls: strip a dye off a prop
+# and the gate must go red; paint a horse blue and the gate must go red.
 
-## Loudest texel any dyed surface may still carry (HSV saturation x value).
-## A raw KayKit atlas scores 0.6+; the same atlas driven to the palette ceiling
-## now scores 0.00, because PALETTE_SATURATION_CEILING is zero — the queen's
-## hood taught us that a "narrow chroma band" is still a hue leak, and one that
-## widens exactly where the house colour is weakest (2026-08-09 regression).
-## So the tolerance follows the ceiling down: at 0.08 the gate still catches an
-## undyed atlas by an order of magnitude, and it now also catches a surface
-## that goes through a WEAKER dye than the pipeline promises.
-const PALETTE_TEXEL_LOUDNESS := 0.08
-## How far a flat albedo may sit from the nearest house hue, in degrees.
-const PALETTE_HUE_TOL := 46.0
-## Chroma weight (HSV saturation x value) below which a color carries no house
-## information and is always legal — iron, bone, leather, shadow. A dark olive
-## banner rod scores 0.05; the shipped magenta grimoire scored 0.53 and the
-## lime staff orb 0.18.
-const PALETTE_CHROMA_FLOOR := 0.10
-## HERALDRY + REGALIA — deliberately outside the dye, by name:
-##   sigil plate / banner cloth / caparison / pennant carry the house's own
-##     artwork; dyeing them would dye the sigil.
-##   crown / tiara / TiaraBand are gold-and-frost, the two metals of kingship
-##     — that contrast against the house body IS the royal read (defect #3).
-##   the glyph ring is a TYPE marker, not a house one.
-const PALETTE_EXEMPT := ["SigilDecal", "BannerCloth", "Pennant", "Caparison",
-		"Crown", "Tiara", "TiaraBand", "GlyphRing"]
+## Chroma weight (HSV saturation x value) below which a colour carries no house
+## information at all — iron, bone, shadow, a black horse. Naturals below it
+## are legal by definition.
+const ROLE_CHROMA_FLOOR := 0.10
+## How far a KIT surface may sit from the nearest of its house's four declared
+## colours, in VALUE-NORMALISED RGB (each colour divided by its own brightest
+## channel, so a shaded tabard and the swatch it was painted from compare as
+## the same colour). Written as a match rather than a hue window on purpose: a
+## jersey's charge is very often WHITE or BLACK — Winterfang's #eef2f5,
+## Hartcrown's #1d1a17 — and a hue window either rejects those or lets any
+## grey through.
+const KIT_MATCH := 0.26
+## Steel, iron and stone are defined by being nearly colourless — this is the
+## most saturation they may carry, whisper included.
+const NATURAL_METAL_SAT := 0.30
+## Leather, wood, skin, bone and horse coats live in the pack's own warm ramp.
+const NATURAL_WARM_LO := 5.0
+const NATURAL_WARM_HI := 58.0
+## ...and how far a natural surface must stay from the house's kit colour, in
+## plain RGB distance. A chestnut coat sits ~0.45 from Goldclaw's gold and a bay
+## ~0.22 from Hartcrown's bronze — the tightest real pair, since a bronze house
+## and a leather strap are honestly similar colours. A coat DYED in the jersey
+## sits at 0.0, which is the control.
+const NATURAL_KIT_DISTANCE := 0.14
 
-## Every surface this piece renders that is outside its house's palette.
-## Returns [] when the whole piece reads as one house.
-static func palette_offenders(pv: PieceView, house_id: String) -> Array[String]:
+
+## Every surface this piece renders that breaks its role's law.
+## Returns [] when the piece reads as a house TEAM made of real materials.
+static func role_offenders(pv: PieceView, house_id: String) -> Array[String]:
 	var errs: Array[String] = []
 	if not HouseRegistry.has_house(house_id):
 		return errs
-	var hues: Array[float] = []
-	for c: Color in PieceAssets.house_palette(house_id):
-		if c.s * c.v > PALETTE_CHROMA_FLOOR:
-			hues.append(c.h * 360.0)
+	var house_colors: Array[Color] = PieceAssets.house_palette(house_id)
+	var kit: Color = PieceAssets.kit_color(house_id)
 	for mi: MeshInstance3D in pv.find_children("*", "MeshInstance3D", true, false):
-		if not mi.is_visible_in_tree() or _palette_exempt(mi, pv):
+		if not mi.is_visible_in_tree():
 			continue
+		var split: Dictionary = split_roles_of(mi)
 		for s in mi.mesh.get_surface_count():
 			var mat := mi.get_active_material(s) as StandardMaterial3D
 			if mat == null:
 				continue
+			var base := mi.mesh.surface_get_material(s) as StandardMaterial3D
+			var cls: Dictionary = PieceAssets.classify(str(mi.name),
+					"" if base == null else str(base.resource_name))
 			var tag := "%s/%s#%d" % [house_id, mi.name, s]
-			var loud := _texel_loudness(mat.albedo_texture)
-			if loud > PALETTE_TEXEL_LOUDNESS:
-				errs.append("%s: undyed texture (loudness %.2f)" % [tag, loud])
-			var flat := mat.albedo_color * _texture_mean(mat.albedo_texture)
-			if flat.s * flat.v <= PALETTE_CHROMA_FLOOR:
+			# UNCLASSIFIED wins over everything, INCLUDING a split map: a mesh
+			# the table does not name must fail even when its surfaces happen to
+			# be wearing dressed materials. Silently dyeing the unknown case is
+			# the habit that produced nine monochrome armies.
+			if int(cls["role"]) == PieceAssets.Role.UNCLASSIFIED:
+				errs.append("%s: UNCLASSIFIED — PieceAssets.MATERIAL_ROLES names no rule for it" % tag)
 				continue
-			var best := 360.0
-			for h in hues:
-				best = minf(best, absf(wrapf(flat.h * 360.0 - h, -180.0, 180.0)))
-			if best > PALETTE_HUE_TOL:
-				errs.append("%s: hue %.0f is %.0f deg off the house palette (%s)"
-						% [tag, flat.h * 360.0, best, flat.to_html(false)])
+			var role: int = split.get(s, cls["role"])
+			var flat := _rendered_color(mi, s, mat)
+			match role:
+				PieceAssets.Role.KIT:
+					errs.append_array(_judge_kit(tag, flat, house_colors,
+							mi.get_surface_override_material(s) != null
+							or mi.material_override != null))
+				PieceAssets.Role.NATURAL:
+					var stuff: int = int(cls["stuff"]) if split.is_empty() \
+							else PieceAssets.Stuff.ATLAS
+					errs.append_array(_judge_natural(tag, flat, kit, stuff))
+				PieceAssets.Role.REGALIA:
+					errs.append_array(_judge_regalia(tag, flat, kit))
 	return errs
 
 
-static func _palette_exempt(mi: MeshInstance3D, pv: PieceView) -> bool:
-	var node: Node = mi
-	while node != null and node != pv:
-		for name in PALETTE_EXEMPT:
-			if str(node.name).containsn(name):
-				return true
-		node = node.get_parent()
-	return false
+## KIT: actually dressed, and wearing one of the house's own four colours.
+##
+## The DRESSED half is the structural check and it is what the negative control
+## trips: a surface the role dispatch never touched still renders, in whatever
+## the marketplace painted it, and that is the failure the whole gate exists
+## for. The COLOUR half is the semantic one — value-normalised so that a fold
+## in shadow and the swatch it came from compare as the same colour.
+static func _judge_kit(tag: String, flat: Color, house_colors: Array[Color],
+		dressed: bool) -> Array[String]:
+	var errs: Array[String] = []
+	if not dressed:
+		errs.append("%s: KIT surface is UNDRESSED — it renders whatever the pack painted it" % tag)
+		return errs
+	var best := 9.9
+	for c: Color in house_colors:
+		best = minf(best, _normalized_distance(flat, c))
+	if best > KIT_MATCH:
+		errs.append("%s: KIT colour %s matches no house colour (nearest %.2f > %.2f)"
+				% [tag, flat.to_html(false), best, KIT_MATCH])
+	return errs
 
 
-static var _palette_stats: Dictionary = {}   # texture rid -> [loudness, mean]
+## RGB distance between two colours with their VALUE divided out — "is this the
+## same colour, lit differently?" A black surface has no direction, so it is
+## compared to black directly.
+static func _normalized_distance(a: Color, b: Color) -> float:
+	var na := _unit_value(a)
+	var nb := _unit_value(b)
+	return Vector3(na.r - nb.r, na.g - nb.g, na.b - nb.b).length()
 
 
-## [loudest texel (HSV s*v), mean color] of a texture, sampled on a grid.
-static func _palette_probe(tex: Texture2D) -> Array:
-	if tex == null:
-		return [0.0, Color.WHITE]
-	var key := tex.get_instance_id()
-	if _palette_stats.has(key):
-		return _palette_stats[key]
-	var img := tex.get_image()
-	if img == null:
-		_palette_stats[key] = [0.0, Color.WHITE]
-		return _palette_stats[key]
-	if img.is_compressed():
-		img.decompress()
-	var steps := 24
-	var loud := 0.0
-	var sum := Color(0.0, 0.0, 0.0)
-	var n := 0
-	for iy in steps:
-		for ix in steps:
-			var px := img.get_pixel(
-					int((ix + 0.5) / steps * img.get_width()),
-					int((iy + 0.5) / steps * img.get_height()))
-			if px.a < 0.5:
-				continue
-			loud = maxf(loud, px.s * px.v)
-			sum += px
-			n += 1
-	var mean := Color.WHITE if n == 0 else Color(sum.r / n, sum.g / n, sum.b / n)
-	_palette_stats[key] = [loud, mean]
-	return _palette_stats[key]
+static func _unit_value(c: Color) -> Color:
+	var m := maxf(maxf(c.r, c.g), maxf(c.b, 0.0001))
+	if m < 0.02:
+		return Color(0.0, 0.0, 0.0)
+	return Color(c.r / m, c.g / m, c.b / m)
 
 
-static func _texel_loudness(tex: Texture2D) -> float:
-	return float(_palette_probe(tex)[0])
+## NATURAL: inside its material's own range, and NOT the house's jersey.
+static func _judge_natural(tag: String, flat: Color, kit: Color,
+		stuff: int) -> Array[String]:
+	var errs: Array[String] = []
+	var dist := Vector3(flat.r - kit.r, flat.g - kit.g, flat.b - kit.b).length()
+	if dist < NATURAL_KIT_DISTANCE:
+		errs.append("%s: NATURAL surface is wearing the house kit (%s, distance %.2f)"
+				% [tag, flat.to_html(false), dist])
+	if flat.s * flat.v <= ROLE_CHROMA_FLOOR:
+		return errs   # neutral: iron, shadow, a black horse — legal by nature
+	var hue := flat.h * 360.0
+	var warm := hue >= NATURAL_WARM_LO and hue <= NATURAL_WARM_HI
+	match stuff:
+		PieceAssets.Stuff.STEEL, PieceAssets.Stuff.STONE:
+			if flat.s > NATURAL_METAL_SAT:
+				errs.append("%s: steel/stone at saturation %.2f is painted, not metal (%s)"
+						% [tag, flat.s, flat.to_html(false)])
+		PieceAssets.Stuff.COAT:
+			if not warm and flat.s > NATURAL_METAL_SAT:
+				errs.append("%s: horse coat hue %.0f is not a coat — bay, chestnut, black, grey and dun only (%s)"
+						% [tag, hue, flat.to_html(false)])
+		PieceAssets.Stuff.GLOW, PieceAssets.Stuff.NONE:
+			pass   # eye paint and witch-light own their colour
+		_:
+			if not warm and flat.s > NATURAL_METAL_SAT:
+				errs.append("%s: natural surface hue %.0f is outside the leather/wood/skin/bone band (%s)"
+						% [tag, hue, flat.to_html(false)])
+	return errs
 
 
-static func _texture_mean(tex: Texture2D) -> Color:
-	return _palette_probe(tex)[1]
+## REGALIA: gold or steel, and never the jersey — that contrast IS the royal
+## read (critic P3: a steel-blue army wearing a steel-blue crown loses its king).
+static func _judge_regalia(tag: String, flat: Color, kit: Color) -> Array[String]:
+	var errs: Array[String] = []
+	if flat.s > 0.55:
+		errs.append("%s: REGALIA at saturation %.2f is paint, not metal (%s)"
+				% [tag, flat.s, flat.to_html(false)])
+	var dist := Vector3(flat.r - kit.r, flat.g - kit.g, flat.b - kit.b).length()
+	if dist < NATURAL_KIT_DISTANCE:
+		errs.append("%s: REGALIA is wearing the house kit (%s) — the crown must contrast"
+				% [tag, flat.to_html(false)])
+	return errs
+
+
+## For a mesh whose surfaces came out of a role SPLIT, which of them are KIT.
+## Empty for every other mesh.
+##
+## Asked through the LIVE PieceAssets autoload on purpose. A `-s` suite that
+## shims its own PieceAssets node holds a second, empty cache — the split was
+## recorded by the autoload the pieces were actually built with, and reading
+## the shim's copy silently reports "nothing was ever split" (which is exactly
+## how this gate first passed a queen whose robe it never checked).
+static func split_roles_of(mi: MeshInstance3D) -> Dictionary:
+	return PieceAssets.split_roles_for_split_mesh(mi.mesh)
+
+
+## What this surface ACTUALLY renders: its flat albedo multiplied by the mean
+## of the texels its own UVs land on (PieceAssets.surface_mean_color), never by
+## the mean of the whole shared atlas — on a pack where one 1024² image paints
+## skin, steel, leather and cloth, the atlas mean is nobody's colour.
+static func _rendered_color(mi: MeshInstance3D, s: int,
+		mat: StandardMaterial3D) -> Color:
+	if mat.albedo_texture == null:
+		return mat.albedo_color
+	return mat.albedo_color * PieceAssets.surface_mean_color(
+			mi.mesh, s, mat.albedo_texture)
 
 
 ## Measured world height of the piece body (the height-grading ground truth).
@@ -358,6 +443,7 @@ func _run_headless_gate() -> void:
 		add_child(pv)
 		pv.setup(combo[1], combo[2], combo[0])
 		var errs := validate_piece(pv, combo[1], combo[0])
+		errs.append_array(role_offenders(pv, combo[0]))
 		for e in errs:
 			print("COSTUME FAIL  ", e)
 		failures += errs.size()

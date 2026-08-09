@@ -13,8 +13,17 @@ extends Node3D
 ##     · an engraved type-glyph ring under every piece — HIDDEN at rest,
 ##     fading in on mouse hover (set_hovered), staying lit while selected
 ##     (set_selected also brightens the glyph to beacon energy). ISSUES.md #2.
+##   MATERIAL-ROLE layer (2026-08-09 — what a surface is MADE OF):
+##     every mesh and material is classified once in PieceAssets.MATERIAL_ROLES
+##     and the colour pipeline dispatches on that. KIT (tabard, cloak, hood,
+##     shield face, helm, crest, caparison) carries the house and is allowed to
+##     be LOUD because it is no longer everywhere; NATURAL (steel, leather,
+##     wood, stone, skin, bone, and the horse's own coat) keeps its own
+##     material's colours; REGALIA stays metal; HERALDRY keeps its artwork.
+##     A KayKit body is painted from one atlas, so it is split per triangle by
+##     what the atlas paints it and each half goes down its own path.
 ##   HOUSE layer (flourish — never changes the type silhouette):
-##     palette tints · helmet crests on knight/queen/king · per-house PAWN
+##     the house jersey · helmet crests on knight/queen/king · per-house PAWN
 ##     half-helms (ISSUES.md #3 — the footman's quieter answer to the crest:
 ##     it wraps the skull instead of towering over it, and only its rim and
 ##     motif take the house accent) · sigil decals
@@ -47,9 +56,10 @@ signal died
 enum Type { PAWN, ROOK, KNIGHT, BISHOP, QUEEN, KING }
 enum House { FROST, EMBER }  # cold grey-blue vs dark crimson
 
-# House Frost = cold grey-blue; House Ember = dark crimson/gold. The pack
-# albedo textures are desaturated (Image.adjust_bcs) then multiplied by the
-# house tint — gritty war-camp colors, no candy.
+# House Frost = cold grey-blue; House Ember = dark crimson/gold. The legacy
+# sides have no houses.json entry, so these two consts serve as BOTH their kit
+# colour and their natural whisper — they field the default coat and the
+# default charge with them.
 const HOUSE_TINT := {
 	House.FROST: Color(0.58, 0.7, 0.9),
 	House.EMBER: Color(0.85, 0.38, 0.22),
@@ -58,8 +68,6 @@ const HOUSE_TINT_TOWER := {
 	House.FROST: Color(0.52, 0.63, 0.8),
 	House.EMBER: Color(0.75, 0.33, 0.2),
 }
-const TINT_SATURATION := 0.25
-
 ## Glyph-ring hover fade (ISSUES.md #2): hidden at rest, ~0.15 s in/out.
 const RING_FADE_TIME := 0.15
 
@@ -194,7 +202,16 @@ func setup(new_type: Type, new_side: House, new_house_id: String = "") -> void:
 		_build_character()
 	_build_glyph_ring()
 	# Face the enemy line: Frost looks +Z (toward Ember), Ember looks -Z.
-	_home_yaw = 0.0 if side == House.FROST else PI
+	#
+	# THE ROOK IS THE EXCEPTION, and it is a costume decision (role pass,
+	# 2026-08-09): a watchtower's masonry is STONE, so the tower itself is the
+	# same grey in all nine houses and the ONLY thing that says whose rook this
+	# is, is the banner down its face. Facing that banner at the enemy meant the
+	# player's own rooks showed him their blank back wall — two neutral grey
+	# blocks in the corners of his own army. A tower has no facing to lose (it
+	# never turns, `_face`/`_face_home` exempt it), so both armies now present
+	# the banner to the camera.
+	_home_yaw = PI if piece_type == Type.ROOK else (0.0 if side == House.FROST else PI)
 	rotation.y = _home_yaw
 	# Counter-rotate the ring so the engraved glyph reads upright from the
 	# default camera (behind the player at -Z) for BOTH armies.
@@ -582,6 +599,7 @@ func _strike_flash(victim_world: Vector3) -> void:
 	mat.emission_enabled = true
 	mat.emission = Color(1.0, 0.72, 0.34)
 	mat.emission_energy_multiplier = 1.4
+	quad.name = "StrikeTrail"   # the name IS its role (PieceAssets.Role.EFFECT)
 	quad.material_override = mat
 	quad.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(quad)
@@ -619,10 +637,11 @@ func _build_character() -> void:
 	_anim.name = "Anim"
 	_model.add_child(_anim)  # root_node ".." = the character scene root
 	_anim.add_animation_library("", PieceAssets.shared_anims())
-	_tint_meshes(_model, _body_tint(), _saturation_for(), [], _tone_floor())
+	_dress(_model)
 	if piece_type == Type.BISHOP:
 		_dress_mitre()   # AFTER the body tint — it repaints the hat's surfaces
-	# Gear/crest/crown attach AFTER _tint_meshes so they keep their own colors.
+	# Gear/crest/crown attach AFTER the body pass — each is dressed on its own
+	# role (gear is split, a crest is KIT, a crown is REGALIA and takes no dye).
 	_attach_gear()
 	if PieceAssets.wants_crest(piece_type):
 		_attach_crest()
@@ -671,18 +690,15 @@ func _build_knight() -> void:
 	_anim.name = "Anim"
 	_rider.add_child(_anim)  # root_node ".." = the rider scene root
 	_anim.add_animation_library("", PieceAssets.shared_anims())
-	# Palette: rider and mount both take the ensemble's BODY tint — the house
-	# multiply with the knight's type value trim already in it (TYPE_VALUE_LIFT
-	# 0.88), so the man and the horse are trimmed together and the horse can
-	# never drift brighter than the man it carries. The mount is DYED rather
-	# than tinted (charred near-dark under the Drowned Legion) so no army
-	# fields a stock brown horse; the caparison is dressed in the house banner
-	# cloth below.
-	_tint_meshes(_rider, _body_tint(), _saturation_for())
-	var horse_tint := _body_tint()
-	if house_id == PieceAssets.SKELETON_HOUSE:
-		horse_tint = horse_tint.darkened(0.32)   # charred, but still a horse
-	_dye_mount(horse_tint)
+	# Costume: rider and mount both go through the same role dispatch, so the
+	# man's tabard and the horse's crinet take the house while his plate stays
+	# steel and the animal keeps its own COAT (PieceAssets.COAT_PALETTES — a
+	# blue horse is a bug, not heraldry). Both carry the knight's rank value
+	# trim (TYPE_VALUE_LIFT 0.88), so the ensemble is trimmed as one object and
+	# the mount can never drift brighter than the man it carries. The
+	# caparison is dressed in the house banner cloth below.
+	_dress(_rider)
+	_dress(_horse)
 	_dress_caparison()
 	# Gear/crest attach AFTER the tints so they keep their own colors.
 	_attach_gear()
@@ -711,32 +727,6 @@ func _start_idle_sway() -> void:
 		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 
 
-## HOUSE flourish: the mount wears its house's colors in the hide itself
-## (PieceAssets.dyed_mount_material — the pack's untextured browns survive a
-## multiply-tint unchanged, so they are re-dyed by luminance instead). Tack
-## is excluded: the caparison gets the banner cloth, the saddle its leather.
-## The eyes keep their own paint — a blue-eyed horse is a horse, a horse with
-## house-colored eyeballs is a bug.
-func _dye_mount(tint: Color) -> void:
-	for mi: MeshInstance3D in _horse.find_children("*", "MeshInstance3D", true, false):
-		# The CAPARISON is the only exclusion: it wears the house banner cloth
-		# (sigil and all) a few lines below. The SADDLE used to be excluded too
-		# "so it keeps its leather" — which meant every one of the nine armies
-		# rode on the same warm brown tack, the last stock color left on the
-		# mount (defect #6). It is harness now: dyed like the hide, and dark
-		# enough at its own low luminance to still read as leather.
-		if mi.name == "Caparison":
-			continue
-		for s in mi.mesh.get_surface_count():
-			var src := mi.get_active_material(s)
-			if src == null or not src is StandardMaterial3D:
-				continue
-			if str(src.resource_name).begins_with("Eye"):
-				continue
-			mi.set_surface_override_material(
-				s, PieceAssets.dyed_mount_material(src, tint))
-
-
 ## HOUSE flourish: the knight's caparison wears the house banner cloth —
 ## primary-dyed, accent hem, the sigil reading on the horse's flank (the
 ## same composited texture the rook's banner flies; v=0 is the cloth TOP,
@@ -750,8 +740,8 @@ func _dress_caparison() -> void:
 		mat.albedo_texture = PieceAssets.banner_texture(house_id)
 	else:
 		mat.albedo_color = HOUSE_TINT[side].darkened(0.12)
-	# The cloth steps down with the ensemble (see _apply_ensemble_trim): the
-	# banner's accent hem was the brightest mark left on a trimmed knight.
+	# The cloth steps down with the ensemble (see _ensemble_trim): the banner's
+	# accent hem was the brightest mark left on a trimmed knight.
 	var trim := _ensemble_trim()
 	mat.albedo_color = Color(mat.albedo_color.r * trim, mat.albedo_color.g * trim,
 			mat.albedo_color.b * trim, mat.albedo_color.a)
@@ -801,7 +791,13 @@ func _dress_mitre() -> void:
 			body.b * MITRE_CROWN_WEIGHT)
 	var band := cone.darkened(0.45)
 	if HouseRegistry.has_house(house_id):
-		band = PieceAssets.house_charge_color(house_id, cone)
+		# The charge comes back at a HOUSE colour's own value, which is outside
+		# _body_tint() and therefore outside the rank's value correction. Left
+		# that way it was the loudest thing on the near back rank — the whole
+		# reason the bishop's lift had to invert. It steps down with him.
+		var trim := _rank_value()
+		var raw := PieceAssets.house_charge_color(house_id, cone)
+		band = Color(raw.r * trim, raw.g * trim, raw.b * trim, raw.a)
 	for mi: MeshInstance3D in _mitre_brim:
 		if not is_instance_valid(mi):
 			continue
@@ -849,16 +845,21 @@ func _bone_mount(bone: String, mount_name: String) -> BoneAttachment3D:
 ## TYPE signature gear: rigid props on the rig's handslot/chest bones.
 ## Same gear for every house — the type IS the gear.
 ##
-## The gear is DYED (defects #6/#7, 2026-08-08). It used to be attached after
-## _tint_meshes purely so it would "keep its own colors", and that one line of
-## intent was the whole bug: every prop is a stock KayKit atlas, so every army
-## fielded a fluorescent magenta grimoire, a lime orb, a salmon shield rim, a
-## maroon saddle-shield and an orange-tan bow — the loudest colors in a frame
-## that is supposed to read as one house. Gear is dressing, not heraldry: it
-## goes through the same multiply the body does, at GEAR_SATURATION (flat), so
-## only the prop's own luminance survives and the hue is exactly the house's.
-## The SIGIL DECAL is the one exception and is attached AFTER the dye — that
-## plate IS heraldry and must keep the sigil's own paint.
+## The gear is DRESSED BY ROLE, and that is the fix for two opposite defects.
+##
+## It used to be attached after the body tint purely so it would "keep its own
+## colors", and every army fielded a fluorescent magenta grimoire, a lime staff
+## orb, a salmon shield rim and an orange-tan bow (defects #6/#7, 2026-08-08).
+## The answer then was to dye ALL of it flat, which is how the sword, the bow
+## and the leather grips ended up house-coloured too — half of the mono-colour
+## complaint that this pass exists to answer.
+##
+## Now each prop goes through the role dispatch. A shield is KIT (a shield is a
+## painted charge-board — it is the plate the sigil lands on). A sword, a staff,
+## a grimoire, a bow and a quiver are MIXED: their steel stays cold steel and
+## their leather stays leather, while the grimoire's magenta cover and the
+## staff's lime orb — real dyed surfaces — take the house. The SIGIL DECAL is
+## attached last and takes no dye at all: that plate IS heraldry.
 func _attach_gear() -> void:
 	for spec: Dictionary in PieceAssets.gear_specs(piece_type):
 		var att := _bone_mount(spec["bone"], "GearMount_%s" % spec["key"])
@@ -870,7 +871,7 @@ func _attach_gear() -> void:
 		prop.rotation_degrees = spec["rot_deg"]
 		prop.scale = Vector3.ONE * float(spec["scl"])
 		att.add_child(prop)
-		_tint_meshes(prop, _body_tint(), PieceAssets.GEAR_SATURATION)
+		_dress(prop)
 		if bool(spec["decal"]) and HouseRegistry.has_house(house_id):
 			_attach_sigil_decal(prop, spec)
 
@@ -890,6 +891,13 @@ func _attach_sigil_decal(shield: Node3D, spec: Dictionary) -> void:
 
 
 ## HOUSE flourish: helmet crest on the head bone (knight/queen/king).
+##
+## A crest is KIT (PieceAssets.MATERIAL_ROLES) — the plume on top of the helm
+## is exactly the sort of thing a house paints in its own colour, and it used
+## to keep the crest GLB's authored per-house paint instead. That was a quiet
+## defect on the dark houses: Hartcrown's primary is #1d1a17, so its stag rode
+## into battle in near-black on a near-black skyline. Dressed through the role
+## dispatch it takes the jersey, at the ensemble's own value trim.
 func _attach_crest() -> void:
 	var packed: PackedScene = PieceAssets.crest_scene(house_id)
 	if packed == null:
@@ -901,35 +909,19 @@ func _attach_crest() -> void:
 	crest.name = "Crest"
 	crest.position = CREST_MOUNT_POS
 	att.add_child(crest)
-	_apply_ensemble_trim(crest)
+	_dress(crest)
 
 
 ## THE ENSEMBLE TRIMS AS ONE (critic defect #3, 2026-08-09). The rank's value
-## correction reaches a piece's BODY through _body_tint(), but two things a
-## knight wears are deliberately outside that path — the caparison (house
-## banner cloth, undyed by design) and the crest (house heraldry, attached
-## after the tint so it keeps its own paint). Left untrimmed they simply
-## became the new brightest marks on the ensemble: with the mount fixed, the
-## caparison's accent hem measured 0.788 and the wolf crest 0.776 against a
-## king at 0.776 — the knight had stopped shouting and started tying.
-##
-## So the correction is applied to the whole ensemble as one object: man,
-## mount, cloth and crest all step down together. It is a VALUE scale (a grey
-## multiply), so the banner keeps its sigil and the crest keeps its heraldic
-## color — the same lift/trim discipline as TYPE_VALUE_LIFT, one axis only.
-## A no-op for every rank that has no correction, which is all of them but two.
-func _apply_ensemble_trim(root: Node3D) -> void:
-	var trim := _ensemble_trim()
-	if is_equal_approx(trim, 1.0):
-		return
-	_tint_meshes(root, Color(trim, trim, trim), _saturation_for())
-
-
-## How far this rank's value correction moved the house tint — the scale that
-## carries it onto surfaces that never see _body_tint().
+## correction reaches every surface through _dress(), including the two a
+## knight wears outside his body — the caparison (house banner cloth) and the
+## crest. Left untrimmed they simply became the new brightest marks on the
+## ensemble: with the mount fixed, the caparison's accent hem measured 0.788
+## and the wolf crest 0.776 against a king at 0.776 — the knight had stopped
+## shouting and started tying. The caparison's texture cannot go through the
+## role dispatch (it IS the house's artwork), so it takes the trim by hand.
 func _ensemble_trim() -> float:
-	var raw: float = _tint_for("piece").v
-	return 1.0 if raw <= 0.001 else _body_tint().v / raw
+	return _rank_value()
 
 
 ## HOUSE flourish: the PAWN's half-helm on the head bone (ISSUES.md #3) — the
@@ -993,12 +985,12 @@ func _doff_bear_hood() -> void:
 ## here changed except that the color it hands back is a cut, not a flare.
 ##
 ## Materials are found BY NAME, never by surface index.
-const HELM_SHELL_WEIGHT := 0.62
-const HELM_SHELL_WEIGHT_DROWNED := 0.40
+const HELM_SHELL_WEIGHT := 0.72
+const HELM_SHELL_WEIGHT_DROWNED := 0.46
 
 
 func _dress_helm(helm: Node3D) -> void:
-	var body: Color = _tint_for("piece")
+	var body: Color = _tint_for("kit")
 	var weight := HELM_SHELL_WEIGHT_DROWNED \
 			if house_id == PieceAssets.SKELETON_HOUSE else HELM_SHELL_WEIGHT
 	var shell := Color(body.r * weight, body.g * weight, body.b * weight)
@@ -1027,11 +1019,11 @@ func _attach_crown() -> void:
 	## The king's crown (custom prop — measured numbers from the props'
 	## INTEGRATION.md): a BoneAttachment3D on the Rig_Medium `head` bone so
 	## the crown tracks idle, walk, and death animations for free. Attached
-	## AFTER _tint_meshes so the crown keeps its own gold/frost materials.
+	## AFTER the body pass; a crown is REGALIA and takes no house dye at all.
 	var att := _bone_mount("head", "CrownMount")
 	if att == null:
 		return
-	var crown: Node3D = PieceAssets.crown_scene(_tint_for("piece")).instantiate()
+	var crown: Node3D = PieceAssets.crown_scene(_tint_for("kit")).instantiate()
 	crown.name = "Crown"
 	crown.position = Vector3(0.0, 0.80, 0.0)   # ring at the skull's crown line
 	crown.rotation.y = deg_to_rad(-20.0)       # battle-bent point toward the camera
@@ -1048,7 +1040,7 @@ func _attach_tiara() -> void:
 	var att := _bone_mount("head", "TiaraMount")
 	if att == null:
 		return
-	var tiara: Node3D = PieceAssets.crown_scene(_tint_for("piece")).instantiate()
+	var tiara: Node3D = PieceAssets.crown_scene(_tint_for("kit")).instantiate()
 	tiara.name = "Tiara"
 	tiara.position = Vector3(0.0, 0.86, 0.0)   # band on the crown of the head
 	tiara.scale = TIARA_SCALE                  # slim ring, points flattened
@@ -1072,10 +1064,7 @@ func _attach_cape() -> void:
 	cape.name = "Cape"
 	cape.position = CAPE_MOUNT_POS
 	att.add_child(cape)
-	var cape_tint: Color = HOUSE_TINT[side]
-	if HouseRegistry.has_house(house_id):
-		cape_tint = HouseRegistry.get_colors(house_id)["secondary"]
-	_tint_meshes(cape, cape_tint, _saturation_for())
+	_dress(cape)   # cape_cloth is KIT — the king wears the jersey, loudly
 
 
 ## TYPE readability: the engraved glyph ring under the piece. Child of the
@@ -1090,7 +1079,7 @@ func _build_glyph_ring() -> void:
 	# brighten THIS ring only; the plate/disc/inlay under it are dressed in
 	# the house body color (critic P7 — they shipped near-black and the
 	# medallion read as a hole punched in the amber selection tile).
-	var body: Color = _body_tint()
+	var body: Color = _body_tint()   # the jersey — the ring is this army's mark
 	var plate := {
 		PieceAssets.RING_MEDAL_MATERIAL: PieceAssets.RING_MEDAL_WEIGHT,
 		PieceAssets.RING_STONE_MATERIAL: PieceAssets.RING_STONE_WEIGHT,
@@ -1138,10 +1127,11 @@ func _build_tower() -> void:
 	var raw_h := body.mesh.get_aabb().end.y if body != null else 1.35
 	_model.scale = Vector3.ONE * (PieceAssets.piece_height(piece_type) / maxf(raw_h, 0.01))
 	add_child(_model)
-	# House tint on the masonry/wood only — banner and pennant carry the
-	# house colors directly and are re-skinned below.
-	_tint_meshes(_model, _tint_for("tower"), _saturation_for(),
-			["BannerCloth", "Pennant"])
+	# The masonry is STONE and the rod is WOOD — natural, so a watchtower is a
+	# watchtower in every house and only takes the faint tower whisper. Its
+	# house identity is the banner down its face and the pennant on top, both
+	# skinned below with the house's own artwork.
+	_dress(_model, ["BannerCloth", "Pennant"], _tint_for("tower"))
 	_dress_banner()
 	_dress_pennant()
 
@@ -1219,31 +1209,67 @@ func _drop_banner() -> void:
 ## reads as the brightest object on the board — which is the king's job. The
 ## trim buys the crown its hierarchy back: the whole ensemble, rider and mount
 ## together, now peaks a clear step under the king.
+## QUEEN 0.95 (role pass, 2026-08-09). The Rogue_Hooded cast is a full hooded
+## ROBE, which under the role rule is one enormous KIT surface — so the rank
+## that used to be the darkest piece on the board became the loudest, and her
+## peak passed the king's (measured on the boot frame: queen p90 0.878 against
+## a king at 0.867). A queen is allowed to blaze; she is not allowed to out-top
+## the crown. The trim puts the king back on top by a clear step and leaves her
+## far-side median at 0.40, comfortably inside her rank's band — the black-hole
+## win from the last pass is untouched.
+## BISHOP 0.90 (role pass, 2026-08-09) — the correction INVERTED, because the
+## thing it corrected for is gone. It existed because the mage cast is painted
+## one dark navy from hem to hat and a multiply-tint over dark navy can only go
+## darker (P9: mean value 0.34 against 0.42-0.55 for the rest of the rank).
+## Under the role rule his robe is KIT — it takes the jersey at full strength
+## instead of multiplying into the atlas — and his hair takes a black-point
+## lift instead. Left at 1.18 on top of that he swung the other way and became
+## the BRIGHTEST piece on his own back rank (median 0.694 against a king at
+## 0.612, measured on the boot frame). A bishop does not out-shine his king in
+## either direction.
 const TYPE_VALUE_LIFT := {
-	Type.BISHOP: 1.18,
+	Type.BISHOP: 0.90,
 	Type.KNIGHT: 0.88,
+	Type.QUEEN: 0.95,
 }
 
 ## THE QUEEN'S TONE FLOOR (critic defect #2, 2026-08-09) — a VALUE fix that is
 ## deliberately NOT a tint change, because her hue win from the last pass is
 ## kept intact. See PieceAssets.QUEEN_TONE_FLOOR for the mechanism and the
 ## measurement; the constant lives there because it operates on the texture.
+## THE BISHOP'S HAIR (role pass, 2026-08-09). The mage atlas paints his hair
+## and hood in near-BLACK — #181818, #202020, #282028, together 44 % of the
+## texels his head mesh lands on — and the role rule correctly calls near-black
+## NATURAL, so the old army-wide dye no longer lifts it. From the gameplay
+## camera, which looks down at the top of a head, that turned the near bishop
+## back into the dark thimble P9 fought: median value 0.20 against a rank
+## running 0.36-0.65. His mitre is fine; it is his SCALP that vanishes. So his
+## natural half gets the same black-point lift the queen's does — value, and
+## only value.
 const TYPE_TONE_FLOOR := {
 	Type.QUEEN: PieceAssets.QUEEN_TONE_FLOOR,
+	Type.BISHOP: 0.24,
 }
 
 
-## The piece's body tint: the house multiply, plus the rank's type-level value
-## correction (above). Everything a body wears goes through this — meshes,
-## signature gear, the mitre paint, the knight's mount, the glyph ring — so a
-## bishop's staff never ends up a stop darker than the bishop holding it, and a
-## trimmed knight's horse is trimmed with him.
+## THE JERSEY: the colour every KIT surface on this piece is painted in — the
+## house's `tints.kit`, with the rank's value correction applied. Tabard,
+## cloak, hood, shield face, helm, crest, the mitre paint and the glyph plate
+## all take it, and NOTHING else does: steel, leather, skin, bone, wood and the
+## horse's coat go through _natural() instead. (Legacy FROST/EMBER sides have
+## no house entry and keep their two consts.)
 func _body_tint() -> Color:
-	var tint: Color = _tint_for("piece")
-	var lift: float = TYPE_VALUE_LIFT.get(piece_type, 1.0)
+	var kit: Color = _tint_for("kit")
+	var lift: float = _rank_value()
 	if is_equal_approx(lift, 1.0):
-		return tint
-	return Color.from_hsv(tint.h, tint.s, minf(1.0, tint.v * lift), tint.a)
+		return kit
+	return Color.from_hsv(kit.h, kit.s, minf(1.0, kit.v * lift), kit.a)
+
+
+## This rank's value correction — see TYPE_VALUE_LIFT. Applied to kit AND
+## natural surfaces alike, so a rank steps as one object.
+func _rank_value() -> float:
+	return TYPE_VALUE_LIFT.get(piece_type, 1.0)
 
 
 ## The rank's texture black-point lift — see TYPE_TONE_FLOOR.
@@ -1251,32 +1277,101 @@ func _tone_floor() -> float:
 	return TYPE_TONE_FLOOR.get(piece_type, 0.0)
 
 
-## The multiply tint for this piece: HouseRegistry colors when a house id was
-## given, the legacy FROST/EMBER consts otherwise.
+## A house tint by role ("kit" / "piece" / "tower"): HouseRegistry colors when
+## a house id was given, the legacy FROST/EMBER consts otherwise.
 func _tint_for(role: String) -> Color:
 	if house_id.is_empty():
-		return HOUSE_TINT[side] if role == "piece" else HOUSE_TINT_TOWER[side]
+		return HOUSE_TINT_TOWER[side] if role == "tower" else HOUSE_TINT[side]
 	return HouseRegistry.get_house_tint(house_id, role)
 
 
-func _saturation_for() -> float:
-	if house_id.is_empty():
-		return TINT_SATURATION
-	return HouseRegistry.get_tint_saturation(house_id)
+## The natural coat this house's mount wears — never a house hue.
+func _coat() -> Dictionary:
+	return PieceAssets.coat_palette(house_id)
 
 
-func _tint_meshes(root: Node, tint: Color, saturation: float,
-		skip_names: Array = [], tone_floor: float = 0.0) -> void:
-	## Per-side material overlay: multiply the pack's albedo texture by the
-	## house tint, push roughness up. Tinted materials are cached and shared.
-	## skip_names: MeshInstance3D names left untouched (banner, pennant).
-	## tone_floor: the rank's texture black-point lift (see TYPE_TONE_FLOOR).
+# -- role dispatch ---------------------------------------------------------
+#
+# THE REPLACEMENT FOR "DYE EVERYTHING" (owner critique, 2026-08-09: "too much
+# mono color, should be like a hockey team jersey — colors of the team/house,
+# but NOT everywhere"). Every surface is CLASSIFIED first
+# (PieceAssets.MATERIAL_ROLES) and only then coloured:
+#
+#   KIT       -> the house jersey, confidently saturated
+#   NATURAL   -> its own material's colours, plus a faint house whisper
+#   MIXED     -> the mesh is split per triangle by what the atlas paints it,
+#                and each half goes down one of the two paths above
+#   REGALIA   -> untouched metal (the crown and tiara dress themselves)
+#   HERALDRY  -> untouched artwork (sigil, banner, caparison, pennant, ring)
+#   EFFECT    -> owns its own light
+#
+# An UNCLASSIFIED surface is left undressed on purpose: PieceAssets.classify
+# has already shouted, and the role gate fails on it. Silently dyeing the
+# unknown case is the exact habit that produced nine monochrome armies.
+
+
+## Dress every mesh under `root`. `skip_names` are left completely alone (the
+## banner and pennant, which are re-skinned by hand with the house artwork);
+## `whisper` overrides the tint natural surfaces take a hint of — the rook's
+## masonry uses the tower tint, everything else the piece tint.
+func _dress(root: Node, skip_names: Array = [], whisper: Color = Color.BLACK) -> void:
+	var cast_tint := whisper if whisper != Color.BLACK else _tint_for("piece")
 	for mi: MeshInstance3D in root.find_children("*", "MeshInstance3D", true, false):
 		if mi.name in skip_names:
 			continue
-		for s in mi.mesh.get_surface_count():
-			var src := mi.get_active_material(s)
-			if src == null or not src is StandardMaterial3D:
-				continue
-			mi.set_surface_override_material(
-				s, PieceAssets.tinted_material(src, tint, saturation, tone_floor))
+		_dress_mesh(mi, cast_tint)
+
+
+func _dress_mesh(mi: MeshInstance3D, cast_tint: Color) -> void:
+	var probe := mi.mesh.surface_get_material(0) as StandardMaterial3D
+	var probe_name := "" if probe == null else str(probe.resource_name)
+	if PieceAssets.classify(str(mi.name), probe_name)["role"] == PieceAssets.Role.MIXED:
+		_dress_split_mesh(mi, cast_tint)
+		return
+	for s in mi.mesh.get_surface_count():
+		var src := mi.get_active_material(s) as StandardMaterial3D
+		if src == null:
+			continue
+		_apply_role(mi, s, src, PieceAssets.classify(
+				str(mi.name), str(src.resource_name)), cast_tint)
+
+
+## A MIXED mesh: swap in the role-split variant (KIT triangles and NATURAL
+## triangles on separate surfaces — see PieceAssets.role_split_mesh) and paint
+## the two halves apart. The split never moves a vertex, so the mesh AABB the
+## height grading measures is bit-identical to the source's.
+func _dress_split_mesh(mi: MeshInstance3D, cast_tint: Color) -> void:
+	var src_mesh := mi.mesh
+	var split := PieceAssets.role_split_mesh(src_mesh)   # populates the roles
+	var roles: Dictionary = PieceAssets.split_surface_roles(src_mesh)
+	mi.mesh = split
+	for s in split.get_surface_count():
+		var src := split.surface_get_material(s) as StandardMaterial3D
+		if src == null:
+			continue
+		var role: int = roles.get(s, PieceAssets.Role.NATURAL)
+		if role == PieceAssets.Role.KIT:
+			mi.set_surface_override_material(s, PieceAssets.kit_material(
+					src, _tint_for("kit"), _rank_value()))
+		else:
+			mi.set_surface_override_material(s, PieceAssets.natural_material(
+					src, PieceAssets.Stuff.ATLAS, cast_tint, _rank_value(),
+					_tone_floor()))
+
+
+func _apply_role(mi: MeshInstance3D, s: int, src: StandardMaterial3D,
+		cls: Dictionary, cast_tint: Color) -> void:
+	var role: int = cls["role"]
+	var stuff: int = cls["stuff"]
+	if role == PieceAssets.Role.KIT:
+		mi.set_surface_override_material(s, PieceAssets.kit_material(
+				src, _tint_for("kit"), _rank_value()))
+	elif role == PieceAssets.Role.NATURAL:
+		if stuff == PieceAssets.Stuff.COAT:
+			mi.set_surface_override_material(s, PieceAssets.coat_material(
+					src, _coat(), _rank_value()))
+		else:
+			mi.set_surface_override_material(s, PieceAssets.natural_material(
+					src, stuff, cast_tint, _rank_value(), _tone_floor()))
+	# REGALIA / HERALDRY / EFFECT dress themselves; UNCLASSIFIED is left bare
+	# so the role gate can find it.

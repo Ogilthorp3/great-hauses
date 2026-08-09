@@ -78,7 +78,10 @@ func _main() -> void:
 	_test_bishop_mitre()
 	_test_glyph_medallion()
 	_test_mount_barding()
-	_test_palette_envelope()
+	_test_horse_coats()
+	_test_material_role_table()
+	_test_role_split()
+	_test_role_gate()
 	await _test_selection_feedback()
 	await _test_rook_crumble()
 	await _test_knight_death()
@@ -304,20 +307,30 @@ func _test_pawn_helms() -> void:
 						(helm_charge[hid] as Color).g - (iron_albedo[hid] as Color).g,
 						(helm_charge[hid] as Color).b - (iron_albedo[hid] as Color).b
 					).length() > 0.20)
-		# THE CHARGE VALUE LAW (critic P8, 2026-08-09). "Furthest from the dome"
-		# elects the palest heraldic color a house owns, so every near piece wore
-		# a near-white plate at the TOP of its silhouette — measured on the boot
-		# frame at value 0.78, peak 0.93, against a 0.59 dome. A mark is CUT INTO
-		# a helm bright enough to carry it and only LAID ON one that is not (the
-		# Drowned Legion's charred dome renders at 0.22 and swallows anything
-		# darker). PieceAssets.house_charge_color owns the law; this is the gate.
+		# THE CHARGE LAW, VALUE-ONLY (role pass, 2026-08-09). What P8 got right
+		# is that a PALE, LOW-CHROMA plate on the top of a silhouette flares and
+		# eats the head shape (measured then at value 0.78, peak 0.93, against a
+		# 0.59 dome). What it got wrong was buying separation with CHROMA, which
+		# walked the charge off the house's own palette — Thornvale's gold
+		# #d3b04a came out #302300 and the role gate rightly refuses it.
+		#
+		# So a charge is now one of the house's DECLARED colours moved only along
+		# VALUE, and the flare rule survives as a rule about NEUTRALS: a
+		# colourless mark must be cut INTO its dome; a chromatic one (gold on
+		# green, crimson on gold) may be laid on it, because that is heraldry.
 		var dome_v: float = (iron_albedo[hid] as Color).v
-		var charge_v: float = (helm_charge[hid] as Color).v
-		var may_exceed: bool = dome_v < float(assets.CHARGE_DARK_DOME)
-		check("helm %s: charge %.2f vs dome %.2f — %s" % [hid, charge_v, dome_v,
-				"laid on a dark dome" if may_exceed else "cut into a bright one"],
-				true, charge_v < dome_v if not may_exceed
-						else charge_v > dome_v and charge_v < dome_v + 0.34)
+		var charge: Color = helm_charge[hid]
+		var on_palette := false
+		for c: Color in assets.house_palette(hid):
+			if absf(wrapf(c.h * 360.0 - charge.h * 360.0, -180.0, 180.0)) < 6.0 \
+					and absf(c.s - charge.s) < 0.06:
+				on_palette = true
+		check("helm %s: the charge is one of the house's own colours (%s)"
+				% [hid, charge.to_html(false)], true, on_palette)
+		check("helm %s: a colourless charge is cut INTO the dome (%.2f vs %.2f, s=%.2f)"
+				% [hid, charge.v, dome_v, charge.s], true,
+				charge.s >= float(assets.CHARGE_NEUTRAL_SAT)
+				or charge.v <= dome_v * float(assets.CHARGE_UNDER) + 0.001)
 		# The bear hood must be OFF (it swallows the helm) and still THERE —
 		# _raw_model_height counts it, so freeing it would rescale the pawn.
 		var hoods: Array = pv.find_children("*BearHat*", "MeshInstance3D", true, false)
@@ -424,15 +437,23 @@ func _test_mounted_knight() -> void:
 				and pv._horse.find_children("*", "AnimationPlayer", true, false).is_empty())
 		check("mounted %s: mount breathes on the idle sway" % label, true,
 				pv._sway_tween != null and pv._sway_tween.is_running())
-		# HOUSE palette dresses the MOUNT too, not just the rider.
+		# The MOUNT is dressed too — but in its own COAT, not in the house
+		# (see _test_horse_coats: the animal is an animal).
 		var hide_mesh := pv._horse.find_child("Horse", true, false) as MeshInstance3D
-		check("mounted %s: horse hide wears the house tint" % label, true,
+		check("mounted %s: horse hide wears its house's coat" % label, true,
 				hide_mesh != null and hide_mesh.get_surface_override_material(0) != null)
-		# The saddle is HARNESS, not heraldry: dyed with the hide (defect #6 —
-		# it was the last stock brown left on nine differently-colored mounts).
-		check("mounted %s: saddle wears house-dyed harness" % label, true,
-				(pv.find_child("Saddle", true, false) as MeshInstance3D)
-						.get_surface_override_material(0) != null)
+		# The saddle is LEATHER, and leather is NATURAL (the role pass,
+		# 2026-08-09). It used to be dyed with the hide "so no army rides on
+		# stock brown tack" — which is exactly the reasoning that ended up
+		# painting a house colour onto every surface in the game. Tack is tack.
+		var saddle_mat := (pv.find_child("Saddle", true, false) as MeshInstance3D) \
+				.get_surface_override_material(0) as StandardMaterial3D
+		check("mounted %s: saddle is dressed" % label, true, saddle_mat != null)
+		if saddle_mat != null:
+			var sh := saddle_mat.albedo_color.h * 360.0
+			check("mounted %s: saddle stays leather (%s)"
+					% [label, saddle_mat.albedo_color.to_html(false)], true,
+					saddle_mat.albedo_color.s <= 0.20 or (sh >= 5.0 and sh <= 58.0))
 		# Seating: the rider rides ON the saddle — hips inside the seat slab,
 		# never floating above it or sunk through the horse's back.
 		var rider: Node3D = pv.find_child("Rider", true, false)
@@ -519,7 +540,7 @@ func _test_royal_metal() -> void:
 	var cold := 0
 	var warm := 0
 	for hid in registry.house_ids():
-		var tint: Color = registry.get_house_tint(hid, "piece")
+		var tint: Color = registry.get_house_tint(hid, "kit")
 		var packed: PackedScene = assets.crown_scene(tint)
 		var is_frost: bool = str(packed.resource_path).contains("frost")
 		var body_is_cold: bool = tint.b > tint.r
@@ -558,10 +579,15 @@ func _test_royal_metal() -> void:
 func _test_bishop_mitre() -> void:
 	for hid in ["winterfang", "goldclaw", "tidegrip"]:
 		var pv := _spawn(T_BISHOP, FROST, hid)
-		var raw: Color = registry.get_house_tint(hid, "piece")
-		check("mitre %s: body tint lifted above the raw house tint" % hid, true,
-				pv._body_tint().v > raw.v or is_equal_approx(raw.v, 1.0))
-		check("mitre %s: lift moves value only (hue+sat untouched)" % hid, true,
+		var raw: Color = registry.get_house_tint(hid, "kit")
+		# THE BISHOP'S VALUE LIFT IS RETIRED (role pass, 2026-08-09). It existed
+		# because a multiply-tint over the mage's dark navy atlas could only go
+		# darker; his robe is KIT now and takes the jersey at full strength, so
+		# the lift on top of that made him the BRIGHTEST piece on his own back
+		# rank instead of the dimmest. What still has to hold is the invariant
+		# the lift was always bound by: this rank moves on VALUE only — it can
+		# never become a way to smuggle a piece out of its house.
+		check("mitre %s: the bishop paints in his own house's jersey" % hid, true,
 				absf(pv._body_tint().h - raw.h) < 0.005
 				and absf(pv._body_tint().s - raw.s) < 0.005)
 		var hats: Array = pv.find_children("*Hat*", "MeshInstance3D", true, false)
@@ -589,10 +615,23 @@ func _test_bishop_mitre() -> void:
 				else:
 					cone = over.albedo_color
 		check("mitre %s: every hat surface painted" % hid, true, painted >= 2)
-		check("mitre %s: the band reads against the cone" % hid, true,
-				Vector3(cone.r - band.r, cone.g - band.g,
-						cone.b - band.b).length() > 0.10)
-		check("mitre %s: the cone is the lit half" % hid, true, cone.v > band.v)
+		check("mitre %s: the band reads against the cone (%.2f)" % [hid,
+				_rgb_gap(cone, band)], true, _rgb_gap(cone, band) > 0.20)
+		# WHICH half is the lit one is no longer fixed (role pass, 2026-08-09).
+		# The old law required the band to be darker, and "darker" is exactly how
+		# it kept electing near-black: Winterfang's band came out #2a2e32 against
+		# a 0.67 cone and the near bishop read as a black ring with a blue nub in
+		# it. A band is a herald's colour at a herald's value — Winterfang's is
+		# now its ice-blue accent, brighter than the cone, and Goldclaw's is its
+		# crimson primary, darker. What must hold is that the band is a colour
+		# the house actually owns.
+		var on_palette := false
+		for c: Color in assets.house_palette(hid):
+			if absf(wrapf(c.h * 360.0 - band.h * 360.0, -180.0, 180.0)) < 6.0 \
+					and absf(c.s - band.s) < 0.06:
+				on_palette = true
+		check("mitre %s: the band is one of the house's own colours (%s)"
+				% [hid, band.to_html(false)], true, on_palette)
 		pv.free()
 
 
@@ -635,28 +674,85 @@ func _test_glyph_medallion() -> void:
 		pv.free()
 
 
-## THE MOUNT'S BARDING (critic P6, 2026-08-09): the near army is read from
-## ABOVE, where the rider occludes the horse, so the mount carries a house-cloth
-## CRINET down the neck and a CHANFRON with a raked plume on the head — the two
-## parts a plan view otherwise loses. Both are dyed BRIGHTER than the hide on
-## purpose; anything dimmer just rejoins the blob they exist to break up.
+## THE MOUNT'S BARDING (critic P6, 2026-08-09; re-roled 2026-08-09): the near
+## army is read from ABOVE, where the rider occludes the horse, so the mount
+## carries a CRINET down the neck and a CHANFRON on the head — the two parts a
+## plan view otherwise loses.
+##
+## The two are no longer the same thing. The crinet is CLOTH, so it is KIT and
+## wears the jersey: it is the mark that says whose cavalry this is from
+## directly above. The chanfron is a STEEL face plate, so it is natural — it
+## breaks the coat up by being metal, not by being painted. Both must still
+## separate from the coat, or they rejoin the blob they exist to break.
 func _test_mount_barding() -> void:
 	for hid in ["winterfang", "goldclaw", "tidegrip"]:
 		var pv := _spawn(T_KNIGHT, FROST, hid)
 		var hide: Color = _hide_albedo(pv)
+		var kit: Color = registry.get_house_tint(hid, "kit")
 		for part in ["Crinet", "Chanfron"]:
 			var mi := pv._horse.find_child(part, true, false) as MeshInstance3D
 			check("barding %s: mount wears a %s" % [hid, part], true, mi != null)
 			if mi == null:
 				continue
 			var mat := mi.get_surface_override_material(0) as StandardMaterial3D
-			check("barding %s: %s dyed into the house" % [hid, part], true,
-					mat != null)
-			if mat != null:
-				check("barding %s: %s carries more light than the hide (%.2f > %.2f)"
-						% [hid, part, mat.albedo_color.v, hide.v], true,
-						mat.albedo_color.v > hide.v)
+			check("barding %s: %s is dressed" % [hid, part], true, mat != null)
+			if mat == null:
+				continue
+			var c: Color = mat.albedo_color
+			if part == "Crinet":
+				# The KIT band — the one mark on the mount a plan view can name.
+				check("barding %s: the crinet flies the house colour" % hid, true,
+						absf(wrapf(c.h * 360.0 - kit.h * 360.0, -180.0, 180.0)) < 30.0)
+				check("barding %s: the crinet separates from the coat (%.2f)"
+						% [hid, _rgb_gap(c, hide)], true, _rgb_gap(c, hide) > 0.14)
+			else:
+				# The chanfron breaks the coat up by being METAL, not by being
+				# painted — so it is judged as steel, never as a house mark. On a
+				# grey house it is deliberately close to the coat: a steel plate
+				# on a grey horse is a steel plate on a grey horse.
+				check("barding %s: the chanfron stays STEEL, not painted (s=%.2f)"
+						% [hid, c.s], true, c.s < 0.30)
+				check("barding %s: the chanfron is not the jersey" % hid, true,
+						_rgb_gap(c, kit) > 0.14)
 		pv.free()
+
+
+## THE HORSE'S COAT (the owner's rule, 2026-08-09): "Horse should be brown,
+## black or white, something majestic." Nine houses used to ride nine horses
+## dyed in nine house colours — a steel-blue charger, a gold one. The animal is
+## now an animal, and its house identity is worn on the caparison over it.
+func _test_horse_coats() -> void:
+	var coats := {}
+	for hid in registry.house_ids():
+		var pv := _spawn(T_KNIGHT, FROST, hid)
+		var hide: Color = _hide_albedo(pv)
+		var kit: Color = registry.get_house_tint(hid, "kit")
+		var hue := hide.h * 360.0
+		check("coat %s: the hide is a coat, not a jersey (%s)"
+				% [hid, hide.to_html(false)], true,
+				hide.s <= 0.20 or (hue >= 5.0 and hue <= 58.0))
+		check("coat %s: the hide is not the house colour (%.2f)"
+				% [hid, _rgb_gap(hide, kit)], true, _rgb_gap(hide, kit) > 0.14)
+		# ...and the mount still says whose it is, on the cloth over it.
+		var cap := pv.find_child("Caparison", true, false) as MeshInstance3D
+		check("coat %s: the caparison still carries the house" % hid, true,
+				cap != null and cap.material_override != null
+				and (cap.material_override as StandardMaterial3D).albedo_texture != null)
+		coats[hid] = hide
+		pv.free()
+	check("coats: the mapping is written down, one per house",
+			registry.house_ids().size(), coats.size())
+	# Variety: the nine are not one horse repeated. Grouped by coat name, at
+	# least four visibly different animals take the field.
+	var families := {}
+	for hid in coats:
+		families[registry.get_house_coat(hid)] = true
+	check("coats: at least four different coats are fielded (%s)"
+			% str(families.keys()), true, families.size() >= 4)
+
+
+func _rgb_gap(a: Color, b: Color) -> float:
+	return Vector3(a.r - b.r, a.g - b.g, a.b - b.b).length()
 
 
 ## Widest half-extent of the character's head/skull mesh (model space).
@@ -683,34 +779,159 @@ func _prop_radius(prop: Node) -> float:
 	return r
 
 
-## THE PALETTE ENVELOPE (critic defects #6/#7, 2026-08-08). Every surface an
-## army renders must belong to that army: no stock pack color may survive the
-## dye. This is the gate that would have caught the shipped magenta grimoire,
-## lime staff orb, salmon shield rim, maroon knight's shield, orange-tan bow
-## and forest-green queen's hood — all nine houses, all at once, all invisible
-## to a suite that only ever asked "is a material set?".
+## THE ROLE GATE (owner critique, 2026-08-09 — replaces the palette envelope).
 ##
-## Heraldry (sigil, banner, caparison, pennant) and regalia (crown, tiara) are
-## exempt BY NAME in costume_preview.PALETTE_EXEMPT and documented there.
-func _test_palette_envelope() -> void:
+## The envelope required EVERY surface to sit on the house hue, and to make
+## that survivable on skin, steel and horsehide its saturation ceiling was
+## driven to zero. Nine monochrome armies. The owner: "too much mono color,
+## should be like a hockey team jersey — colors of the team/house, but NOT
+## everywhere. Horse should be brown, black or white, something majestic."
+##
+## So the gate now holds each ROLE to its own law: KIT must be dressed and
+## wearing one of its house's own colours; NATURAL must be inside its
+## material's range and must NOT be the house kit; REGALIA must stay metal;
+## an UNCLASSIFIED surface is a failure. costume_preview.role_offenders owns
+## the law, PieceAssets.MATERIAL_ROLES owns the classification.
+##
+## THREE NEGATIVE CONTROLS, because a gate that fires on nothing is not a
+## gate: strip a dye and it must go red (the original discipline), paint a
+## horse blue and it must go red (its mirror — the defect this pass exists to
+## end), and rename a surface out of the table and it must go red (the
+## unclassified case must fail loudly, never default to "dye it").
+func _test_role_gate() -> void:
 	for hid in registry.house_ids():
 		var offenders: Array = []
 		for t in GRADE_ORDER:
 			var pv := _spawn(t, FROST, hid)
-			offenders.append_array(preview.palette_offenders(pv, hid))
+			offenders.append_array(preview.role_offenders(pv, hid))
 			pv.free()
-		check("palette %s: whole army inside its own palette" % hid,
+		check("roles %s: whole army obeys its material roles" % hid,
 				"[]", str(offenders))
-	# The dye must actually be doing work — a pass that fired on nothing is
-	# not a pass. Strip the dye off one prop and the gate must go red.
+	# CONTROL 1 — strip the dye off one prop.
 	var probe := _spawn(T_BISHOP, FROST, "winterfang")
 	var tome: Node3D = probe.find_child("Gear_tome", true, false)
 	for mi: MeshInstance3D in tome.find_children("*", "MeshInstance3D", true, false):
 		for s in mi.mesh.get_surface_count():
 			mi.set_surface_override_material(s, null)
-	check("palette: the gate detects an undyed prop", true,
-			not preview.palette_offenders(probe, "winterfang").is_empty())
+	check("roles: the gate detects an undressed prop", true,
+			not preview.role_offenders(probe, "winterfang").is_empty())
 	probe.free()
+	# CONTROL 2 — paint a horse blue. The mount's house identity lives in its
+	# CAPARISON; the animal is an animal, and a blue horse must fail.
+	var blue := _spawn(T_KNIGHT, FROST, "goldclaw")
+	var hide := (blue._horse as Node3D).find_child("Horse", true, false) as MeshInstance3D
+	var painted := StandardMaterial3D.new()
+	painted.albedo_color = Color(0.18, 0.36, 0.86)
+	hide.set_surface_override_material(0, painted)
+	var blue_errs: Array = preview.role_offenders(blue, "goldclaw")
+	check("roles: the gate detects a BLUE HORSE", true, not blue_errs.is_empty())
+	check("roles: ...and names the coat as the offender", true,
+			str(blue_errs).containsn("coat"))
+	blue.free()
+	# CONTROL 3 — a surface the table does not name.
+	var stray := _spawn(T_PAWN, FROST, "thornvale")
+	var body := stray.find_child("Barbarian_Body", true, false) as MeshInstance3D
+	check("roles: (control 3 needs the pawn body mesh)", true, body != null)
+	if body != null:
+		body.name = "Barbarian_Poncho"
+		check("roles: an UNCLASSIFIED surface fails loudly", true,
+				str(preview.role_offenders(stray, "thornvale")).containsn("UNCLASSIFIED"))
+	stray.free()
+
+
+## THE ROLE TABLE ITSELF. Every rule dispatches to a real role, the nine
+## houses each declare a jersey and a coat, and no two houses wear the same
+## jersey — nine armies that look alike is the failure mode this whole pass
+## exists to end, and it is cheapest to catch in the data.
+func _test_material_role_table() -> void:
+	var seen_roles := {}
+	for rule: Dictionary in assets.MATERIAL_ROLES:
+		check("role table: rule %s names a pattern" % str(rule.get("n")), true,
+				not str(rule.get("n", "")).is_empty())
+		seen_roles[rule["role"]] = true
+	for want in [assets.Role.KIT, assets.Role.NATURAL, assets.Role.REGALIA,
+			assets.Role.HERALDRY, assets.Role.MIXED]:
+		check("role table: dispatches to role %d" % want, true, seen_roles.has(want))
+	check("role table: an unnamed surface classifies as UNCLASSIFIED",
+			assets.Role.UNCLASSIFIED,
+			assets.classify("Nothing_The_Table_Knows", "nor_this")["role"])
+	var kits := {}
+	for hid in registry.house_ids():
+		var kit: Color = assets.kit_color(hid)
+		check("jersey %s: declared and saturated (s=%.2f)" % [hid, kit.s], true,
+				kit.s >= 0.40)
+		kits[hid] = kit
+		var coat: Dictionary = assets.coat_palette(hid)
+		for part in ["Main", "Main_Light", "Main_Dark", "Muzzle", "Hair", "Hooves"]:
+			check("coat %s: names %s" % [hid, part], true, coat.has(part))
+		# A COAT IS NEVER A HOUSE HUE (the owner's rule, in data): bay,
+		# chestnut, black, grey and dun are warm browns or neutrals, full stop.
+		for part in coat:
+			var c: Color = coat[part]
+			var hue := c.h * 360.0
+			check("coat %s/%s is a real coat colour (%s)" % [hid, part,
+					c.to_html(false)], true,
+					c.s <= 0.20 or (hue >= 5.0 and hue <= 58.0))
+			check("coat %s/%s is not the jersey" % [hid, part], true,
+					Vector3(c.r - kit.r, c.g - kit.g, c.b - kit.b).length() > 0.14)
+	var close := 0
+	for a in kits:
+		for b in kits:
+			if str(a) >= str(b):
+				continue
+			var ca: Color = kits[a]
+			var cb: Color = kits[b]
+			if Vector3(ca.r - cb.r, ca.g - cb.g, ca.b - cb.b).length() < 0.20:
+				close += 1
+				print("      jerseys too close: %s %s vs %s %s"
+						% [a, ca.to_html(false), b, cb.to_html(false)])
+	check("jerseys: no two houses wear the same one", 0, close)
+
+
+## THE MIXED SPLIT. A KayKit figure is painted from one atlas, so the tabard
+## and the breastplate under it are the SAME surface until the role split
+## separates them by texel. Two things have to hold or the jersey is a lie:
+## the split must actually produce both halves on a body that has both, and it
+## must not move a vertex — the height law measures these meshes' AABBs.
+func _test_role_split() -> void:
+	# The QUEEN, deliberately: the Rogue_Hooded atlas paints a saturated teal
+	# robe over bare skin on ONE mesh, which is the exact case the split exists
+	# for. (The knight's body is a counter-example worth knowing — his plate
+	# carries no cloth at all, so his mesh splits into one natural surface and
+	# his house is carried by his cape, his shield and his horse's caparison.)
+	var pv := _spawn(T_QUEEN, FROST, "goldclaw")
+	var body := pv.find_child("RogueHooded_Body", true, false) as MeshInstance3D
+	check("split: the queen's robe mesh survives", true, body != null)
+	if body == null:
+		pv.free()
+		return
+	# Asked through costume_preview (i.e. the LIVE autoload), never through this
+	# suite's PieceAssets shim: the shim is a second instance with an empty
+	# cache, so it would report "nothing was split" for every mesh in the game.
+	var roles: Dictionary = preview.split_roles_of(body)
+	check("split: the body was split by role", true, roles.size() >= 2)
+	var kit_surfaces := 0
+	var nat_surfaces := 0
+	for s in roles:
+		if int(roles[s]) == assets.Role.KIT:
+			kit_surfaces += 1
+		else:
+			nat_surfaces += 1
+	check("split: the body has a KIT half (the tabard)", true, kit_surfaces >= 1)
+	check("split: ...and a NATURAL half (the plate under it)", true, nat_surfaces >= 1)
+	# The pack's own palette, as the classifier reads it — the evidence behind
+	# MATERIAL_ROLES, from tools/dump_uv_palette.gd.
+	for probe in [[Color.html("#086050"), assets.Role.KIT, "the rogue's teal"],
+			[Color.html("#2078b7"), assets.Role.KIT, "the ranger's blue cape"],
+			[Color.html("#b71860"), assets.Role.KIT, "the grimoire's magenta"],
+			[Color.html("#788087"), assets.Role.NATURAL, "sword steel"],
+			[Color.html("#b07050"), assets.Role.NATURAL, "skin"],
+			[Color.html("#7c3c2c"), assets.Role.NATURAL, "leather"],
+			[Color.html("#d7af87"), assets.Role.NATURAL, "bone"],
+			[Color.html("#181818"), assets.Role.NATURAL, "shadow"]]:
+		check("split: %s classifies right" % probe[2], probe[1],
+				assets.texel_role(probe[0]))
+	pv.free()
 
 
 ## Model-space AABB of a named mesh under the ensemble (mounted-knight rig).
