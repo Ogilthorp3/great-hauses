@@ -5,6 +5,8 @@
 #   ./tools/build/build.sh windows         # just the .exe
 #   ./tools/build/build.sh macos
 #   ./tools/build/build.sh degrade         # platform-degradation suite only
+#   ./tools/build/build.sh freshness       # is the shipped .exe older than src?
+#   ./tools/build/build.sh freshness --artifact <path>
 #   ./tools/build/build.sh --out /tmp/dist windows
 #
 # Every step checks its exit code and every artifact is verified after the
@@ -158,6 +160,36 @@ do_import() {
   return 0
 }
 
+# ── Freshness ──────────────────────────────────────────────────────────────
+# THE STALENESS DEFECT (2026-08-09): a Windows .exe sat in great-houses-dist/
+# with SEVEN source files newer than it — the entire branding set had landed
+# after the export. Nothing caught it. `file` was happy, the pck assertions
+# were happy, the size was right; the artifact was simply a photograph of an
+# older tree, and it was one step from being sent to a friend.
+#
+# An export IS a photograph. This asserts the shutter fired after the last
+# edit to anything the photograph is supposed to contain. The exclusion list
+# below MIRRORS export_presets.cfg's exclude_filter on purpose: a file the
+# export never ships cannot make the artifact stale, and treating it as if it
+# could would make this gate cry wolf every time a doc or a test changed.
+verify_freshness() {
+  local artifact="$1" newer
+  if [ ! -e "$artifact" ]; then fail "freshness: no artifact at $artifact"; return 1; fi
+  newer="$(find "$PROJ/src" "$PROJ/scenes" "$PROJ/assets" \
+                "$PROJ/project.godot" "$PROJ/export_presets.cfg" \
+             -type f -newer "$artifact" \
+             -not -name '*.md' -not -name '*.py' -not -name '*.sh' \
+             2>/dev/null)"
+  if [ -n "$newer" ]; then
+    fail "STALE ARTIFACT — these exported sources are NEWER than the artifact:
+$(printf '%s\n' "$newer" | sed "s|^$PROJ/|         |")
+       The export ran BEFORE these edits. Re-run it; do not ship this."
+    return 1
+  fi
+  note "freshness: no exported source is newer than the artifact"
+  return 0
+}
+
 # ── Exports ────────────────────────────────────────────────────────────────
 build_windows() {
   local target="$OUT/windows/$WIN_OUT_NAME"
@@ -186,6 +218,7 @@ build_windows() {
   build_pck_args
   python3 "$SCRIPT_DIR/pck_list.py" "$target" --count-only "${PCK_ARGS[@]}" || {
     fail "pck content assertions failed for $target"; return 1; }
+  verify_freshness "$target" || return 1
   note "windows build verified"
   return 0
 }
@@ -209,6 +242,11 @@ build_macos() {
   build_pck_args
   python3 "$SCRIPT_DIR/pck_list.py" "$target" --count-only "${PCK_ARGS[@]}" || {
     fail "pck content assertions failed for $target"; return 1; }
+  # Freshness is asked of the .pck, not the .app: a bundle DIRECTORY's mtime
+  # moves when anything inside it is touched (the boot smoke test below writes
+  # nothing into it, but codesign does), whereas the pck is written exactly
+  # once, by the export.
+  verify_freshness "$target/Contents/Resources/Great Houses.pck" || return 1
 
   # The macOS bundle is the ONLY artifact we can actually execute here, so it
   # doubles as the smoke test for filters that are shared with Windows: a
@@ -242,11 +280,13 @@ run_degrade() {
 
 # ── Main ───────────────────────────────────────────────────────────────────
 TARGETS=()
+FRESH_ARTIFACT=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --out) OUT="$2"; shift 2 ;;
-    windows|macos|degrade|all) TARGETS+=("$1"); shift ;;
-    -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
+    --artifact) FRESH_ARTIFACT="$2"; shift 2 ;;
+    windows|macos|degrade|freshness|all) TARGETS+=("$1"); shift ;;
+    -h|--help) sed -n '2,18p' "$0"; exit 0 ;;
     *) echo "unknown argument '$1'"; exit 2 ;;
   esac
 done
@@ -255,13 +295,19 @@ done
 mkdir -p "$OUT"
 note "project   : $PROJ"
 note "output    : $OUT"
-check_toolchain || { note "toolchain unusable — stopping"; exit 1; }
+# `freshness` is a pure filesystem comparison — it needs no Godot and no export
+# templates, so it must still work on a box where the toolchain is missing.
+case " ${TARGETS[*]} " in
+  *" freshness "*) : ;;
+  *) check_toolchain || { note "toolchain unusable — stopping"; exit 1; } ;;
+esac
 
 for t in "${TARGETS[@]}"; do
   case "$t" in
     windows) guard_concurrent_e2e && do_import && build_windows ;;
     macos)   guard_concurrent_e2e && do_import && build_macos ;;
     degrade) run_degrade ;;
+    freshness) verify_freshness "${FRESH_ARTIFACT:-$OUT/windows/$WIN_OUT_NAME}" ;;
     all)     guard_concurrent_e2e && do_import && { build_windows; build_macos; run_degrade; } ;;
   esac
 done

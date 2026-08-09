@@ -2,14 +2,84 @@
 
 How to turn this repo into something a friend can double-click — on Windows or macOS.
 
+## The rebuild command
+
+**This is the one to run. Nothing else is a release build.**
+
 ```bash
-./tools/build/build.sh            # windows + macos, both verified
-./tools/build/build.sh windows    # just the .exe
-./tools/build/build.sh degrade    # just the platform-degradation suite
+cd /Users/bert/Projects/godot-lab/great-houses-chess
+./tools/build/build.sh all
+```
+
+That single command does, in order, and stops at the first failure:
+
+| Step | What it proves |
+|---|---|
+| toolchain check | editor version == export-template version |
+| concurrent-e2e guard | no test suite is racing the export (see Trap 3) |
+| `--import` | **exit code checked** — a failed import ships missing meshes |
+| Windows export | exit code checked, then `file` == PE32+ GUI x86-64, size sane |
+| pck assertions | the three `FileAccess` `.json` files are IN, `test_e2e/` is OUT |
+| **freshness gate** | **no exported source is newer than the artifact** |
+| macOS export | same, plus a headless boot that catches a dropped autoload |
+| degradation suite | Maester + Oracle grey out instead of crashing or hanging |
+
+Sub-targets when you don't need all of it:
+
+```bash
+./tools/build/build.sh windows      # just the .exe (+ its verification)
+./tools/build/build.sh macos        # just the .app
+./tools/build/build.sh degrade      # just the platform-degradation suite
+./tools/build/build.sh freshness    # is the shipped .exe older than src/? (no Godot needed)
 ```
 
 Artifacts land in `../great-houses-dist/` (a sibling of the repo, deliberately **outside**
 `res://` — a build dropped inside the project gets swept into the *next* export).
+
+### The staleness gate — why `freshness` exists
+
+**Scar, 2026-08-09.** A `GreatHouses.exe` sat in `great-houses-dist/` with **seven source
+files newer than it**, including the entire branding set. Every check we had was green:
+`file` said PE32+, the size was right, the pck index held all the expected paths. The
+artifact was simply a *photograph of an older tree*, and it was one step from being sent
+to a friend — who would have run a build with no heraldry in it.
+
+An export is a photograph. `verify_freshness` asserts the shutter fired **after** the last
+edit to anything the photograph should contain, and it now runs automatically at the end
+of both exports. It compares `src/`, `scenes/`, `assets/`, `project.godot` and
+`export_presets.cfg` against the artifact's mtime, skipping `*.md`/`*.py`/`*.sh` because
+those mirror `exclude_filter` and are never shipped.
+
+On failure it names the offending files and exits 1:
+
+```
+[build] FAIL: STALE ARTIFACT — these exported sources are NEWER than the artifact:
+         src/net/net_protocol.gd
+         src/board/piece_view.gd
+       The export ran BEFORE these edits. Re-run it; do not ship this.
+```
+
+To check an artifact you did **not** just build (e.g. one already zipped and about to be
+sent):
+
+```bash
+./tools/build/build.sh freshness --artifact ../great-houses-dist/windows/GreatHouses.exe
+```
+
+### Packaging for the friend
+
+```bash
+cd ../great-houses-dist/for-a-friend
+cp ../windows/GreatHouses.exe .
+zip -9 -X GreatHouses-windows-v0.1.0.zip GreatHouses.exe README.txt
+rm GreatHouses.exe          # keep only the zip under version-of-record
+```
+
+`README.txt` next to the zip is the friend-facing copy: how to run it, the two dialogs
+Windows shows and what to click, UDP 7777, how to join a host, why the Grand Maester and
+the DS4-Oracle are greyed out, and the disclosure that the binary has never been run on
+Windows. Re-zip whenever the `.exe` is rebuilt — the zip does **not** update itself, and
+`build.sh freshness` does not police it.
 
 ---
 
@@ -54,8 +124,14 @@ looking in the wrong place. `build.sh` checks this for you and says so in one li
 
 **One file: `GreatHouses.exe`.** Nothing else — no `.pck`, no runtime, no installer.
 
-The Windows preset sets `binary_format/embed_pck=true`, so the ~43 MiB game archive is
-appended inside the executable (~147 MiB total). This is a deliberate trade:
+What actually gets *sent* is
+`../great-houses-dist/for-a-friend/GreatHouses-windows-v0.1.0.zip` (~78 MiB): that one
+`.exe` plus a `README.txt`. The zip exists only because the `.exe` compresses ~47% and
+because a bare unsigned `.exe` arriving by itself is the most alarming thing you can put
+in someone's downloads folder.
+
+The Windows preset sets `binary_format/embed_pck=true`, so the ~45 MiB game archive is
+appended inside the executable (~149 MiB total). This is a deliberate trade:
 
 - **Embedded (what we ship):** impossible for the friend to separate the game from its
   data, or to unzip only half of it. One file, one double-click.
@@ -98,6 +174,10 @@ echo "export rc=$?"
 cases, which is why the build script verifies the artifact afterwards rather than
 trusting the exit code alone.
 
+**Exporting by hand skips the freshness gate.** If you run the raw commands above, run
+`./tools/build/build.sh freshness` afterwards, or you can produce exactly the stale
+artifact that scar at the top of this file is about.
+
 ### Verifying a build
 
 ```bash
@@ -122,8 +202,15 @@ Both presets share these filters:
 ```ini
 export_filter="all_resources"
 include_filter="*.json,*.txt,*LICENSE*"
-exclude_filter="test_e2e/artifacts/*,tests/*,tools/*,*.md,*.py,*.sh"
+exclude_filter="test_e2e/*,tests/*,tools/*,*.md,*.py,*.sh,assets/branding/*.ico,assets/branding/*.icns"
 ```
+
+> `test_e2e/*` (not just `test_e2e/artifacts/*`) since 2026-08-09: the E2E harness used to
+> be an autoload in `project.godot`, so a ~90 KB `.gdc` of *test code* shipped inside the
+> player's pck. It is registered at runtime now (`src/main.gd::_install_e2e_harness`), only
+> for an `--e2e` launch, and the whole directory is excluded from every export.
+> The `.ico`/`.icns` clauses drop the *source* icon files: both are embedded into the
+> binary by the exporter, so shipping them again inside the pck is pure dead weight.
 
 Each clause is load-bearing. All four of these were found by building and inspecting,
 not by reading docs:
@@ -300,12 +387,24 @@ connection still fails after allowing UDP, allowing TCP 7777 too costs nothing.
 
 Honest list, because "it builds" is not "it runs":
 
-- **The `.exe` has never been executed.** There is no Windows machine here and **Wine is
-  not installed** (it was not installed, to avoid a large unrequested toolchain). What is
-  proven: `--export-release` exits 0, `file` reports *PE32+ executable (GUI) x86-64*, the
-  size is sane (147 MiB), and the embedded PCK index contains the expected 302 files and
-  none of the excluded ones. Everything past process start — rendering, input, audio,
-  actual gameplay — is **unverified on Windows**.
+- **The `.exe` has never been executed — not once, on any Windows machine.** There is no
+  Windows box here and **Wine is not installed** (deliberately, to avoid a large
+  unrequested toolchain). What *is* proven, as of the 2026-08-09 06:47 build
+  (sha256 `9845d36f…b567a`, 156,653,304 bytes): `--export-release` exits 0, `file` reports
+  *PE32+ executable (GUI) x86-64*, the embedded PCK index holds **320 files** — including
+  the three `FileAccess`-read `.json` files, all eight branding textures as imported
+  `.ctex`, and all four `src/net/*.gdc` — and **zero** `test_e2e/` paths. Everything past
+  process start — the window opening, rendering, input, audio, actual gameplay — is
+  **unverified on Windows**.
+- **The build is not byte-reproducible.** Two exports of the same commit, minutes apart,
+  produced different sha256 sums (measured 2026-08-09 — PE headers carry a timestamp).
+  That hash therefore identifies *the artifact that was zipped and sent*, and is worth
+  checking against the zip's contents; it is **not** a claim that rebuilding reproduces
+  it. Use `build.sh freshness` to answer "is this artifact current?", never a hash diff.
+- **The netcode hardening is verified on macOS only.** The P1 request-clock, the
+  `hello_admission` / `seat_admission` RPC gates and the six UX fixes are covered by the
+  macOS suites and are present in the shipped pck as bytecode; none of them has executed
+  on Windows.
 - **The multiplayer path has not been exercised across two machines**, and no firewall
   rule has been tested on real Windows. The port number is read from the netcode source,
   not observed on the wire.
