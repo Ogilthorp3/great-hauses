@@ -423,26 +423,112 @@ const PALETTE_SATURATION_CEILING := 0.0
 const GEAR_SATURATION := 0.0
 
 
+## THE TONE FLOOR — how a cast whose ATLAS is dark gets lifted (critic
+## defect #2, 2026-08-09: "the far queen is a black hole in her own army").
+##
+## The bishop's fix (P9) could paint over the problem because a mitre is two
+## flat surfaces. The queen's cannot: the Rogue_Hooded atlas paints a whole
+## hooded robe, and painting it flat would throw away every fold the cast has.
+## Her problem is not the hue — the hood came in-house last pass and STAYS in
+## house here — it is that the atlas's hood patch is near-black, and a
+## multiply-tint over a near-black texel can only ever return a near-black
+## texel. Measured on the shipped boot frame: Goldclaw's d8 queen at median
+## value 0.212 against a back rank running 0.310-0.376 — the darkest piece in
+## her own army by ~30 %. She now measures 0.337 inside a 0.310-0.373 band,
+## and the same check across all nine costume previews puts her above her
+## rank's floor in every house.
+##
+## So the DARK END of her texture is raised before the tint multiplies it:
+##     L' = floor + (1 - floor) * L
+## A linear black-point lift. It is monotonic, so every fold and seam keeps
+## its ordering (a hard `max(L, floor)` would flatten the hood into a paper
+## cut-out); it leaves L=1 exactly where it was, so the piece's HIGHLIGHTS —
+## and therefore her peak against the king's — do not move; and because the
+## texture is already driven to pure luminance by PALETTE_SATURATION_CEILING,
+## a luminance-only lift provably cannot shift a hue. Value, and only value.
+const QUEEN_TONE_FLOOR := 0.30
+
+
 ## House-tinted variant of a pack material: desaturated albedo texture
 ## multiplied by the house tint, roughness pushed up. Cached and shared.
 ## `saturation` is clamped to PALETTE_SATURATION_CEILING — see above.
-func tinted_material(src: StandardMaterial3D, tint: Color, saturation: float) -> StandardMaterial3D:
+## `tone_floor` raises the texture's black point first — see above.
+func tinted_material(src: StandardMaterial3D, tint: Color, saturation: float,
+		tone_floor: float = 0.0) -> StandardMaterial3D:
 	var sat := minf(saturation, PALETTE_SATURATION_CEILING)
+	var floor_v := clampf(tone_floor, 0.0, 0.9)
 	# Keyed on the resource's INSTANCE id, never its RID: a headless run has
 	# no rendering server, so Resource.get_rid() hands every material the same
 	# empty RID and one cache entry would be served to all of them (and a
 	# freed RID id is recycled, which is the same bug with a timer on it).
-	var key := "%d|%s|%.3f" % [src.get_instance_id(), tint.to_html(), sat]
+	# The FLOOR belongs in the key for the same reason the saturation does:
+	# the queen and the king pull the same pack atlas at different floors.
+	var key := "%d|%s|%.3f|%.3f" % [src.get_instance_id(), tint.to_html(), sat, floor_v]
 	if _tint_cache.has(key):
 		return _tint_cache[key]
 	var tinted: StandardMaterial3D = src.duplicate()
 	if tinted.albedo_texture != null:
-		tinted.albedo_texture = _desaturated(tinted.albedo_texture, sat)
+		tinted.albedo_texture = _desaturated(tinted.albedo_texture, sat, floor_v)
 	tinted.albedo_color = src.albedo_color * tint
 	tinted.roughness = maxf(tinted.roughness, 0.88)
 	tinted.metallic = minf(tinted.metallic, 0.05)
 	_tint_cache[key] = tinted
 	return tinted
+
+
+## THE WEAPON TRAIL (critic defect #1, 2026-08-09 — "the mustard rectangle").
+##
+## PieceView._strike_flash used to spawn a BARE QuadMesh with a 90 %-alpha
+## mustard albedo. A bare quad has no shape of its own, so at the instant the
+## duel camera takes its frame the "weapon trail" was still a filled
+## rectangle: measured 433x112 px at 99 % fill and value 0.741 in
+## duel/03_mid_duel.png, 426x111 at 0.739 in showcase/05, and 427x110 at 0.940
+## in slowmo/02 — a near-opaque slab across both fighters' heads at the moment
+## of the kill. Three separate critics read it as an unfinished debug panel,
+## which is exactly what it looked like.
+##
+## The fix is to give the quad SHAPE, in the only place a quad can have one:
+## its alpha. This paints a tapered ARC — a curved core that thins to nothing
+## at both ends and falls off with a gaussian across its width — so the mesh's
+## rectangle is never visible at any opacity. The core is white-hot and the
+## fringe amber, and the material draws it ADDITIVELY, so the trail can only
+## ever ADD light to the frame: no alpha value of it can produce a flat plate,
+## because there is no flat region to produce.
+const TRAIL_TEX_W := 192
+const TRAIL_TEX_H := 96
+const TRAIL_ARC_TOP := 0.30      # v of the arc's crest (v=0 is the image top)
+const TRAIL_ARC_DROP := 0.40     # ...and how far its ends fall below that
+const TRAIL_CORE := 0.052        # half-thickness of the hot core, in v units
+
+var _trail_tex: Texture2D
+
+
+## The soft-edged blade-arc texture — built once, shared by every strike.
+func strike_trail_texture() -> Texture2D:
+	if _trail_tex != null:
+		return _trail_tex
+	var img := Image.create(TRAIL_TEX_W, TRAIL_TEX_H, false, Image.FORMAT_RGBA8)
+	var edge := Color(1.0, 0.60, 0.20)   # amber fringe
+	var core := Color(1.0, 0.96, 0.86)   # white-hot core
+	for x in TRAIL_TEX_W:
+		var u := (float(x) + 0.5) / TRAIL_TEX_W
+		# Tapered ends: the ink reaches zero AT both ends, so the quad's left
+		# and right edges can never draw a straight vertical cut.
+		var taper := pow(sin(PI * u), 0.9)
+		var arc := TRAIL_ARC_TOP + TRAIL_ARC_DROP * pow(2.0 * u - 1.0, 2.0)
+		var half := TRAIL_CORE * maxf(taper, 0.05)
+		for y in TRAIL_TEX_H:
+			var v := (float(y) + 0.5) / TRAIL_TEX_H
+			var d := (v - arc) / half
+			var a := exp(-d * d * 1.6) * taper
+			img.set_pixel(x, y, Color(
+					lerpf(edge.r, core.r, a * a),
+					lerpf(edge.g, core.g, a * a),
+					lerpf(edge.b, core.b, a * a),
+					clampf(a, 0.0, 1.0)))
+	img.generate_mipmaps()
+	_trail_tex = ImageTexture.create_from_image(img)
+	return _trail_tex
 
 
 ## Every color a house is allowed to put on the board: its three heraldic
@@ -468,8 +554,17 @@ func house_palette(house_id: String) -> Array[Color]:
 ## by each material's own luminance, which keeps hide/mane/hooves contrast
 ## while the whole animal reads house-colored at gameplay distance. Cached
 ## and shared like every other tinted material.
-const MOUNT_DYE_FLOOR := 0.42   # darkest material still shows the hue
-const MOUNT_DYE_GAIN := 1.05    # ...and the lightest reads near full tint
+const MOUNT_DYE_FLOOR := 0.34   # darkest material still shows the hue
+const MOUNT_DYE_GAIN := 0.80    # ...and the lightest reads near full tint
+## NOTHING ON THE MOUNT MAY OUT-VALUE ITS RIDER (critic defect #3,
+## 2026-08-09). A mount weight is a FLAT dye — the whole surface lands at
+## `weight x tint`, where a rider's textured surface only touches `tint` at
+## its few brightest texels. So a weight of 1.0 does not mean "as bright as
+## the rider", it means "the entire horse is as bright as the rider's
+## highlight", which is exactly the white lump that shipped. The ceiling is
+## the rider's own brightest texel, and every hide/tack weight now sits well
+## under it — see MOUNT_DYE_WEIGHTS.
+const MOUNT_DYE_CEILING := 1.00
 
 ## The pack's own albedos are all dark browns within 0.11 of each other, so a
 ## pure luminance dye flattened the animal into one silhouette-less blob at
@@ -479,21 +574,30 @@ const MOUNT_DYE_GAIN := 1.05    # ...and the lightest reads near full tint
 ## tail and legs stay separately readable while the whole animal still reads
 ## house-colored. Unknown materials fall back to the luminance formula.
 ## The BARDING (crinet + chanfron, critic P6 — tools/props/convert_horse.py)
-## is deliberately the BRIGHTEST thing on the mount. Its whole job is to carry
-## the neck and the head at values the near-side top-down camera can find, so
-## the ensemble reads as a rider ON something rather than as a rider with
-## debris around him. Anything dimmer than the hide would simply join the blob
-## the barding exists to break up.
+## is still the brightest thing ON THE MOUNT: its job is to carry the neck and
+## the head at values the near-side top-down camera can find, so the ensemble
+## reads as a rider ON something rather than as a rider with debris around him.
+##
+## WHAT CHANGED (critic defect #3, 2026-08-09): "brightest on the mount" had
+## been written as weights ABOVE 1.0 — a hide at exactly the rider's peak
+## (1.00), barding a third above it (1.32 / 1.24). On a pale house that is a
+## flat #9fb4cc-and-up mass the size of two pieces, and it measured as such:
+## the near knights peaked at 0.839/0.875 value against a king at 0.776, so
+## the loudest thing on the board was a horse and the crown the same pass
+## fought to make findable was drowned by it. Every weight is now a FRACTION
+## of the rider (MOUNT_DYE_CEILING), the hide sits a clear step under him, and
+## the barding's contrast is preserved as a RATIO against the hide instead of
+## as an absolute flare: chanfron/hide is 1.26 here, it was 1.24 before.
 const MOUNT_DYE_WEIGHTS := {
-	"Main": 1.00,          # the hide
-	"Main_Light": 1.32,    # blaze / socks — the bright accent
-	"Main_Dark": 0.60,     # ears, shading
-	"Muzzle": 0.50,
-	"Hair": 0.54,          # mane + tail: darker than the hide, not black
-	"Hooves": 0.32,
-	"saddle_leather": 0.44,
-	"crinet_cloth": 1.06,  # neck barding — the plan-view band
-	"chanfron_steel": 1.24,  # face plate — the brightest mark, ON the head
+	"Main": 0.78,          # the hide — a clear step under the rider
+	"Main_Light": 1.00,    # blaze / socks — the bright accent, at the ceiling
+	"Main_Dark": 0.50,     # ears, shading
+	"Muzzle": 0.44,
+	"Hair": 0.46,          # mane + tail: darker than the hide, not black
+	"Hooves": 0.28,
+	"saddle_leather": 0.38,
+	"crinet_cloth": 0.88,  # neck barding — the plan-view band
+	"chanfron_steel": 0.98,  # face plate — the brightest mark, ON the head
 }
 
 
@@ -501,7 +605,7 @@ func dyed_mount_material(src: StandardMaterial3D, tint: Color) -> StandardMateri
 	var lum := src.albedo_color.get_luminance()
 	var weight: float = MOUNT_DYE_WEIGHTS.get(str(src.resource_name),
 			MOUNT_DYE_FLOOR + MOUNT_DYE_GAIN * lum)
-	return dyed_material(src, tint, weight)
+	return dyed_material(src, tint, minf(weight, MOUNT_DYE_CEILING))
 
 
 ## Flat house dye: the tint at a fixed weight, keeping the source's alpha.
@@ -735,11 +839,12 @@ func _split_hat_indices(idx: PackedInt32Array,
 	return [crown, brim]
 
 
-func _desaturated(tex: Texture2D, saturation: float) -> Texture2D:
+func _desaturated(tex: Texture2D, saturation: float,
+		tone_floor: float = 0.0) -> Texture2D:
 	# The saturation belongs in the key: body and gear pull the SAME pack
 	# atlas at different saturations, and a texture-only key silently served
-	# whichever one asked first to both.
-	var key := "%d|%.3f" % [tex.get_instance_id(), saturation]
+	# whichever one asked first to both. Same argument for the tone floor.
+	var key := "%d|%.3f|%.3f" % [tex.get_instance_id(), saturation, tone_floor]
 	if _desat_cache.has(key):
 		return _desat_cache[key]
 	# DUPLICATE before touching it: Texture2D.get_image() hands back the
@@ -757,7 +862,22 @@ func _desaturated(tex: Texture2D, saturation: float) -> Texture2D:
 		img.decompress()
 	img.convert(Image.FORMAT_RGBA8)
 	img.adjust_bcs(1.0, 1.0, saturation)
+	if tone_floor > 0.0:
+		_lift_black_point(img, tone_floor)
 	img.generate_mipmaps()
 	var out := ImageTexture.create_from_image(img)
 	_desat_cache[key] = out
 	return out
+
+
+## L' = floor + (1 - floor) * L, per channel, in place. See QUEEN_TONE_FLOOR.
+## Alpha is untouched — a cut-out stays a cut-out.
+func _lift_black_point(img: Image, floor_v: float) -> void:
+	var span := 1.0 - floor_v
+	for y in img.get_height():
+		for x in img.get_width():
+			var c := img.get_pixel(x, y)
+			img.set_pixel(x, y, Color(
+					floor_v + span * c.r,
+					floor_v + span * c.g,
+					floor_v + span * c.b, c.a))

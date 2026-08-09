@@ -536,23 +536,39 @@ def helm_tidegrip(shell, iron, accent):
       * a NASAL BAR (Winterfang's pattern, in plain iron) closes the face.
         Half the "undead king" read was never the tentacles at all: it was a
         BARE glowing-eyed skull framed by a band, which is a portrait of a
-        lich. A footman's face bar makes it a portrait of a soldier."""
+        lich. A footman's face bar makes it a portrait of a soldier.
+
+    HUMBLED A THIRD TIME 2026-08-09 (critic defect #4, the close-up half of
+    P10 that survived). The tails had stopped climbing, but the SPLAY had not:
+    46 degrees grown by a further 35 % put the outer two limbs' tips at +/-62
+    degrees — the TEMPLES — and a limb that ends at the temple ends ABOVE the
+    browline, because the shell rises there. Three raised tabs spaced evenly
+    around a band is a circlet whatever the tabs are shaped like, and the
+    duel-range close-up read exactly that: undead ROYALTY, not a footman.
+    The geometry now denies the shape rather than shrinking it:
+      * the limbs are pulled to the FRONT QUARTER (+/-34 degrees) and the
+        splay INVERTS (0.88) — they converge toward the nasal as they climb
+        instead of fanning around the skull, so no tip ever reaches a temple;
+      * the climb is halved (0.55 of the old rise), keeping every tip on the
+        brow's own slope where it sits UNDER the band's top edge, not above;
+      * the limbs are thinner again (0.038 base) — a grip, not a frame.
+    The kraken still grips the brow; there is no longer a ring of anything."""
     objs = []
-    for i, az_deg in enumerate((-46.0, 0.0, 46.0)):
+    for i, az_deg in enumerate((-34.0, 0.0, 34.0)):
         pts, radii = [], []
         n_pt = 4
         for k in range(n_pt):
             t = k / float(n_pt - 1)
-            # up the front slope only — never onto the crown
-            z = shell.brow + 0.04 + (abs(shell.brow) - 0.15) * t
-            az = math.radians(az_deg) * (1.0 + 0.35 * t)
+            # up the front slope only — never onto the crown, never to a temple
+            z = shell.brow + 0.04 + (abs(shell.brow) - 0.15) * 0.55 * t
+            az = math.radians(az_deg) * (1.0 - 0.12 * t)
             p = shell.point(az, z)
             n = shell.normal(az, z)
-            pts.append(p + n * (0.020 + 0.014 * t * t))
-            radii.append(0.046 - 0.016 * t)
+            pts.append(p + n * (0.018 + 0.012 * t * t))
+            radii.append(0.038 - 0.014 * t)
         # the tail hooks DOWN the cap behind it — a grip, never a point
         tail = pts[-1]
-        pts.append(tail + Vector((0.0, 0.055, -0.045)))
+        pts.append(tail + Vector((0.0, 0.050, -0.040)))
         radii.append(0.0)
         objs += tube_chain(pts, radii, accent, "Tentacle_%d" % i)
     front_y = shell.cy(shell.brow) - shell.ry(shell.brow)

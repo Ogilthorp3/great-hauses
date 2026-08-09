@@ -326,7 +326,7 @@ func play_capture(victim: PieceView) -> void:
 		await get_tree().create_timer(0.5 / 1.3).timeout  # strike release beat
 	else:
 		await _tower_lunge(to_victim)
-	_strike_flash(victim.position)
+	_strike_flash(victim.global_position)
 	await victim.die()
 	if _anim != null:
 		_anim.speed_scale = 1.0
@@ -525,30 +525,79 @@ func _tower_lunge(to_victim: Vector3) -> void:
 	await tw.finished
 
 
-func _strike_flash(victim_pos: Vector3) -> void:
-	## Quick weapon-trail flash between attacker and victim.
-	var mid := (victim_pos - position) * 0.5 + Vector3(0.0, 0.55, 0.0)
+## THE WEAPON TRAIL (critic defect #1, 2026-08-09). This used to be a bare
+## 0.85 x 0.22 QuadMesh at 90 % mustard alpha, and every duel screenshot in
+## the suite caught it as a filled rectangle over the fighters' heads — the
+## "mustard rectangle" three critics read as an unfinished debug panel
+## (measured: 433x112 px, 99 % fill, value 0.741 in duel/03; 0.940 in the
+## slow-mo frame, where the time dip holds it open even longer).
+##
+## Three things changed, and each one independently makes a slab impossible:
+##  1. SHAPE lives in the alpha now — PieceAssets.strike_trail_texture() paints
+##     a tapered arc that reaches zero ink at both ends and falls off across
+##     its width, so the mesh's rectangle is never a visible edge.
+##  2. The blend is ADDITIVE, so the trail can only add light to what is
+##     behind it. It can brighten a helmet; it cannot cover one.
+##  3. It is born ALREADY SWEPT — it spawns wider than it is tall and keeps
+##     stretching, so it is a streak from its first frame to its last, never
+##     an unstretched shape waiting to stretch.
+##
+## TRAIL_LIFE is the one number NOT tuned toward "faster". At 0.16 s the arc
+## was gone before the suite's mid-duel frame and every shipped screenshot
+## showed a kill with no blow in it — a strike that does not read as a strike
+## is the other half of the defect. 0.50 s with a quad EASE_OUT alpha spends
+## most of itself as a dim tail: bright for a beat, then a fading streak the
+## frame can still catch. Verified by regenerating all three duel frames.
+##
+## The quad is `top_level` so its world pose is set directly: the old code
+## assigned a BOARD-space midpoint into the attacker's own rotated local
+## space, which is what threw the flash off the strike line and left it
+## floating over the duellists' heads instead of tracking the blade.
+##
+## ...and the corrected midpoint then hid the trail INSIDE the fight: at duel
+## range the two combatants stand chest to chest, so the exact point between
+## them is behind a body from every angle and the first corrected build
+## rendered no strike at all. So the arc is pulled TRAIL_LIFT toward the live
+## camera along the view ray — still on the blade line, but in front of the
+## bodies that line runs through. Billboarded, so that offset always resolves
+## to "in front" no matter which camera (board, duel, slow-mo) is looking.
+const TRAIL_QUAD_SIZE := Vector2(0.86, 0.46)
+const TRAIL_LIFE := 0.50
+const TRAIL_LIFT := 0.45   # metres toward the camera, off the duellists' line
+
+
+func _strike_flash(victim_world: Vector3) -> void:
+	## A fast, thin, additive arc of light along the blade's path.
 	var quad := MeshInstance3D.new()
 	var mesh := QuadMesh.new()
-	mesh.size = Vector2(0.85, 0.22)
+	mesh.size = TRAIL_QUAD_SIZE
 	quad.mesh = mesh
 	var mat := StandardMaterial3D.new()
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
-	mat.albedo_color = Color(1.0, 0.85, 0.5, 0.9)
+	mat.albedo_texture = PieceAssets.strike_trail_texture()
+	mat.albedo_color = Color(1.0, 1.0, 1.0, 0.85)
 	mat.emission_enabled = true
-	mat.emission = Color(1.0, 0.7, 0.3)
-	mat.emission_energy_multiplier = 3.0
+	mat.emission = Color(1.0, 0.72, 0.34)
+	mat.emission_energy_multiplier = 1.4
 	quad.material_override = mat
 	quad.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	quad.position = mid
-	quad.rotation.z = randf_range(-0.5, 0.5)
 	add_child(quad)
+	quad.top_level = true   # world pose, set below — never the attacker's frame
+	var mid := (global_position + victim_world) * 0.5 + Vector3(0.0, 0.62, 0.0)
+	var cam := get_viewport().get_camera_3d()
+	if cam != null:
+		mid += (cam.global_position - mid).normalized() * TRAIL_LIFT
+	quad.global_position = mid
+	quad.rotation = Vector3(0.0, 0.0, randf_range(-0.35, 0.35))
+	quad.scale = Vector3(1.05, 0.85, 1.0)
 	var tw := create_tween().set_parallel(true)
-	tw.tween_property(quad, "scale", Vector3(1.6, 0.4, 1.0), 0.22) \
+	tw.tween_property(quad, "scale", Vector3(1.55, 0.55, 1.0), TRAIL_LIFE) \
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	tw.tween_property(mat, "albedo_color:a", 0.0, 0.24)
+	tw.tween_property(mat, "albedo_color:a", 0.0, TRAIL_LIFE) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	tw.chain().tween_callback(quad.queue_free)
 
 
@@ -570,7 +619,7 @@ func _build_character() -> void:
 	_anim.name = "Anim"
 	_model.add_child(_anim)  # root_node ".." = the character scene root
 	_anim.add_animation_library("", PieceAssets.shared_anims())
-	_tint_meshes(_model, _body_tint(), _saturation_for())
+	_tint_meshes(_model, _body_tint(), _saturation_for(), [], _tone_floor())
 	if piece_type == Type.BISHOP:
 		_dress_mitre()   # AFTER the body tint — it repaints the hat's surfaces
 	# Gear/crest/crown attach AFTER _tint_meshes so they keep their own colors.
@@ -622,12 +671,15 @@ func _build_knight() -> void:
 	_anim.name = "Anim"
 	_rider.add_child(_anim)  # root_node ".." = the rider scene root
 	_anim.add_animation_library("", PieceAssets.shared_anims())
-	# Palette: rider tinted like any character; the mount DYED into the house
-	# colors (charred near-dark under the Drowned Legion) so no army fields a
-	# stock brown horse; the tack never — the caparison is dressed in the
-	# house banner cloth below and the saddle keeps its leather.
-	_tint_meshes(_rider, _tint_for("piece"), _saturation_for())
-	var horse_tint := _tint_for("piece")
+	# Palette: rider and mount both take the ensemble's BODY tint — the house
+	# multiply with the knight's type value trim already in it (TYPE_VALUE_LIFT
+	# 0.88), so the man and the horse are trimmed together and the horse can
+	# never drift brighter than the man it carries. The mount is DYED rather
+	# than tinted (charred near-dark under the Drowned Legion) so no army
+	# fields a stock brown horse; the caparison is dressed in the house banner
+	# cloth below.
+	_tint_meshes(_rider, _body_tint(), _saturation_for())
+	var horse_tint := _body_tint()
 	if house_id == PieceAssets.SKELETON_HOUSE:
 		horse_tint = horse_tint.darkened(0.32)   # charred, but still a horse
 	_dye_mount(horse_tint)
@@ -698,6 +750,11 @@ func _dress_caparison() -> void:
 		mat.albedo_texture = PieceAssets.banner_texture(house_id)
 	else:
 		mat.albedo_color = HOUSE_TINT[side].darkened(0.12)
+	# The cloth steps down with the ensemble (see _apply_ensemble_trim): the
+	# banner's accent hem was the brightest mark left on a trimmed knight.
+	var trim := _ensemble_trim()
+	mat.albedo_color = Color(mat.albedo_color.r * trim, mat.albedo_color.g * trim,
+			mat.albedo_color.b * trim, mat.albedo_color.a)
 	mat.roughness = 0.92
 	mat.metallic = 0.0
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
@@ -844,6 +901,35 @@ func _attach_crest() -> void:
 	crest.name = "Crest"
 	crest.position = CREST_MOUNT_POS
 	att.add_child(crest)
+	_apply_ensemble_trim(crest)
+
+
+## THE ENSEMBLE TRIMS AS ONE (critic defect #3, 2026-08-09). The rank's value
+## correction reaches a piece's BODY through _body_tint(), but two things a
+## knight wears are deliberately outside that path — the caparison (house
+## banner cloth, undyed by design) and the crest (house heraldry, attached
+## after the tint so it keeps its own paint). Left untrimmed they simply
+## became the new brightest marks on the ensemble: with the mount fixed, the
+## caparison's accent hem measured 0.788 and the wolf crest 0.776 against a
+## king at 0.776 — the knight had stopped shouting and started tying.
+##
+## So the correction is applied to the whole ensemble as one object: man,
+## mount, cloth and crest all step down together. It is a VALUE scale (a grey
+## multiply), so the banner keeps its sigil and the crest keeps its heraldic
+## color — the same lift/trim discipline as TYPE_VALUE_LIFT, one axis only.
+## A no-op for every rank that has no correction, which is all of them but two.
+func _apply_ensemble_trim(root: Node3D) -> void:
+	var trim := _ensemble_trim()
+	if is_equal_approx(trim, 1.0):
+		return
+	_tint_meshes(root, Color(trim, trim, trim), _saturation_for())
+
+
+## How far this rank's value correction moved the house tint — the scale that
+## carries it onto surfaces that never see _body_tint().
+func _ensemble_trim() -> float:
+	var raw: float = _tint_for("piece").v
+	return 1.0 if raw <= 0.001 else _body_tint().v / raw
 
 
 ## HOUSE flourish: the PAWN's half-helm on the head bone (ISSUES.md #3) — the
@@ -1109,31 +1195,60 @@ func _drop_banner() -> void:
 	tw.chain().tween_callback(banner.queue_free)
 
 
-## THE BISHOP'S VALUE LIFT (critic P9, 2026-08-09). Every other rank rides a
-## pack texture with mid-to-light passages somewhere on it; the mage cast is
-## painted one dark navy from hem to hat, so the house multiply can only ever
-## make a bishop darker than his own army. Measured on the boot frame he was
-## the dimmest piece on the near back rank in both files (mean value 0.34 and
-## 0.38 against 0.42-0.55 for everyone else) — a dark thimble, exactly as
-## charged.
+## THE TYPE VALUE LADDER — per-rank corrections to the house tint's VALUE.
 ##
-## The lift is applied in HSV with hue and SATURATION untouched, so it moves
-## the bishop's brightness and nothing else: the palette envelope measures hue,
-## and this must not be a way to smuggle a piece out of its house. It is a TYPE
-## correction like the height grading — the same reasoning, one axis over.
-const BISHOP_VALUE_LIFT := 1.18
+## The house tint is one color for a whole army, but a rank's cast decides how
+## much of it survives: a mage painted one dark navy comes out darker than his
+## own army no matter what you multiply into him, and a knight who arrives as
+## a man PLUS a horse comes out as twice the lit surface of anybody else. Both
+## are TYPE facts, like the height grading, and both are corrected on the same
+## axis the grading uses — one number per rank, applied in HSV with hue and
+## SATURATION untouched so this can never become a way to smuggle a piece out
+## of its house. (The palette envelope measures hue; it would catch us.)
+##
+## BISHOP 1.18 (critic P9, 2026-08-09): the mage cast is painted one dark navy
+## from hem to hat and measured the dimmest piece on the near back rank in
+## both files — mean value 0.34 and 0.38 against 0.42-0.55 for everyone else.
+##
+## KNIGHT 0.88 (critic defect #3, 2026-08-09) — the correction pointing DOWN,
+## and the first one to. The mounted ensemble is the only rank that fields two
+## bodies, and at rider-weight 1.0 its rider ALREADY ties the king's peak
+## (measured: rider head 0.777/0.780 against a king at 0.776) while the horse
+## beside him ran 0.784-0.875 across an area the size of two pieces. A rank
+## that ties the crown and then doubles its area does not read as cavalry, it
+## reads as the brightest object on the board — which is the king's job. The
+## trim buys the crown its hierarchy back: the whole ensemble, rider and mount
+## together, now peaks a clear step under the king.
+const TYPE_VALUE_LIFT := {
+	Type.BISHOP: 1.18,
+	Type.KNIGHT: 0.88,
+}
+
+## THE QUEEN'S TONE FLOOR (critic defect #2, 2026-08-09) — a VALUE fix that is
+## deliberately NOT a tint change, because her hue win from the last pass is
+## kept intact. See PieceAssets.QUEEN_TONE_FLOOR for the mechanism and the
+## measurement; the constant lives there because it operates on the texture.
+const TYPE_TONE_FLOOR := {
+	Type.QUEEN: PieceAssets.QUEEN_TONE_FLOOR,
+}
 
 
-## The piece's body tint: the house multiply, plus the bishop's type-level
-## value lift (above). Everything a body wears goes through this — meshes,
-## signature gear, the mitre paint, the glyph ring — so a bishop's staff never
-## ends up a stop darker than the bishop holding it.
+## The piece's body tint: the house multiply, plus the rank's type-level value
+## correction (above). Everything a body wears goes through this — meshes,
+## signature gear, the mitre paint, the knight's mount, the glyph ring — so a
+## bishop's staff never ends up a stop darker than the bishop holding it, and a
+## trimmed knight's horse is trimmed with him.
 func _body_tint() -> Color:
 	var tint: Color = _tint_for("piece")
-	if piece_type != Type.BISHOP:
+	var lift: float = TYPE_VALUE_LIFT.get(piece_type, 1.0)
+	if is_equal_approx(lift, 1.0):
 		return tint
-	return Color.from_hsv(tint.h, tint.s, minf(1.0, tint.v * BISHOP_VALUE_LIFT),
-			tint.a)
+	return Color.from_hsv(tint.h, tint.s, minf(1.0, tint.v * lift), tint.a)
+
+
+## The rank's texture black-point lift — see TYPE_TONE_FLOOR.
+func _tone_floor() -> float:
+	return TYPE_TONE_FLOOR.get(piece_type, 0.0)
 
 
 ## The multiply tint for this piece: HouseRegistry colors when a house id was
@@ -1151,10 +1266,11 @@ func _saturation_for() -> float:
 
 
 func _tint_meshes(root: Node, tint: Color, saturation: float,
-		skip_names: Array = []) -> void:
+		skip_names: Array = [], tone_floor: float = 0.0) -> void:
 	## Per-side material overlay: multiply the pack's albedo texture by the
 	## house tint, push roughness up. Tinted materials are cached and shared.
 	## skip_names: MeshInstance3D names left untouched (banner, pennant).
+	## tone_floor: the rank's texture black-point lift (see TYPE_TONE_FLOOR).
 	for mi: MeshInstance3D in root.find_children("*", "MeshInstance3D", true, false):
 		if mi.name in skip_names:
 			continue
@@ -1163,4 +1279,4 @@ func _tint_meshes(root: Node, tint: Color, saturation: float,
 			if src == null or not src is StandardMaterial3D:
 				continue
 			mi.set_surface_override_material(
-				s, PieceAssets.tinted_material(src, tint, saturation))
+				s, PieceAssets.tinted_material(src, tint, saturation, tone_floor))
