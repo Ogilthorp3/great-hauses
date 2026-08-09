@@ -96,6 +96,12 @@ var _last_tick := 0
 var _caption_layer: CanvasLayer
 var _caption: Label
 var _caption_fade := 0        # generation token for the wall-clock fades
+## World points the caption plate must not cover (see CineCaption). The
+## championship tableau fills this with the crowned king on the dais — until
+## 2026-08-09 the "ASHFALL." plate landed square on his head in the best
+## frame in the game (critic defect P2b).
+var _caption_avoid: Array = []
+var _caption_dx := 0.0        # live horizontal slide of the plate
 var _lines: Dictionary = {}
 var _canon: Dictionary = {}   # lowercase id/name/archetype -> house info dict
 var _champion_house := ""     # remembered by play_checkmate for the tableau captions
@@ -182,6 +188,7 @@ func play_promotion(piece: Node3D, meta: Dictionary = {}) -> void:
 	_arm_failsafe(seq, failsafe_wall_sec)
 	_audio_capture()
 	var info := _fighter(piece, meta, "attacker")
+	_own_the_light(piece)
 	var beam := _spawn_beam(piece, info["color"])
 	_spawn_banner(piece, info["color"])
 	var text := "Rise."
@@ -253,9 +260,14 @@ func play_checkmate(losing_king: Node3D, winning_house: String,
 ## (skip) mid-tableau returns to the gameplay camera instead of parking.
 ## The next scene change (Return to the Hall of Banners / rematch) resets
 ## the viewport camera as usual.
-func play_championship_tableau(throne_focus: Vector3, _meta: Dictionary = {}) -> void:
+## `avoid` — world points the caption plate must never cover (the crowned
+## king on the dais; see CineCaption). Optional and defaulted, so the old
+## 1-arg call still works.
+func play_championship_tableau(throne_focus: Vector3, avoid: Array = [],
+		_meta: Dictionary = {}) -> void:
 	if _active or not is_inside_tree():
 		return
+	_caption_avoid = avoid.duplicate()
 	var seq := _begin("championship")
 	_arm_failsafe(seq, maxf(failsafe_wall_sec,
 		championship_glide_wall + championship_hold_wall + 3.0))
@@ -516,9 +528,15 @@ func _restore_presentation() -> void:
 	if _caption_layer != null:
 		_caption_fade += 1   # kill any in-flight fade; the hard reset wins
 		_caption_layer.visible = false
+	_caption_avoid = []
+	_caption_dx = 0.0
+	if _caption != null:
+		_caption.offset_left = 0.0
+		_caption.offset_right = 0.0
 	_shake_target = 0.0
 	_shake = 0.0
 	_orbiting = false
+	_return_the_light()
 	for pr in _props:
 		if is_instance_valid(pr):
 			pr.queue_free()
@@ -533,6 +551,7 @@ func _exit_tree() -> void:
 	if _active:
 		Engine.time_scale = _prev_time_scale
 		_audio_restore()
+		_return_the_light()
 		for pr in _props:
 			if is_instance_valid(pr):
 				pr.queue_free()
@@ -629,6 +648,13 @@ func _wall_wait(seq: int, sec: float) -> void:
 
 
 func _process(_delta: float) -> void:
+	# The caption plate slides clear of whatever the ceremony is filming (see
+	# CineCaption.slide_toward) — this runs whether or not the cine camera is
+	# live, because the tableau's plate must clear the crowned king standing
+	# under it even while the gameplay camera is still the one drawing.
+	if _caption != null and _caption_layer != null and _caption_layer.visible:
+		_caption_dx = CineCaption.slide_toward(_caption, _caption_dx,
+			_caption_avoid, get_viewport())
 	if not _cam_on:
 		return
 	var now := Time.get_ticks_msec()
@@ -865,8 +891,73 @@ func _hide_caption(fade_sec: float = 0.3) -> void:
 # ── flourish props (promotion) ─────────────────────────────────────────────
 
 
+## THE RISE OF LIGHT. Two pieces: an additive stem the eye follows up, and a
+## pool of house-coloured glow on the stone under the newly crowned piece.
+##
+## The pool used to be a real 2.6-energy OmniLight3D at range 3.0, held flat
+## for the whole flourish. Measured on the shipped frame
+## (promote/02_after_promotion, 2026-08-09) it did not read as light at all:
+## 859 pixels at v = 1.000, v95 = 1.000 across a 70x52 px patch — a BLOWN
+## WHITE PLATE about a square and a half wide whose boundary stepped a quarter
+## of the full range in a single pixel. Clipped light has no gradient left, so
+## the falloff a pool of light is entirely made of was not in the frame.
+##
+## It is a QUAD now, not a lamp, for two measured reasons:
+##   1. the blow-out came from the ARRIVAL BURST the piece lights itself with
+##      (A/B: with the director's lamp at zero energy the frame still measured
+##      1 078 clipped pixels) — so the director takes single ownership of the
+##      promotion frame's light (see _own_the_light);
+##   2. a ninth omni in this hall barely renders anyway. The eight torches
+##      fill the per-instance light budget, and a lamp given the burst's exact
+##      parameters lifted the stone by 0.02 v — the same budget dracarys.gd
+##      refuses to spend, for the same reason.
+## An additive ground glow with a radial falloff has the falloff BY
+## CONSTRUCTION and a peak this file can cap, which is the whole defect.
+const BEAM_ALPHA := 0.22        ## additive stem, well under a white-out
+## Peak additive alpha of the ground pool. Additive over torch-lit stone
+## (~0.55 v) with a house tint (~0.6): 0.5 lands the core near 0.85 v — a pool
+## of light with a gradient in it, and nothing at the clip point.
+const GLOW_ALPHA := 0.5
+const GLOW_SIZE := 3.0          ## world units across; TILE_SIZE is 1.0
+
+## SINGLE OWNER OF THE PROMOTION FRAME'S LIGHT.
+##
+## The arriving piece lights its own arrival too (an amber burst that tweens
+## to 4.5 energy in 0.18 s). Stacked under the director's beam lamp on pale
+## stone that is a white-out, and the A/B says the burst is the bigger half:
+## with the director's lamp at ZERO energy the shipped frame still measured
+## 1 078 pixels at v = 1.000 across a 71x52 patch (2026-08-09). Two modules
+## lighting one moment, neither able to see the other's contribution, is the
+## same class of bug as two owners of the banner plan.
+##
+## So for the length of the flourish the director is the only lamp on the
+## piece: any Light3D it did not create is hidden, recorded, and handed back
+## by _restore_presentation. Nothing is freed and no other module's state is
+## rewritten — the arrival burst's own tween still runs and still frees it.
+var _borrowed_lights: Array = []   # [{node, visible}] restored on every exit
+
+func _own_the_light(piece: Node3D) -> void:
+	if not is_instance_valid(piece):
+		return
+	for l in piece.find_children("*", "Light3D", true, false):
+		var lt := l as Light3D
+		if lt == null or _props.has(lt):
+			continue
+		_borrowed_lights.append({"node": lt, "visible": lt.visible})
+		lt.visible = false
+
+
+func _return_the_light() -> void:
+	for entry in _borrowed_lights:
+		var lt = entry.get("node")
+		if is_instance_valid(lt):
+			(lt as Light3D).visible = bool(entry.get("visible", true))
+	_borrowed_lights.clear()
+
+
 func _spawn_beam(piece: Node3D, tint: Color) -> MeshInstance3D:
 	var beam := MeshInstance3D.new()
+	beam.name = "PromotionBeam"
 	var cyl := CylinderMesh.new()
 	cyl.top_radius = 0.16
 	cyl.bottom_radius = 0.3
@@ -876,32 +967,89 @@ func _spawn_beam(piece: Node3D, tint: Color) -> MeshInstance3D:
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.albedo_color = Color(tint.r, tint.g, tint.b, 0.4)
+	mat.albedo_color = Color(tint.r, tint.g, tint.b, BEAM_ALPHA)
 	beam.material_override = mat
 	beam.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	beam.position = Vector3(0.0, 1.3, 0.0)
 	beam.scale = Vector3(1.0, 0.05, 1.0)
 	piece.add_child(beam)
 	_props.append(beam)
-	var light := OmniLight3D.new()
-	light.light_color = tint
-	light.light_energy = 2.6
-	light.omni_range = 3.0
-	light.position = Vector3(0.0, 1.0, 0.0)
-	piece.add_child(light)
-	_props.append(light)
+	# The pool: an additive radial glow lying on the stone the piece stands on.
+	# Alpha 0 at birth — _animate_beam owns the envelope, so it never snaps on.
+	var glow := MeshInstance3D.new()
+	glow.name = "PromotionGlow"
+	var quad := QuadMesh.new()
+	quad.size = Vector2(GLOW_SIZE, GLOW_SIZE)
+	glow.mesh = quad
+	var gmat := StandardMaterial3D.new()
+	gmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	gmat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	gmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	gmat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	gmat.albedo_color = Color(tint.r, tint.g, tint.b, 0.0)
+	gmat.albedo_texture = _glow_falloff()
+	gmat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR
+	glow.material_override = gmat
+	glow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	glow.rotation.x = -PI * 0.5      # lie flat on the square
+	glow.position = Vector3(0.0, 0.014, 0.0)   # clear of the tile face
+	piece.add_child(glow)
+	_props.append(glow)
+	beam.set_meta("glow", glow)
 	return beam
 
 
+## Radial falloff for the ground pool: opaque core easing to nothing well
+## inside the quad, so the pool has no edge of its own to show.
+static func _glow_falloff() -> GradientTexture2D:
+	var g := Gradient.new()
+	g.offsets = PackedFloat32Array([0.0, 0.22, 0.55, 1.0])
+	g.colors = PackedColorArray([
+		Color(1, 1, 1, 1.0), Color(1, 1, 1, 0.78),
+		Color(1, 1, 1, 0.24), Color(1, 1, 1, 0.0)])
+	var t := GradientTexture2D.new()
+	t.gradient = g
+	t.width = 128
+	t.height = 128
+	t.fill = GradientTexture2D.FILL_RADIAL
+	t.fill_from = Vector2(0.5, 0.5)
+	t.fill_to = Vector2(1.0, 0.5)
+	return t
+
+
+## The flourish envelope, on its own LINEAR wall clock.
+##
+## This used to ride _wall_lerp, whose parameter is cubic-EASED: at a tenth of
+## the way through, e is 0.004, not 0.1. Any "swell over the first tenth"
+## written against that parameter is really a swell over the first half, and
+## the frame taken when the piece lands — the frame this cinematic exists for
+## — catches nothing at all. Attack and decay are stated here in plain
+## fractions of wall time, and only the stem's GROWTH is eased.
 func _animate_beam(beam: MeshInstance3D, seq: int) -> void:
-	var setter := func(e: float) -> void:
+	var dur: float = maxf(promo_wall * 0.9, 0.05)
+	var t0 := Time.get_ticks_msec()
+	while _seq == seq and not _skip:
 		if not is_instance_valid(beam):
 			return
-		beam.scale = Vector3(1.0, clampf(e * 2.2, 0.05, 1.0), 1.0)
+		var u := clampf(float(Time.get_ticks_msec() - t0) / (dur * 1000.0), 0.0, 1.0)
+		var rise := _ease_cubic(clampf(u * 3.0, 0.0, 1.0))   # stem up in a third
+		var fade: float = clampf((1.0 - u) * 2.4, 0.0, 1.0)  # both die together
+		beam.scale = Vector3(1.0, maxf(rise, 0.08), 1.0)
 		var mat: StandardMaterial3D = beam.material_override
 		if mat != null:
-			mat.albedo_color.a = 0.4 * clampf((1.0 - e) * 2.4, 0.0, 1.0)
-	await _wall_lerp(seq, setter, 0.0, 1.0, promo_wall * 0.9)
+			mat.albedo_color.a = BEAM_ALPHA * fade
+		var glow = beam.get_meta("glow", null)
+		if glow != null and is_instance_valid(glow):
+			var gmat: StandardMaterial3D = (glow as MeshInstance3D).material_override
+			if gmat != null:
+				gmat.albedo_color.a = GLOW_ALPHA \
+					* minf(clampf(u / 0.08, 0.0, 1.0), fade)
+		if u >= 1.0:
+			return
+		var tree := get_tree()
+		if tree == null:
+			return
+		await tree.process_frame
 
 
 ## The promotion banner. It hangs over the newly crowned piece for the length

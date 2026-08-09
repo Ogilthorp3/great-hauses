@@ -183,9 +183,24 @@ var _gaze_id := 0
 var _look: LookAtModifier3D = null
 var _gaze_target: Node3D = null
 
+## World points the ceremony caption must never cover (the throne, the
+## crowned king on the dais). The integrator fills this; the ceremony adds
+## the burning army itself while the jet is up. See CineCaption.
+var ceremony_avoid: Array = []
+
 var _ash_active := false
 var _ash_skip := false
 var _ash_seq := 0
+## THE CEREMONY'S OWN CLOCK, EXPOSED. The ashfall runs on wall time while the
+## engine clock is bent to 0.55 — so any test that sleeps `n` seconds after
+## the dip actually sleeps n/0.55 and lands somewhere else entirely. That is
+## exactly how the torrent shipped for a day with NO FRAME OF IT ANYWHERE:
+## the dragon-live scenario's post-dip await put 02_mid_ashfall at ~2.8 s,
+## the tail of the BANK, while the jet does not ignite until ~4.85 s (critic
+## defect P1, 2026-08-09). Instruments must wait on STATE, not on a stopwatch
+## they do not own — these two probes are that state.
+var _ash_phase := ""      # "" | launch | bank | flare | inhale | breath | linger | return | crown
+var _jet_lit := false     # the jet itself is burning (not the ember tail)
 var _prev_time_scale := 1.0
 var _ash_losers: Array = []
 var _fx: Node3D = null                 # DracarysVFX — the torrent (lazily built)
@@ -230,6 +245,9 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	if _ash_active:
+		# Keep the ceremony caption sliding clear of what it is filming.
+		if caption != null and is_instance_valid(caption):
+			caption.avoid_points = _caption_avoid()
 		return
 	# Gentle bob at the roost (wall clock — the perch ignores slow-mo).
 	# After a championship the roost IS the throne perch, not the wall.
@@ -322,6 +340,36 @@ func is_ashfall_active() -> bool:
 	return _ash_active
 
 
+## Which beat of the ceremony is on screen right now (see _ash_phase). "" when
+## no ceremony is running. THE instrument hook: an e2e that wants the torrent
+## waits for this, never for a wall-clock guess.
+func ashfall_phase() -> String:
+	return _ash_phase
+
+
+## True only while the JET is burning — the beat a fire photograph must be
+## taken in. Goes false the instant the ceremony cuts the jet, while
+## is_fire_tail_alive() is still true for the embers/ash that outlive it.
+func is_jet_burning() -> bool:
+	return _jet_lit and _fx != null and is_instance_valid(_fx) and _fx.is_active()
+
+
+## True while ANY of the fire lives — jet, embers, drifting ash, ground smoke.
+func is_fire_tail_alive() -> bool:
+	return _fx != null and is_instance_valid(_fx) and _fx.is_active()
+
+
+## The points the ceremony caption must clear this frame: whatever the
+## integrator handed us, plus the army currently being burned.
+func _caption_avoid() -> Array:
+	var pts: Array = ceremony_avoid.duplicate()
+	if _ash_phase == "breath" or _ash_phase == "linger":
+		var c := _losers_centroid()
+		if c.is_finite():
+			pts.append(c + Vector3.UP * 0.8)
+	return pts
+
+
 ## Remove the spectator (e.g. before the championship tableau summons its
 ## own throne dragon). Restores presentation via _exit_tree.
 func dismiss() -> void:
@@ -360,6 +408,8 @@ func play_ashfall(losing_side: int, winning_house: String = "",
 	for p in (losers if not losers.is_empty() else _collect_losers(losing_side)):
 		if is_instance_valid(p) and p is Node3D and not p.is_queued_for_deletion():
 			_ash_losers.append(p)
+	_ash_phase = "launch"
+	_jet_lit = false
 	ashfall_started.emit()
 	_arm_failsafe(seq)
 	_gaze_off()
@@ -375,6 +425,7 @@ func play_ashfall(losing_side: int, winning_house: String = "",
 
 	# ── II. THE BANK — one sweeping pass around the hall, filmed from
 	# below: the low-angle camera pushes in as the wyrm thunders overhead.
+	_ash_phase = "bank"
 	var start_pos := position
 	var th0 := atan2(start_pos.x, start_pos.z)
 	var prev_p := start_pos
@@ -410,6 +461,7 @@ func play_ashfall(losing_side: int, winning_house: String = "",
 		await tree.process_frame
 
 	# ── III. THE FLARE — wing-spread hover above the board center ──
+	_ash_phase = "flare"
 	rig.play_loop("Flying_Idle", 0.6, 0.5)   # slow flap: the mighty hover
 	var hover_center := Vector3(0.0, 3.11, 0.0)   # 1.50 + 1.15×1.4 (root moved)
 	var f0_pos := position
@@ -425,6 +477,7 @@ func play_ashfall(losing_side: int, winning_house: String = "",
 		return
 
 	# ── IV. THE INHALE — one beat of stillness before the judgment ──
+	_ash_phase = "inhale"
 	_ensure_fx()   # build the torrent now, off-screen, not on the ignition frame
 	var inhale := func(u: float) -> void:
 		position = hover_center + Vector3.UP * (0.18 * u)
@@ -435,6 +488,7 @@ func play_ashfall(losing_side: int, winning_house: String = "",
 
 	# ── V. THE BREATH — the fire sweep across the beaten army; every
 	# warrior the jet touches burns down to a smoldering skeleton ──
+	_ash_phase = "breath"
 	var focus := _losers_centroid()
 	var away := perch_position - focus
 	away.y = 0.0
@@ -507,6 +561,7 @@ func play_ashfall(losing_side: int, winning_house: String = "",
 	# cut() is the GRACEFUL stop: the jet retracts over 0.16 s while the
 	# embers, ash, ground fire and smoke live on for seconds — the lingering
 	# tail this phase exists to show. hard_stop() would kill them too.
+	_ash_phase = "linger"
 	_fire_cut()
 	_gaze_off()   # the head comes back off the aim point with the jet
 	var recoil_wall := minf(ash_linger_wall * 0.45, 0.65)
@@ -537,6 +592,7 @@ func play_ashfall(losing_side: int, winning_house: String = "",
 
 	if not championship:
 		# ── VII. THE RETURN — back to the wall perch, size and clock restored ──
+		_ash_phase = "return"
 		rig.play_loop("Fast_Flying", 1.0, 0.3)
 		_scale_ramp(seq, dragon_scale, ash_return_wall)
 		var from := position
@@ -548,6 +604,7 @@ func play_ashfall(losing_side: int, winning_house: String = "",
 		await _wall_lerp(seq, back, 0.0, 1.0, ash_return_wall)
 	else:
 		# ── VII. THE CROWNING — one more bank, then the throne perch ──
+		_ash_phase = "crown"
 		rig.play_loop("Fast_Flying", 1.0, 0.3)
 		_scale_ramp(seq, champ_scale, ash_swoop_wall + ash_settle_wall * 0.5)
 		var c0 := position
@@ -614,10 +671,12 @@ func _ash_finish(seq: int) -> void:
 	if not _ash_active or seq != _ash_seq:
 		return
 	_ash_active = false
+	_ash_phase = ""
 	Engine.time_scale = _prev_time_scale
 	_fire_stop()   # THE SKIP: clears every particle AND restores env + camera
 	_gaze_off()
 	if caption != null:
+		caption.avoid_points = []
 		caption.hide_line()
 	for p in _ash_losers:   # end state: every loser gone, skipped or not
 		if is_instance_valid(p) and p is Node3D:
@@ -647,7 +706,12 @@ func _exit_tree() -> void:
 	## hygiene rule, extended to the dracarys environment lift).
 	if _ash_active:
 		_ash_active = false
+		_ash_phase = ""
 		Engine.time_scale = _prev_time_scale
+		# The integrator's chrome/verdict hold is reference-counted off this
+		# signal: a spectator freed mid-ceremony must still balance the books,
+		# or the HUD stays faded and the victory card never opens.
+		ashfall_finished.emit()
 	_fire_stop()
 	for entry in _remains:   # remains live outside this subtree — free them
 		var n = entry.get("node")
@@ -1059,25 +1123,38 @@ func _ensure_fx() -> void:
 		return
 	_fx = DracarysScript.new()
 	_fx.name = "Dracarys"
-	# Parented to the spectator, which never scales (the RIG scales) — the
-	# kit drives its muzzle by GLOBAL transform, so position/rotation of this
-	# node are compensated but a parent scale would not be.
-	add_child(_fx)
+	# ── TUNE BEFORE add_child. THE KIT BUILDS ITSELF IN _ready() ──
+	# Everything below is baked into shader uniforms, gradients and particle
+	# materials by Dracarys._build(), and _build() runs from its _ready() —
+	# i.e. the instant this node enters the tree. Every one of these
+	# assignments used to sit BELOW add_child(), so the whole tuning pass
+	# (including an `intensity` trimmed "by measurement") had never once
+	# reached the fire: it burned at the kit's stock 1.0 in a small dark hall.
+	# Which is exactly why nobody caught it — see _ash_phase for the other
+	# half of that story: no frame of the fire had ever been taken either.
+	#
 	# Board scale, not the demo stage: the losing army is ~8x2 tiles, so the
 	# sweep wants ~4 tiles of reach, not the kit's 9 m default (its README
 	# §7 hand-over asks for exactly this re-tune).
 	_fx.reach = 4.2
-	_fx.torrent_spread = 13.0
+	_fx.torrent_spread = 9.0
 	_fx.ember_tail = 3.2
 	_fx.ash_tail = 3.0
 	# The kit's stock HDR values were tuned against a stand-in stage at 9 m;
 	# fired six units across a small dark hall they bloom the stone walls
-	# white. Trimmed by eye and by measurement (2026-08-09).
-	_fx.intensity = 0.66
+	# white — measured on the first frame ever taken of the real thing: 7.9%
+	# of the whole picture at v >= 0.98, the banners and the white wyrm itself
+	# gone to paper. The fire keeps a hot clipped CORE (flame should); the
+	# room it burns in stays a dark stone hall.
+	_fx.intensity = 0.40
 	# The punches are driven here rather than by auto_punch so the hall gets
 	# a KICK, not a new exposure setting: the stock 1.24× exposure + 0.40
 	# glow lifted the whole room a full stop.
 	_fx.auto_punch = false
+	# Parented to the spectator, which never scales (the RIG scales) — the
+	# kit drives its muzzle by GLOBAL transform, so position/rotation of this
+	# node are compensated but a parent scale would not be.
+	add_child(_fx)
 	_bind_fx()
 
 
@@ -1128,6 +1205,7 @@ func _fire_start(aim: Vector3) -> void:
 	# `duration` is the jet's own length; the ceremony cuts it by hand at the
 	# end of the sweep, so ask for a hair more than the sweep can take.
 	_fx.start(mouth, aim, ash_breath_wall + 1.0)
+	_jet_lit = true
 	# LAYER 6, hand-driven (auto_punch is off — see _ensure_fx). The camera
 	# shake writes only h_offset/v_offset/fov, so the ceremony dolly keeps
 	# working underneath it; both punches record-and-restore.
@@ -1139,7 +1217,9 @@ func _fire_start(aim: Vector3) -> void:
 		_fx.punch_camera(cam, 0.09, 0.55, 24.0, 1.7)
 	var we := _world_env()
 	if we != null:
-		_fx.punch_exposure(we, ash_breath_wall, 1.06, 0.10, 0.05, 0.07)
+		# A KICK, not a new exposure setting (see _ensure_fx): the hall lifts a
+		# hair on ignition and comes straight back down.
+		_fx.punch_exposure(we, ash_breath_wall, 1.02, 0.045, 0.05, 0.07)
 
 
 func _fire_aim(aim: Vector3) -> void:
@@ -1152,6 +1232,7 @@ func _fire_aim(aim: Vector3) -> void:
 
 ## The graceful stop: the jet retracts, the tail lives on.
 func _fire_cut() -> void:
+	_jet_lit = false
 	if _fx != null and is_instance_valid(_fx) and _fx.is_active():
 		_fx.cut()
 
@@ -1159,6 +1240,7 @@ func _fire_cut() -> void:
 ## THE SKIP: instant clear + full camera/environment restore. Idempotent, and
 ## safe when nothing ever fired.
 func _fire_stop() -> void:
+	_jet_lit = false
 	if _fx != null and is_instance_valid(_fx):
 		_fx.hard_stop()
 

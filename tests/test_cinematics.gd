@@ -26,7 +26,7 @@ var checks_run := 0
 ## A hard-erroring test function aborts silently at the error and its await
 ## resumes as if it finished — so "no FAIL lines" is NOT proof the suite ran.
 ## This floor turns silently-aborted tests into a loud failure.
-const MIN_EXPECTED_CHECKS := 55
+const MIN_EXPECTED_CHECKS := 68
 
 
 class Duck:
@@ -59,6 +59,8 @@ func _main() -> void:
 	await _test_dracarys_restore_free()
 	check("dracarys: no Light3D added by the fire on any path",
 			lights_before, _light_count())
+	_test_heraldic_tincture()
+	await _test_caption_clears_its_subject()
 	check("final: time_scale is 1.0", true, is_equal_approx(Engine.time_scale, 1.0))
 	check("final: no test silently aborted (checks >= %d)" % MIN_EXPECTED_CHECKS,
 			true, checks_run >= MIN_EXPECTED_CHECKS)
@@ -470,3 +472,98 @@ func _test_dracarys_restore_free() -> void:
 	check("fire-free: time_scale restored on exit-tree", true,
 			is_equal_approx(Engine.time_scale, 1.0))
 	await _teardown_stage(stage)
+
+
+## ── HERALDIC TINCTURE (src/env/banner.gd) ─────────────────────────────────
+## The sigil's field is re-dyed to contrast the cloth it flies on. Critic
+## defect P5: Winterfang's white chevron measured 1.99:1 inside its own
+## shield on its own cream banner and vanished at hall distance, while
+## Goldclaw's gold sun read at 3.15:1 on crimson. These are the pure halves
+## of that fix, so a future re-tune cannot silently invert the rule.
+func _test_heraldic_tincture() -> void:
+	const Banner := preload("res://src/env/banner.gd")
+	var pale := Color("#8d99a6")        # Winterfang primary — light cloth
+	var crimson := Color("#8e1f2c")     # Goldclaw primary — dark cloth
+	var snow := Color("#eef2f5")        # Winterfang secondary — very light
+	var pale_field: Color = Banner.field_tincture(pale)
+	var crimson_field: Color = Banner.field_tincture(crimson)
+	check("tincture: a light cloth takes a DEEP field", true,
+			Banner.luminance(pale_field) < Banner.luminance(pale))
+	check("tincture: a dark cloth takes a PALE field", true,
+			Banner.luminance(crimson_field) > Banner.luminance(crimson))
+	check("tincture: the deep field clears 2.5:1 on its own cloth", true,
+			Banner.contrast_ratio(pale, pale_field) >= 2.5)
+	check("tincture: the pale field clears 2.5:1 on its own cloth", true,
+			Banner.contrast_ratio(crimson, crimson_field) >= 2.5)
+	check("tincture: the whitest cloth in the registry still clears 2.5:1", true,
+			Banner.contrast_ratio(snow, Banner.field_tincture(snow)) >= 2.5)
+	# Hue is the house: a deepened field keeps the cloth's own colour.
+	check("tincture: the deep field keeps the cloth's hue", true,
+			absf(pale_field.h - pale.h) < 0.02)
+	check("contrast_ratio: identical colours read 1.0", true,
+			absf(Banner.contrast_ratio(pale, pale) - 1.0) < 0.001)
+	check("contrast_ratio: black on white is the 21:1 maximum", true,
+			absf(Banner.contrast_ratio(Color.BLACK, Color.WHITE) - 21.0) < 0.1)
+
+
+## ── THE CAPTION CLEARS ITS SUBJECT (src/cinematics/cine_caption.gd) ───────
+## Critic defect P2b: the "ASHFALL." plate landed square on the crowned king
+## on the dais in the throne-room frame. The plate now slides. This drives
+## the solver with the EXACT geometry measured off that frame (subjects at
+## screen x 918 and 958, a 228 px plate in a 1920 px frame) — the case a
+## one-subject-at-a-time push could not solve, because clearing the second
+## subject threw the plate back across the first.
+func _test_caption_clears_its_subject() -> void:
+	const Caption := preload("res://src/cinematics/cine_caption.gd")
+	var vp := root
+	var cam := Camera3D.new()
+	root.add_child(cam)
+	cam.global_position = Vector3(0.0, 1.0, -6.0)
+	cam.look_at(Vector3(0.0, 1.0, 0.0), Vector3.UP)
+	cam.current = true
+	var layer := CanvasLayer.new()
+	root.add_child(layer)
+	var label := Label.new()
+	label.text = "ASHFALL."
+	label.add_theme_font_size_override("font_size", 34)
+	label.anchor_left = 0.5
+	label.anchor_right = 0.5
+	label.anchor_top = 1.0
+	label.anchor_bottom = 1.0
+	label.offset_top = -160.0
+	label.offset_bottom = -96.0
+	label.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	label.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	layer.add_child(label)
+	await process_frame
+	await process_frame
+	var size := vp.get_visible_rect().size
+	# A subject standing low and centred, right where the plate lives.
+	var subject := Vector3(0.0, 0.0, 0.0)
+	var s: Vector2 = cam.unproject_position(subject)
+	var half: float = label.get_global_rect().size.x * 0.5 + 90.0 + 34.0
+	var dx: float = Caption.clear_offset(label, 0.0, [subject], vp)
+	var in_frame := s.y >= size.y * 0.5
+	check("caption: the probe subject really is in the lower half", true, in_frame)
+	check("caption: the plate slides clear of a subject under it", true,
+			absf((size.x * 0.5 + dx) - s.x) >= half - 1.0)
+	check("caption: it stays inside the frame", true,
+			size.x * 0.5 + dx - label.get_global_rect().size.x * 0.5 >= 0.0 \
+			and size.x * 0.5 + dx + label.get_global_rect().size.x * 0.5 <= size.x)
+	# TWO subjects a little apart — the case the greedy push could not solve.
+	var second := Vector3(0.55, 0.0, 0.6)
+	var s2: Vector2 = cam.unproject_position(second)
+	var dx2: float = Caption.clear_offset(label, 0.0, [subject, second], vp)
+	var c2: float = size.x * 0.5 + dx2
+	check("caption: two subjects at once — clears BOTH", true,
+			absf(c2 - s.x) >= half - 1.0 and absf(c2 - s2.x) >= half - 1.0)
+	# Nothing to avoid = dead centre, the default look.
+	check("caption: no subject leaves it centred", true,
+			absf(Caption.clear_offset(label, 40.0, [], vp)) < 0.001)
+	# A subject high in the frame is not under a lower-third plate.
+	var high := Vector3(0.0, 4.0, 0.0)
+	check("caption: a subject in the upper half never moves it", true,
+			absf(Caption.clear_offset(label, 0.0, [high], vp)) < 0.001)
+	cam.queue_free()
+	layer.queue_free()
+	await process_frame

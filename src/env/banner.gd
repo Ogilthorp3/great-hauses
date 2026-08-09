@@ -49,6 +49,37 @@ const SIGIL_SIZE := 1.12
 ## in-game frames, i.e. no heraldry left at all (2026-08-09).
 const SIGIL_EMISSION := 0.10
 
+## ── THE FIELD IS DYED TO ITS CLOTH (critic defect P5, 2026-08-09) ──────────
+## Measured on the shipped wide shot (showcase/02_great_hall_wide.png):
+## Goldclaw's charge read at 4.2:1 against its crimson cloth and you saw the
+## lion's sun at a glance; Winterfang's chevron came in at 1.99:1 inside its
+## own shield on its own cream cloth, and at banner distance the device was
+## simply not there. Two things were killing it and both are value, not
+## colour: the shield's field is a mid slate that sits at the same value as
+## pale cloth, and a 256 px device drawn ~40 px wide is sampled several mip
+## levels down, where a thin white chevron averages INTO the field it lies on.
+##
+## The heraldic answer is the old one: a charge is placed on a field chosen to
+## contrast the cloth. So the sigil's FIELD (its modal tone) is repainted per
+## banner — deep when the cloth is light, pale when the cloth is dark — while
+## the charge and the rim (everything far from the field in value) are kept
+## exactly as the house drew them. The repaint happens BEFORE the mip chain is
+## built, so every mip level averages the high-contrast version.
+## A pixel this far (linear luminance) from the field tone counts as CHARGE
+## and is left alone; nearer than this it is field and gets the new tincture.
+const SIGIL_FIELD_SPAN := 0.15
+## Linear luminance above which a cloth counts as "light" (take a deep field).
+const SIGIL_CLOTH_LIGHT := 0.12
+## Deep tincture: the cloth's own hue at this fraction of its value.
+const SIGIL_GROUND_DARK := 0.16
+## Pale tincture (dark cloth): how far toward parchment the field is carried.
+const SIGIL_GROUND_LIGHT := 0.74
+const SIGIL_PARCHMENT := Color(0.90, 0.87, 0.80)
+## Working resolution of the repainted device. The banner is never wider than
+## ~90 px on screen, the composite pass is O(n²) GDScript run nine times at
+## hall build, and the mip chain is generated from this base.
+const SIGIL_WORK_PX := 128
+
 var house_color: Color = NEUTRAL:
 	set(value):
 		house_color = value
@@ -107,6 +138,11 @@ func clear_house() -> void:
 
 func set_house_color(primary: Color) -> void:
 	house_color = primary
+	# The sigil's field is dyed to the cloth it lies on, so a re-dye that left
+	# the old device in place would hand back exactly the invisible charge this
+	# module exists to prevent.
+	if not house_id.is_empty() and _mesh != null:
+		_build_sigil(house_id)
 
 
 func clear_house_color() -> void:
@@ -134,7 +170,7 @@ func _apply(color: Color) -> void:
 ## crawls and aliases into noise. Mips are built here at load time instead,
 ## which needs no edit to an .import file outside this module's lane.
 func _build_sigil(id: String) -> void:
-	var tex := _mipped_sigil(id)
+	var tex := _mipped_sigil(id, house_color)
 	if tex == null:
 		return
 	if _sigil == null or not is_instance_valid(_sigil):
@@ -162,8 +198,9 @@ func _build_sigil(id: String) -> void:
 	_sigil.visible = true
 
 
-## The house sigil with a mip chain (null when the house has no art).
-func _mipped_sigil(id: String) -> Texture2D:
+## The house sigil, its field re-dyed to contrast `cloth`, with a mip chain
+## built from the re-dyed art (null when the house has no art).
+func _mipped_sigil(id: String, cloth: Color) -> Texture2D:
 	var src := HouseRegistry.load_sigil(id)
 	if src == null:
 		return null
@@ -174,8 +211,91 @@ func _mipped_sigil(id: String) -> Texture2D:
 	if img.is_compressed():
 		if img.decompress() != OK:
 			return src
+	if img.get_format() != Image.FORMAT_RGBA8:
+		img.convert(Image.FORMAT_RGBA8)
+	if img.get_width() > SIGIL_WORK_PX:
+		img.resize(SIGIL_WORK_PX, SIGIL_WORK_PX, Image.INTERPOLATE_LANCZOS)
+	_dye_field(img, cloth)
 	img.generate_mipmaps()
 	return ImageTexture.create_from_image(img)
+
+
+## Repaint the sigil's FIELD (its modal tone) in a tincture that contrasts
+## `cloth`, leaving the charge and the rim — every pixel more than
+## SIGIL_FIELD_SPAN away in luminance — untouched. Mutates `img` in place.
+func _dye_field(img: Image, cloth: Color) -> void:
+	var w := img.get_width()
+	var h := img.get_height()
+	if w <= 0 or h <= 0:
+		return
+	var field_lum := _field_luminance(img)
+	if field_lum < 0.0:
+		return   # nothing opaque to repaint
+	var ground := field_tincture(cloth)
+	for y in h:
+		for x in w:
+			var c := img.get_pixel(x, y)
+			if c.a < 0.02:
+				continue
+			var d: float = absf(luminance(c) - field_lum) / SIGIL_FIELD_SPAN
+			if d >= 1.0:
+				continue   # this is the charge (or the rim) — the house drew it
+			var keep: float = d * d          # ease: the field goes fully over
+			img.set_pixel(x, y, Color(
+				lerpf(ground.r, c.r, keep),
+				lerpf(ground.g, c.g, keep),
+				lerpf(ground.b, c.b, keep), c.a))
+
+
+## The tone the shield's field takes on this cloth: the cloth's own hue,
+## deepened when the cloth is light and carried toward parchment when it is
+## dark. Pure — unit-testable without a scene.
+static func field_tincture(cloth: Color) -> Color:
+	if luminance(cloth) >= SIGIL_CLOTH_LIGHT:
+		return Color(cloth.r * SIGIL_GROUND_DARK, cloth.g * SIGIL_GROUND_DARK,
+			cloth.b * SIGIL_GROUND_DARK, 1.0)
+	return cloth.lerp(SIGIL_PARCHMENT, SIGIL_GROUND_LIGHT)
+
+
+## Median luminance over the opaque pixels — the shield's field, which is the
+## single largest tone in every one of the nine devices. -1.0 when nothing is
+## opaque. Sampled on a grid: an exact median over 16 k pixels buys nothing a
+## 4 k sample does not.
+static func _field_luminance(img: Image) -> float:
+	var w := img.get_width()
+	var h := img.get_height()
+	var step := maxi(1, int(sqrt(float(w * h) / 4096.0)))
+	var lums := PackedFloat32Array()
+	var y := 0
+	while y < h:
+		var x := 0
+		while x < w:
+			var c := img.get_pixel(x, y)
+			if c.a >= 0.5:
+				lums.append(luminance(c))
+			x += step
+		y += step
+	if lums.is_empty():
+		return -1.0
+	lums.sort()
+	return lums[lums.size() / 2]
+
+
+## WCAG relative luminance (Rec.709 over linearised sRGB) — the value a glance
+## actually obeys, and the number the frame measurements are taken in.
+static func luminance(c: Color) -> float:
+	return 0.2126 * _lin(c.r) + 0.7152 * _lin(c.g) + 0.0722 * _lin(c.b)
+
+
+static func _lin(v: float) -> float:
+	return v / 12.92 if v <= 0.04045 else pow((v + 0.055) / 1.055, 2.4)
+
+
+## WCAG contrast ratio between two colours (1.0 = identical, 21.0 = max).
+static func contrast_ratio(a: Color, b: Color) -> float:
+	var la := luminance(a)
+	var lb := luminance(b)
+	return (maxf(la, lb) + 0.05) / (minf(la, lb) + 0.05)
 
 
 static func _find_mesh(node: Node) -> MeshInstance3D:

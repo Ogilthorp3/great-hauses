@@ -108,6 +108,22 @@ var _continue_btn: Button
 var _victory_shown := false
 var _next_action := "rematch"       # "rematch" | "next_round" | "hall"
 
+# ── THE CEREMONY OWNS THE FRAME (critic defect P2, 2026-08-09) ─────────────
+# Three separate pieces of UI were sitting ON TOP of the best shot in the
+# game: the HUD title block lay across the dragon's neck and skull in the
+# throne-room frame, and the checkmate modal opened over the wyrm while the
+# ASHFALL ceremony was still playing behind it. A cinematic is a shot, not a
+# background — so while one is running the chrome fades out and the verdict
+# card waits its turn.
+## Every HUD control that is CHROME (readouts, controls, scrim) — never the
+## victory panel and never a caption, which have their own rules.
+var _hud_chrome: Array[Control] = []
+var _cine_depth := 0                # nested/chained cinematics: fade once
+var _chrome_fade := 0               # generation token for the wall-clock fades
+## The verdict card, queued while a ceremony is still on screen.
+var _victory_pending := ""
+var _victory_held := false
+
 
 func _ready() -> void:
 	var fen := ""
@@ -134,7 +150,8 @@ func _ready() -> void:
 	# the playlist −8 dB; only the duel also fires a stinger at the slow-mo.
 	duel_director.cinematic_started.connect(_on_cinematic_started)
 	duel_director.cinematic_finished.connect(func(_kind: String) -> void:
-		Music.unduck())
+		Music.unduck()
+		_chrome_for_cinematic(false))
 	_setup_spectator()
 	if Session.configured and str(Session.opponent.get("kind", "")) == "ds4_oracle":
 		oracle = Ds4Opponent.new()
@@ -179,7 +196,16 @@ func _setup_spectator() -> void:
 	var hall: GreatHall = get_node_or_null("GreatHall")
 	if hall != null:
 		spectator.perch_position = hall.spectator_perch()
+		# The ceremony caption may never land on the throne or on the champion
+		# standing at its foot — it slides around them (CineCaption).
+		spectator.ceremony_avoid = [
+			hall.throne_dais() + Vector3.UP * 0.9,
+			hall.throne_focus() - Vector3.UP * 2.4,
+		]
 	add_child(spectator)
+	# The wyrm's own ceremony is a cinematic too: chrome out, verdict held.
+	spectator.ashfall_started.connect(func() -> void: _chrome_for_cinematic(true))
+	spectator.ashfall_finished.connect(func() -> void: _chrome_for_cinematic(false))
 
 
 func _setup_banter() -> void:
@@ -199,6 +225,7 @@ func _setup_banter() -> void:
 
 func _on_cinematic_started(kind: String) -> void:
 	Music.duck()
+	_chrome_for_cinematic(true)
 	if kind == "duel":
 		Music.sting_duel()
 	# Drop any hover-revealed glyph medallion before the camera takes over —
@@ -233,33 +260,33 @@ func _house_name(id: String) -> String:
 
 
 func _dress_hall() -> void:
-	## Banner index map (great_hall.gd): 0-2 far wall, 3-5 west, 6-8 east.
+	## THE DRESSING is the hall's own (great_hall.gd dress_for_match): cloth
+	## AND sigil, per station, so the room says who is fighting.
+	##
+	## This used to be a colour-only set_banner_colors pass duplicating the
+	## hall's station plan by hand — and it had drifted: it re-tinted station 5
+	## to the player's primary and station 8 to the rival's primary, overriding
+	## the accent the hall had deliberately chosen so a near-black primary
+	## never leaves a whole wall invisible. Two owners of one plan, one of them
+	## stale. There is one owner now.
 	if player_house_id.is_empty():
 		return
 	var hall: GreatHall = get_node_or_null("GreatHall")
 	if hall == null:
 		return
-	var pc := HouseRegistry.get_colors(player_house_id)
-	var rc := HouseRegistry.get_colors(rival_house_id)
-	hall.set_banner_colors([
-		pc["primary"], pc["accent"], rc["primary"],     # far wall — both claims
-		pc["primary"], pc["secondary"], pc["primary"],  # west wall — the player
-		rc["primary"], rc["secondary"], rc["primary"],  # east wall — the rival
-	])
+	hall.dress_for_match(player_house_id, rival_house_id)
 
 
 func _dress_hall_championship() -> void:
-	## The throne shot: every banner in the hall falls to the champion.
+	## The throne shot: every banner in the hall falls to the champion —
+	## sigils included (the colour-only pass left the rival's charge flying on
+	## the east wall of the champion's own coronation).
 	if player_house_id.is_empty():
 		return
 	var hall: GreatHall = get_node_or_null("GreatHall")
 	if hall == null:
 		return
-	var pc := HouseRegistry.get_colors(player_house_id)
-	var colors: Array = []
-	for i in 9:
-		colors.append(pc["primary"] if i % 2 == 0 else pc["accent"])
-	hall.set_banner_colors(colors)
+	hall.dress_for_champion(player_house_id)
 
 
 # -- square mapping (engine 0..63, a8=0 .. h1=63  <->  board Vector2i) ------
@@ -768,24 +795,33 @@ func _end_sequence(result: int, player_won: bool) -> void:
 		_on_victory_panel_requested(duel_director.resolve_house_name(winner_key))
 		return
 	views.erase(king_sq)
+	# Whether a ceremony follows is knowable BEFORE the checkmate cinematic —
+	# and it has to be, because play_checkmate fires victory_panel_requested on
+	# its way out. Until 2026-08-09 that opened the verdict modal on top of the
+	# wyrm and the ceremony played out behind a UI card (critic defect P2c).
+	var loser_pieces: Array = []
+	for lsq in views:
+		var lpv: PieceView = views[lsq]
+		if is_instance_valid(lpv) and lpv.side == loser:
+			loser_pieces.append(lpv)
+	var will_burn: bool = spectator != null and is_instance_valid(spectator) \
+		and not loser_pieces.is_empty()   # a bare king leaves nothing to burn
+	if will_burn:
+		_hold_victory_panel()
 	await duel_director.play_checkmate(king_view, winner_key,
 		func(): await king_view.die())
 	# ── ASHFALL: king death → the wyrm burns the beaten army → victory flow ──
-	if spectator != null and is_instance_valid(spectator):
-		var loser_pieces: Array = []
-		for lsq in views:
-			var lpv: PieceView = views[lsq]
-			if is_instance_valid(lpv) and lpv.side == loser:
-				loser_pieces.append(lpv)
-		if not loser_pieces.is_empty():   # a bare king leaves nothing to burn
-			var champ_tier := Session.configured and Session.mode == "tournament" \
-					and Session.tournament != null and player_won \
-					and Session.tournament.is_champion()
-			await spectator.play_ashfall(loser,
-				duel_director.resolve_house_name(winner_key), loser_pieces, champ_tier)
-			for lsq in views.keys():      # ashfall freed those views
-				if not is_instance_valid(views[lsq]):
-					views.erase(lsq)
+	if will_burn and spectator != null and is_instance_valid(spectator):
+		var champ_tier := Session.configured and Session.mode == "tournament" \
+				and Session.tournament != null and player_won \
+				and Session.tournament.is_champion()
+		await spectator.play_ashfall(loser,
+			duel_director.resolve_house_name(winner_key), loser_pieces, champ_tier)
+		for lsq in views.keys():      # ashfall freed those views
+			if not is_instance_valid(views[lsq]):
+				views.erase(lsq)
+	if will_burn:
+		_release_victory_panel()
 
 
 ## The championship ending (the real champion branch fires this, and the e2e
@@ -814,7 +850,12 @@ func start_championship_tableau() -> void:
 		# immediate turn — let it finish, then face the hall for the tableau.
 		await get_tree().create_timer(0.25).timeout
 		king.face_attacker(dais + Vector3(0.0, 0.0, -6.0))
-	await duel_director.play_championship_tableau(hall.throne_focus())
+	# The caption may not stand on the champion: the plate slides clear of the
+	# crowned king (head height) and of the throne he stands before.
+	await duel_director.play_championship_tableau(hall.throne_focus(), [
+		hall.throne_dais() + Vector3.UP * 0.9,
+		hall.throne_focus() - Vector3.UP * 2.4,
+	])
 
 
 func _champion_king_view() -> PieceView:
@@ -827,7 +868,36 @@ func _champion_king_view() -> PieceView:
 	return null
 
 
+## Hold the verdict card until the ceremony that follows the checkmate has
+## finished. Armed with a wall-clock deadline so a ceremony that never returns
+## can only ever DELAY the panel, never lose it.
+func _hold_victory_panel() -> void:
+	_victory_held = true
+	var tree := get_tree()
+	if tree == null:
+		return
+	var t := tree.create_timer(30.0, true, false, true)   # ignore_time_scale
+	t.timeout.connect(func() -> void:
+		if _victory_held:
+			push_warning("ceremony overran its hold — releasing the victory panel")
+			_release_victory_panel())
+
+
+func _release_victory_panel() -> void:
+	if not _victory_held:
+		return
+	_victory_held = false
+	if _victory_pending.is_empty():
+		return
+	var h := _victory_pending
+	_victory_pending = ""
+	_on_victory_panel_requested(h)
+
+
 func _on_victory_panel_requested(winning_house: String) -> void:
+	if _victory_held:
+		_victory_pending = winning_house   # the ceremony still owns the frame
+		return
 	var player_won := state.get_result() == ChessState.RESULT.CHECKMATE and state.turn
 	_show_match_end(player_won, "Checkmate — %s triumphs" % winning_house)
 
@@ -1069,6 +1139,49 @@ func legible_accent(accent: Color) -> Color:
 		maxf(accent.v, ACCENT_MIN_VALUE), 1.0)
 
 
+## Fade the HUD chrome out for the length of a cinematic and back in after.
+## Reference-counted (checkmate chains straight into ASHFALL, and a HUD that
+## blinks back on for the one frame between them is worse than one that never
+## left) and wall-clock driven, because every cinematic runs in slow-mo.
+func _chrome_for_cinematic(entering: bool) -> void:
+	_cine_depth = maxi(0, _cine_depth + (1 if entering else -1))
+	_chrome_fade += 1
+	var my := _chrome_fade
+	if _cine_depth > 0:
+		await _chrome_fade_to(my, 0.0, 0.4)
+		return
+	# Grace window: if another cinematic starts inside it, this restore is
+	# superseded (the token check below) and the chrome never flashes.
+	var tree := get_tree()
+	if tree == null:
+		return
+	await tree.create_timer(0.55, true, false, true).timeout   # ignore_time_scale
+	if _chrome_fade != my or _cine_depth > 0:
+		return
+	await _chrome_fade_to(my, 1.0, 0.55)
+
+
+func _chrome_fade_to(my: int, target: float, dur: float) -> void:
+	var from := 1.0
+	for c in _hud_chrome:
+		if is_instance_valid(c):
+			from = c.modulate.a
+			break
+	var t0 := Time.get_ticks_msec()
+	while _chrome_fade == my:
+		var u := clampf(float(Time.get_ticks_msec() - t0) / (dur * 1000.0), 0.0, 1.0)
+		var a := lerpf(from, target, u)
+		for c in _hud_chrome:
+			if is_instance_valid(c):
+				c.modulate.a = a
+		if u >= 1.0:
+			return
+		var tree := get_tree()
+		if tree == null:
+			return
+		await tree.process_frame
+
+
 func _hud_scrim() -> TextureRect:
 	## Top-of-frame gradient scrim: opaque-ish at the very top, gone by
 	## HUD_SCRIM_H. Works over the dark hall (invisible there) AND over the
@@ -1103,7 +1216,9 @@ func _build_hud() -> void:
 	var hud := CanvasLayer.new()
 	hud.name = "HUD"
 	add_child(hud)
-	hud.add_child(_hud_scrim())   # FIRST child — everything below draws over it
+	var scrim := _hud_scrim()
+	hud.add_child(scrim)   # FIRST child — everything below draws over it
+	_hud_chrome.append(scrim)
 
 	var title := Label.new()
 	title.name = "Title"
@@ -1227,6 +1342,18 @@ func _build_hud() -> void:
 	_oracle_caption.offset_right = -16
 	_oracle_caption.offset_bottom = -10
 	hud.add_child(_oracle_caption)
+
+	# THE CHROME REGISTER. The title block ("HOUSE X vs HOUSE Y" + mottos +
+	# turn line) lay exactly across the dragon's neck and skull in
+	# showcase/10_throne_room.png — the best frame in the game had no readable
+	# dragon head. Everything a cinematic must not have to draw around is
+	# listed here; captions and the victory card are deliberately absent.
+	_hud_chrome.append_array([title, mottos, _turn_label, ctx,
+		_oracle_flash, _undo_btn, _move_list, _oracle_caption])
+	if oracle != null:
+		var ml := hud.get_node_or_null("OracleMode") as Control
+		if ml != null:
+			_hud_chrome.append(ml)
 
 	_banter_caption = Label.new()
 	_banter_caption.name = "BanterCaption"

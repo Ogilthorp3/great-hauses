@@ -70,8 +70,12 @@
 ##   dragon-live (needs DRAGON_FEN — mate-in-1 with three loser pawns left
 ##               standing) the spectator wyrm: perched from the hall anchor,
 ##               notice_move wired, reactions locked under the duel cam, then
-##               the scripted mate → ASHFALL (time dip, mid-fire frame,
-##               time_scale restored, loser views purged, victory flow)
+##               the scripted mate → ASHFALL. Every ceremony frame is taken on
+##               the ceremony's own PHASE (never on the bent clock): the bank
+##               silhouette, the TORRENT (gated on is_jet_burning AND on a
+##               flame census of the saved pixels), and the ember/ash tail
+##               after the cut. Then time_scale restored, loser views purged,
+##               victory flow — which must not open until the wyrm is done.
 ##   undo        (needs DUEL_FEN) take-back insurance vs the mock Pure Oracle
 ##               in TOURNAMENT mode: full-round revert restores FEN + view
 ##               census byte-identical (captured pawn resurrects), a
@@ -246,6 +250,20 @@ func _wait_until(pred: Callable, timeout: float) -> bool:
 func _sleep(sec: float) -> void:
 	await get_tree().create_timer(sec).timeout
 
+## WALL-CLOCK sleep — immune to Engine.time_scale.
+##
+## THE SCAR (2026-08-09): every cinematic in this game bends Engine.time_scale
+## (0.55 for ASHFALL, 0.15 for checkmate) while its own choreography runs on
+## wall time. A plain `_sleep(1.5)` taken after the ashfall dip therefore
+## waited 1.5/0.55 = 2.7 REAL seconds and landed the "mid_ashfall" shot at
+## ~2.8 s — the tail of the bank. The jet does not ignite until ~4.85 s, so
+## the torrent that had been built, wired and unit-tested was never once
+## photographed: every fire image on disk was hours older than the code. A
+## test that measures a cinematic must not measure it with the clock the
+## cinematic is bending.
+func _sleep_wall(sec: float) -> void:
+	await get_tree().create_timer(sec, true, false, true).timeout   # ignore_time_scale
+
 ## Wait for a genuinely drawn frame — BOUNDED. Under full window occlusion
 ## macOS stops drawing while process frames continue, so an unbounded
 ## `await RenderingServer.frame_post_draw` wedges the scenario until the
@@ -259,12 +277,12 @@ func _await_drawn(timeout_s := 3.0) -> void:
 	while not drawn[0] and Time.get_ticks_msec() < deadline:
 		await get_tree().process_frame
 
-func _shot(step_name: String) -> void:
+func _shot(step_name: String) -> Image:
 	await _await_drawn()
 	var img := get_viewport().get_texture().get_image()
 	if img == null:
 		print("E2E WARN no viewport image for screenshot '%s'" % step_name)
-		return
+		return null
 	_shot_i += 1
 	var path := "%s/%02d_%s.png" % [artifacts_dir, _shot_i, step_name]
 	var err := img.save_png(path)
@@ -275,6 +293,91 @@ func _shot(step_name: String) -> void:
 	# rects below ARE the rects in the PNG just saved.
 	if OVERLAY_DUMP_SHOTS.has(step_name):
 		_dump_overlays(step_name)
+	return img
+
+# ── Fire census (the "is there actually fire in this frame?" instrument) ───
+## Earned 2026-08-09: the dracarys torrent shipped, passed its unit tests, and
+## no frame anywhere on disk contained a single pixel of it — the scenario's
+## post-dip await was scaled by the very time_scale the ceremony had bent, so
+## every fire shot landed before the ignition (see _sleep_wall). "The fire is
+## wired" was an UNVERIFIED CLAIM for a whole day. This makes it a measurement:
+## the same pixels that go into the PNG are counted for flame, in the run log,
+## every run. Matches tools/frame_measure.py `fire` so a critic reproducing the
+## number off the PNG gets the driver's number back.
+##
+## Flame = hot hue (red well clear of blue), saturated, and bright. Counted on
+## a 320x180 box-downsample of the frame — 57 k samples is plenty for a share
+## and 921 k GDScript get_pixel calls is not affordable per shot.
+const FIRE_MIN_R := 0.45
+const FIRE_MIN_RB := 0.18      ## how far red must lead blue
+const FIRE_MIN_SAT := 0.30
+const FIRE_MIN_V := 0.35
+## Share of the frame that must be flame in the torrent shot. The torch-lit
+## hall with NO fire measures ~1.2%; the module preview's jet measures ~18%.
+## 3% is comfortably outside the torchlight floor and well under the jet.
+const FIRE_TORRENT_MIN_SHARE := 3.0
+## The tail (embers, ash, ground smoke) after the jet is cut — thinner, but it
+## must still be burning something.
+const FIRE_TAIL_MIN_SHARE := 1.5
+
+## {share, px, samples, v_mean, x0, y0, x1, y1} for `img` (never null-returns:
+## an unreadable image reports share 0).
+func _fire_census(img: Image) -> Dictionary:
+	var out := {"share": 0.0, "px": 0, "samples": 0, "v_mean": 0.0,
+		"x0": -1, "y0": -1, "x1": -1, "y1": -1}
+	if img == null:
+		return out
+	var small := img.duplicate() as Image
+	if small == null:
+		return out
+	if small.get_format() != Image.FORMAT_RGBA8:
+		small.convert(Image.FORMAT_RGBA8)
+	small.resize(320, 180, Image.INTERPOLATE_BILINEAR)
+	var w := small.get_width()
+	var h := small.get_height()
+	var n := 0
+	var vsum := 0.0
+	var x0 := w
+	var y0 := h
+	var x1 := -1
+	var y1 := -1
+	for y in h:
+		for x in w:
+			var c := small.get_pixel(x, y)
+			var v: float = maxf(c.r, maxf(c.g, c.b))
+			var mn: float = minf(c.r, minf(c.g, c.b))
+			var sat: float = 0.0 if v <= 0.0 else (v - mn) / v
+			if c.r < FIRE_MIN_R or c.r - c.b < FIRE_MIN_RB \
+					or sat < FIRE_MIN_SAT or v < FIRE_MIN_V:
+				continue
+			n += 1
+			vsum += v
+			x0 = mini(x0, x)
+			y0 = mini(y0, y)
+			x1 = maxi(x1, x)
+			y1 = maxi(y1, y)
+	var total := float(w * h)
+	out["samples"] = int(total)
+	out["px"] = n
+	out["share"] = 100.0 * float(n) / total
+	out["v_mean"] = (vsum / float(n)) if n > 0 else 0.0
+	if n > 0:
+		# Report in FULL-FRAME pixels so a bbox from the log can be pasted
+		# straight into tools/frame_crop.py against the saved PNG.
+		var sx := float(img.get_width()) / float(w)
+		var sy := float(img.get_height()) / float(h)
+		out["x0"] = int(x0 * sx)
+		out["y0"] = int(y0 * sy)
+		out["x1"] = int((x1 + 1) * sx)
+		out["y1"] = int((y1 + 1) * sy)
+	return out
+
+func _report_fire(tag: String, img: Image) -> Dictionary:
+	var c := _fire_census(img)
+	print("E2E FIRE %s share=%.3f%% px=%d/%d v_mean=%.3f bbox=(%d,%d)-(%d,%d)" % [
+		tag, c["share"], c["px"], c["samples"], c["v_mean"],
+		c["x0"], c["y0"], c["x1"], c["y1"]])
+	return c
 
 func _colors_close(a: Color, b: Color) -> bool:
 	return absf(a.r - b.r) < 0.02 and absf(a.g - b.g) < 0.02 and absf(a.b - b.b) < 0.02
@@ -324,6 +427,10 @@ const OVERLAY_SLAB_SHARE := 0.04
 const OVERLAY_DUMP_SHOTS: Array[String] = [
 	"mid_duel", "mid_slowmo", "duel_caption", "banter_caption",
 	"after_promotion", "attacker_selected",
+	# The ceremony frames. A critic found the HUD title block lying across the
+	# dragon's skull and the victory modal opened over the wyrm mid-ashfall
+	# (2026-08-09): whatever is drawn on top of a ceremony now names itself.
+	"torrent", "mid_ashfall", "throne_room",
 ]
 
 func _dump_overlays(tag: String) -> void:
@@ -1460,6 +1567,13 @@ func _scenario_promote() -> void:
 		await _fail("promote-view-replaced", "no queen view on %s" % str(to_sq))
 		return
 	_pass("promote-view-replaced")
+	# INSIDE the flourish, on the wall clock — the promotion cinematic runs at
+	# time_scale 0.6, so a scaled wait here would land the hero frame somewhere
+	# the flourish is not (the ashfall scar, same shape). 1.2 s is chosen, not
+	# guessed: the arriving piece plays Spawn_Ground (it rises OUT of the
+	# stone), so anything earlier photographs a queen still underground, and
+	# the pool's decay has not started yet at this point in the envelope.
+	await _sleep_wall(1.2)
 	await _shot("after_promotion")
 	if not await _settle(game, "promote-settled"):
 		return
@@ -1616,7 +1730,27 @@ func _showcase_throne_room(game: Node) -> void:
 		await _fail("showcase-dragon-summoned", "no dragon above the throne")
 		return
 	_pass("showcase-dragon-summoned")
-	await _sleep(2.4)   # glide (1.5 s) done — inside the tableau hold
+	await _sleep_wall(2.4)   # glide (1.5 s) done — inside the tableau hold
+	# WHERE THE SUBJECT ACTUALLY IS, in the pixel space the overlay census
+	# reports its rects in. "The caption clears the champion" is a claim about
+	# two rectangles; this line is the second one, so a critic can check the
+	# arithmetic against the PNG instead of taking the plate's word for it.
+	var cam := get_viewport().get_camera_3d()
+	if cam != null:
+		var king_pos := Vector3.INF
+		for sq in (game.get("views") as Dictionary):
+			var pv = (game.get("views") as Dictionary)[sq]
+			if is_instance_valid(pv) and int(pv.get("piece_type")) == PieceView.Type.KING \
+					and int(pv.get("side")) == PieceView.House.FROST:
+				king_pos = (pv as Node3D).global_position
+		for tag in [["dais", hall.throne_dais() + Vector3.UP * 0.9],
+				["throne", hall.throne_focus() - Vector3.UP * 2.4],
+				["king", king_pos + Vector3.UP * 0.9]]:
+			var p: Vector3 = tag[1]
+			if not p.is_finite():
+				continue
+			print("E2E SUBJECT throne_room %-7s world=%v screen=%v behind=%s" % [
+				tag[0], p, cam.unproject_position(p), cam.is_position_behind(p)])
 	await _shot("throne_room")
 	if not await _wait_until(func(): return done["done"], 25.0):
 		await _fail("showcase-tableau-finished", "championship tableau never finished")
@@ -2408,8 +2542,53 @@ func _scenario_dragon_live() -> void:
 	if not await _wait_until(func(): return Engine.time_scale < 0.9, 3.0):
 		await _fail("dragon-ashfall-dip", "no cinematic time dip (%.2f)" % Engine.time_scale)
 		return
-	await _sleep(1.5)   # into the breath sweep — flame + caption on screen
+	# ── THE CEREMONY, PHOTOGRAPHED ON ITS OWN CLOCK ──
+	# Every shot below waits on the ceremony's PHASE, never on a stopwatch the
+	# ceremony is bending (see _sleep_wall). The wide silhouette shot is the
+	# bank; the fire shots are gated on the jet actually burning.
+	if not await _wait_until(func():
+		return str(spectator.call("ashfall_phase")) == "bank", 4.0):
+		await _fail("dragon-ashfall-bank", "the ceremony never reached the bank")
+		return
+	await _sleep_wall(1.4)   # mid-lap: the wyrm crossing the hall in profile
 	await _shot("mid_ashfall")
+	_pass("dragon-bank-photographed")
+	# THE TORRENT. The jet ignites a quarter of the way into the breath beat;
+	# is_jet_burning() is true only while the jet itself (not its ember tail)
+	# is up, so this cannot photograph an empty sky again.
+	if not await _wait_until(func():
+		return bool(spectator.call("is_jet_burning")), 12.0):
+		await _fail("dragon-jet-lit",
+			"the jet never ignited (phase=%s)" % str(spectator.call("ashfall_phase")))
+		return
+	_pass("dragon-jet-lit (phase=%s)" % str(spectator.call("ashfall_phase")))
+	await _sleep_wall(0.7)   # into the sweep — the torrent at full length
+	var torrent_img: Image = await _shot("torrent")
+	var fire := _report_fire("torrent", torrent_img)
+	if float(fire["share"]) < FIRE_TORRENT_MIN_SHARE:
+		await _fail("dragon-torrent-photographed",
+			"only %.3f%% of the torrent frame is flame (need %.1f%%)"
+				% [fire["share"], FIRE_TORRENT_MIN_SHARE])
+		return
+	_pass("dragon-torrent-photographed (%.2f%% flame)" % fire["share"])
+	# THE TAIL. cut() retracts the jet and leaves embers, drifting ash, ground
+	# fire and smoke alive — the beat the linger phase exists to show.
+	if not await _wait_until(func():
+		return not bool(spectator.call("is_jet_burning")), 12.0):
+		await _fail("dragon-jet-cut", "the jet never cut")
+		return
+	await _sleep_wall(1.2)
+	var tail_img: Image = await _shot("ember_tail")
+	var tail := _report_fire("ember_tail", tail_img)
+	if not bool(spectator.call("is_fire_tail_alive")):
+		await _fail("dragon-ember-tail", "the fire died with the jet — no tail")
+		return
+	if float(tail["share"]) < FIRE_TAIL_MIN_SHARE:
+		await _fail("dragon-ember-tail",
+			"only %.3f%% of the tail frame is ember/ash fire (need %.1f%%)"
+				% [tail["share"], FIRE_TAIL_MIN_SHARE])
+		return
+	_pass("dragon-ember-tail (%.2f%% flame)" % tail["share"])
 	if not await _wait_until(func():
 		return not bool(spectator.call("is_ashfall_active")), 15.0):
 		await _fail("dragon-ashfall-finished", "ASHFALL never finished")

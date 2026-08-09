@@ -22,7 +22,7 @@ var checks_run := 0
 ## A hard-erroring test function aborts silently at the error and its await
 ## resumes as if it finished — the floor turns silent aborts into a loud
 ## failure (same guard as test_cinematics.gd).
-const MIN_EXPECTED_CHECKS := 125
+const MIN_EXPECTED_CHECKS := 133
 
 ## THE SERPENT-WYRM CONTRACT (dragon-v2, installed 2026-08-09). Asserted
 ## against the names GODOT ends up with, never the ones the GLB was authored
@@ -88,6 +88,7 @@ func _main() -> void:
 	await _test_skip_every_phase()
 	await _test_championship_tier()
 	await _test_match_defaults_budget()
+	await _test_phase_and_jet_probes()
 	check("final: time_scale is 1.0", true, is_equal_approx(Engine.time_scale, 1.0))
 	check("final: no Light3D added by any module path", lights_before, _light_count())
 	check("final: no test silently aborted (checks >= %d)" % MIN_EXPECTED_CHECKS,
@@ -650,3 +651,40 @@ func _test_fire_wiring() -> void:
 	s.free()
 	await process_frame
 	check("fire: no Light3D added by the whole fire path", lights_before, _light_count())
+
+
+## ── THE INSTRUMENT HOOKS (critic defect P1, 2026-08-09) ───────────────────
+## The dracarys torrent shipped, passed every unit test above, and no frame
+## anywhere on disk contained one pixel of it: the e2e slept on the ENGINE
+## clock the ceremony bends to 0.55, so its "mid-fire" shot landed at ~2.8 s,
+## the tail of the bank, while the jet does not light until ~4.85 s. The fix
+## is that a test never guesses WHEN — it asks. These are the probes it asks,
+## so they can never quietly stop reporting the truth.
+func _test_phase_and_jet_probes() -> void:
+	var s := _fast_spectator()
+	await process_frame
+	check("probe: no phase before a ceremony", "", s.ashfall_phase())
+	check("probe: no jet before a ceremony", false, s.is_jet_burning())
+	check("probe: no tail before a ceremony", false, s.is_fire_tail_alive())
+	var losers := _spawn_army(1, 3, 1.5)
+	var seen := {}
+	var jet_phase := {"v": ""}
+	var runner := func() -> void:
+		await s.play_ashfall(1, "House Winterfang", losers)
+	runner.call()
+	var sampler := func() -> void:
+		while is_instance_valid(s) and s.is_ashfall_active():
+			seen[s.ashfall_phase()] = true
+			if s.is_jet_burning() and jet_phase["v"].is_empty():
+				jet_phase["v"] = s.ashfall_phase()
+			await process_frame
+	sampler.call()
+	var done: bool = await _wait_until(func() -> bool: return not s.is_ashfall_active(), 10.0)
+	check("probe: ceremony completed", true, done)
+	for beat in ["bank", "flare", "inhale", "breath", "linger"]:
+		check("probe: phase '%s' was reported" % beat, true, seen.has(beat))
+	check("probe: the jet only burns in the breath", "breath", jet_phase["v"])
+	check("probe: phase cleared at the end", "", s.ashfall_phase())
+	check("probe: the jet is out at the end", false, s.is_jet_burning())
+	s.free()
+	await process_frame
