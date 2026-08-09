@@ -1,0 +1,101 @@
+{
+  "_readme": [
+    "House Ravenmark — a WORKED EXAMPLE of a third-party house pack.",
+    "It ships nothing of the game's: its own sigil, its own half-helm, its own",
+    "crest, its own taunts. Copy this folder into user://houses/ and it plays.",
+    "On macOS that is:",
+    "  ~/Library/Application Support/Godot/app_userdata/Great Houses/houses/",
+    "Check it first:  Godot --headless -s res://tools/validate_house_pack.gd -- <dir>",
+    "The format, the rules and the reasons: docs/HOUSE-PACK.md"
+  ],
+  "format": 1,
+  "id": "ravenmark",
+  "name": "House Ravenmark",
+  "archetype": "raven",
+  "seat": "Corvenhold",
+  "motto": "We are counted at dusk.",
+
+  "colors": {
+    "primary": "#2a2140",
+    "secondary": "#d8cfe6",
+    "accent": "#a06fd6"
+  },
+  "tints": {
+    "kit": "#7b3fb5",
+    "piece": "#6f5aa8",
+    "tower": "#5a4890"
+  },
+
+  "coat": "black",
+
+  "sigil": "sigil.png",
+  "pawn_helm": "pawn_helm.glb",
+  "crest": "crest.glb",
+
+  "materials": {
+    "ravenmark_beak": "natural:bone"
+  },
+
+  "banter": {
+    "game_start": [
+      "Corvenhold counts your pieces. It is a short count.",
+      "The birds came early. They know the hour.",
+      "We are counted at dusk. You will be counted sooner.",
+      "Move. The flock is patient and the field is wide.",
+      "Every banner ends as feathers and a field.",
+      "You will hear us before you see us. Then only us.",
+      "The ravens have already chosen their perches.",
+      "Play, and let the counting begin."
+    ],
+    "player_captured": [
+      "One more for the count.",
+      "Your {piece} is carrion now, and we are punctual.",
+      "The flock thanks you for the {piece}.",
+      "Feathers settle. Yours will not.",
+      "A short flight, that one.",
+      "We keep no prisoners, only tallies.",
+      "The {piece} is counted. Send another.",
+      "Dusk came early for him."
+    ],
+    "rival_captured": [
+      "A bird falls. The flock does not.",
+      "You took a {piece}. The count still favours us.",
+      "One perch empty. There are a thousand.",
+      "We mourn in flight, not in place.",
+      "A feather, no more.",
+      "The murder is undiminished.",
+      "Take the {piece}. The field remains ours.",
+      "Blood on the branch. It has been there before."
+    ],
+    "check_given": [
+      "Your king stands under a full tree.",
+      "Look up. That is the last thing they all do.",
+      "The count reaches your crown.",
+      "Wings above the throne, sire.",
+      "There is nowhere a bird cannot follow.",
+      "Dusk, and the flock has your scent.",
+      "Your king is being counted.",
+      "The branches are heavy tonight."
+    ],
+    "check_received": [
+      "A stone thrown into a tree changes nothing.",
+      "The flock scatters and reforms. Watch.",
+      "You startled us. Once.",
+      "Noise is not the same as harm.",
+      "We are counted at dusk, not now.",
+      "Ravens are not so easily scattered.",
+      "You have our attention. It is not a gift.",
+      "The tree still stands, and so do we."
+    ],
+    "game_end": [
+      "The count is closed.",
+      "Dusk, as promised.",
+      "The field is quiet, and the birds are not.",
+      "You were counted. That is all any of us get.",
+      "Corvenhold will remember the number.",
+      "Sleep. The flock keeps the field.",
+      "It is done, and the branches are full.",
+      "We told you the hour."
+    ]
+  }
+}

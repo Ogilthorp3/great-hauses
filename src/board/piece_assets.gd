@@ -90,14 +90,15 @@ const CHARACTER_SCENES := {
 
 ## HOUSE layer — the Tidegrip Drowned Legion: same rig (Rig_Medium, same
 ## bones, same shared anims), skeleton cast swapped in wholesale.
+##
+## THE CAST IS NOW A PACK DECLARATION, not a table (house-pack pass,
+## 2026-08-09). Tidegrip's five skeleton models are the `army` block of
+## houses/tidegrip/house.json, which is exactly the mechanism a third-party
+## house uses to field its own cast. This constant survives because two
+## scripts outside the house layer still ask "is this the Drowned Legion?" by
+## name (costume_preview's assembly gate, dragon_spectator's already-bones
+## check) — it names the shipped house, it no longer decides anything.
 const SKELETON_HOUSE := "tidegrip"
-const SKELETON_SCENES := {
-	0: preload("res://assets/kaykit-skeletons/Skeleton_Minion.glb"),   # PAWN
-	2: preload("res://assets/kaykit-skeletons/Skeleton_Warrior.glb"),  # KNIGHT
-	3: preload("res://assets/kaykit-skeletons/Skeleton_Mage.glb"),     # BISHOP
-	4: preload("res://assets/kaykit-skeletons/Skeleton_Rogue.glb"),    # QUEEN
-	5: preload("res://assets/kaykit-skeletons/Skeleton_Warrior.glb"),  # KING
-}
 
 ## TYPE layer — signature gear (KayKit adventurers prop set). Rigid mounts
 ## on Rig_Medium bones; handslot.* are the pack's purpose-built prop bones.
@@ -194,18 +195,9 @@ const RING_INLAY_WEIGHT := 0.24
 ## knight/queen/king only. Pawns wear the humbler half-helm below — never a
 ## crest: the two registries are deliberately SEPARATE lists, because adding
 ## PAWN to this one would put a royal crest on every footman.
+## Each house's crest is declared by its own pack (`crest` in house.json) —
+## the nine point at these same files, a dropped-in house points at its own.
 const CRESTED_TYPES: Array[int] = [2, 4, 5]
-const CREST_SCENES := {
-	"hartcrown": preload("res://assets/custom-props/crests/crest_hartcrown.glb"),
-	"winterfang": preload("res://assets/custom-props/crests/crest_winterfang.glb"),
-	"ashwyrm": preload("res://assets/custom-props/crests/crest_ashwyrm.glb"),
-	"tidegrip": preload("res://assets/custom-props/crests/crest_tidegrip.glb"),
-	"thornvale": preload("res://assets/custom-props/crests/crest_thornvale.glb"),
-	"duskfire": preload("res://assets/custom-props/crests/crest_duskfire.glb"),
-	"swiftcrest": preload("res://assets/custom-props/crests/crest_swiftcrest.glb"),
-	"silverbrook": preload("res://assets/custom-props/crests/crest_silverbrook.glb"),
-	"goldclaw": preload("res://assets/custom-props/crests/crest_goldclaw.glb"),
-}
 
 ## HOUSE layer — PAWN half-helms (ISSUES.md #3, tools/props/make_pawn_helms.py).
 ## Worn by pawns ONLY, and deliberately quieter than the royal crest above: a
@@ -222,23 +214,17 @@ const CREST_SCENES := {
 ## near-white so the multiply tint lands the house color true. The rim carries
 ## the accent on every helm, so a house reads by COLOR even when its motif is
 ## only a few pixels tall on the board.
+## Each house's half-helm is declared by its own pack (`pawn_helm`). Tidegrip
+## points at the CHARRED twin — identical kraken geometry with the iron and rim
+## baked charred (the crown.glb / crown_frost.glb precedent, one asset swap
+## instead of a runtime material branch), because its pawns are drowned
+## skeletons and their helm came out of the same fire. That choice is now data
+## in houses/tidegrip/house.json, where a modder can see how it was done.
 const HELMED_TYPES: Array[int] = [0]
-const PAWN_HELM_SCENES := {
-	"hartcrown": preload("res://assets/custom-props/pawn-helms/pawn_helm_hartcrown.glb"),
-	"winterfang": preload("res://assets/custom-props/pawn-helms/pawn_helm_winterfang.glb"),
-	"ashwyrm": preload("res://assets/custom-props/pawn-helms/pawn_helm_ashwyrm.glb"),
-	"tidegrip": preload("res://assets/custom-props/pawn-helms/pawn_helm_tidegrip.glb"),
-	"thornvale": preload("res://assets/custom-props/pawn-helms/pawn_helm_thornvale.glb"),
-	"duskfire": preload("res://assets/custom-props/pawn-helms/pawn_helm_duskfire.glb"),
-	"swiftcrest": preload("res://assets/custom-props/pawn-helms/pawn_helm_swiftcrest.glb"),
-	"silverbrook": preload("res://assets/custom-props/pawn-helms/pawn_helm_silverbrook.glb"),
-	"goldclaw": preload("res://assets/custom-props/pawn-helms/pawn_helm_goldclaw.glb"),
-}
-## HOUSE layer — the Drowned Legion's twin: identical kraken geometry with the
-## iron and rim baked charred (the crown.glb / crown_frost.glb precedent, one
-## asset swap instead of a runtime material branch). Tidegrip's pawns are
-## drowned skeletons on a charred charger; their helm came out of the same fire.
-const PAWN_HELM_CHARRED := preload("res://assets/custom-props/pawn-helms/pawn_helm_tidegrip_charred.glb")
+## THE DRESSING CONTRACT. These two names are how ANY model — shipped or
+## dropped in — tells the engine which surface is the dome and which is the rim
+## and motif. Name them this in your .glb and the game paints them for you;
+## HousePack.CONTRACT_MATERIALS is the modder-facing half of the same fact.
 const HELM_IRON_MATERIAL := "pawnhelm_iron"
 const HELM_ACCENT_MATERIAL := "pawnhelm_accent"
 ## The Barbarian pawn body ships wearing a full bear-skull hood that swallows
@@ -251,6 +237,9 @@ var _desat_cache: Dictionary = {}   # "<kind>|<texture id>" -> Texture2D
 var _atlas_cache: Dictionary = {}   # texture id -> decompressed RGBA8 Image
 var _sigil_mat_cache: Dictionary = {}   # house_id -> StandardMaterial3D
 var _banner_tex_cache: Dictionary = {}  # house_id -> Texture2D
+var _pack_scene_cache: Dictionary = {}  # pack asset path -> PackedScene
+var _pack_rules: Array = []             # pack-declared MATERIAL_ROLES, merged
+var _pack_rules_built := false          # ...built once, even when it is empty
 
 
 ## Both Rig_Medium libraries merged once; the same rig drives every character
@@ -283,11 +272,35 @@ func piece_height(piece_type: int) -> float:
 	return TYPE_HEIGHT[piece_type]
 
 
-## The character scene for a type: the adventurer cast, or the skeleton cast
-## for the Drowned Legion. Callers pass PieceView.Type != ROOK.
+## The models a house's pack overrides, as {piece type -> PackedScene}. {} for
+## every house that fields the shipped cast.
+func army_scenes(house_id: String) -> Dictionary:
+	var out := {}
+	for piece_type in HouseRegistry.army_overrides(house_id):
+		var packed := _pack_scene(str(HouseRegistry.army_overrides(house_id)[piece_type]))
+		if packed != null:
+			out[int(piece_type)] = packed
+	return out
+
+
+## The Drowned Legion's cast — DERIVED, not declared. It reads the `army` block
+## of houses/tidegrip/house.json, which is the same mechanism any third-party
+## house uses to field its own models. The name survives because the costume
+## suite asserts rig compatibility against it (same bones, same shared anims).
+var SKELETON_SCENES: Dictionary:
+	get:
+		return army_scenes(SKELETON_HOUSE)
+
+
+## The character scene for a type: the adventurer cast by default, or whatever
+## the house's pack declares in its `army` block (Tidegrip's Drowned Legion is
+## the shipped example). Callers pass PieceView.Type != ROOK.
 func character_scene(piece_type: int, house_id: String) -> PackedScene:
-	if house_id == SKELETON_HOUSE:
-		return SKELETON_SCENES[piece_type]
+	var army: Dictionary = HouseRegistry.army_overrides(house_id)
+	if army.has(piece_type):
+		var packed := _pack_scene(str(army[piece_type]))
+		if packed != null:
+			return packed
 	return CHARACTER_SCENES[piece_type]
 
 
@@ -307,22 +320,37 @@ func wants_crest(piece_type: int) -> bool:
 	return piece_type in CRESTED_TYPES
 
 
-## The helmet-crest scene for a house (null for legacy sides / unknown ids).
+## The helmet-crest scene for a house — whatever its pack declares (null for
+## legacy sides, unknown ids, and packs that ship no crest: a house with no
+## crest rides bare-headed, which is a look, not a crash).
 func crest_scene(house_id: String) -> PackedScene:
-	return CREST_SCENES.get(house_id)
+	return _pack_scene(HouseRegistry.crest_path(house_id))
 
 
 func wants_helm(piece_type: int) -> bool:
 	return piece_type in HELMED_TYPES
 
 
-## The PAWN half-helm scene for a house (null for legacy sides / unknown ids —
-## legacy pawns keep the bear hood they shipped with). The Drowned Legion
-## fields the pre-charred twin.
+## The PAWN half-helm scene for a house — whatever its pack declares (null for
+## legacy sides / unknown ids / packs shipping none — those pawns keep the
+## cast's own headgear). The Drowned Legion's pack points at the charred twin.
 func pawn_helm_scene(house_id: String) -> PackedScene:
-	if house_id == SKELETON_HOUSE:
-		return PAWN_HELM_CHARRED
-	return PAWN_HELM_SCENES.get(house_id)
+	return _pack_scene(HouseRegistry.pawn_helm_path(house_id))
+
+
+## One pack-declared model, loaded and CACHED HERE — on the autoload Node, not
+## in a script static: statics holding Resources crash Godot during engine
+## shutdown (see the header). A res:// path comes through the import pipeline;
+## a path a player dropped into user:// is parsed at runtime by
+## HousePack.load_scene, which is what makes a DLC house need no rebuild.
+func _pack_scene(path: String) -> PackedScene:
+	if path.is_empty():
+		return null
+	if _pack_scene_cache.has(path):
+		return _pack_scene_cache[path]
+	var packed := HousePack.load_scene(path)
+	_pack_scene_cache[path] = packed
+	return packed
 
 
 ## Crown-variant mapping (kings and their queens' tiaras).
@@ -516,14 +544,87 @@ const MATERIAL_ROLES: Array = [
 ## name, `mat_name` the source material's resource_name. Returns
 ## {"role": Role, "stuff": Stuff}. An unnamed surface returns UNCLASSIFIED and
 ## shouts — it must never silently fall through to "dye it".
-func classify(mesh_name: String, mat_name: String) -> Dictionary:
+##
+## PACK RULES ARE CONSULTED FIRST (house-pack pass, 2026-08-09). A third-party
+## house declares the roles of ITS OWN surfaces in its manifest, and those
+## declarations are folded in here so the whole pipeline — the dressing in
+## PieceView, the role gate in costume_preview — treats a stranger's helm
+## exactly as it treats ours. They cannot shadow anything of the engine's:
+## HousePack requires every declared surface name to begin with "<house id>_",
+## refuses the engine's contract names, and refuses reserved ids. That prefix
+## rule is the whole reason a merged table is safe.
+## `quiet` suppresses the shout for callers whose JOB is to find unclassified
+## surfaces and report them themselves (tools/validate_house_pack.gd). The game
+## never passes it: in the render path, silence is the bug.
+func classify(mesh_name: String, mat_name: String, quiet := false) -> Dictionary:
+	for rule: Dictionary in pack_rules():
+		var pattern: String = rule["n"]
+		if mesh_name.matchn(pattern) or mat_name.matchn(pattern):
+			return {"role": rule["role"], "stuff": rule.get("stuff", Stuff.NONE)}
 	for rule: Dictionary in MATERIAL_ROLES:
 		var pattern: String = rule["n"]
 		if mesh_name.matchn(pattern) or mat_name.matchn(pattern):
 			return {"role": rule["role"], "stuff": rule.get("stuff", Stuff.NONE)}
-	push_error("PieceAssets.classify: no MATERIAL_ROLES rule for mesh '%s' / material '%s' — add it to the table"
-			% [mesh_name, mat_name])
+	if not quiet:
+		push_error("PieceAssets.classify: no MATERIAL_ROLES rule for mesh '%s' / material '%s' — add it to the table"
+				% [mesh_name, mat_name])
 	return {"role": Role.UNCLASSIFIED, "stuff": Stuff.NONE}
+
+
+## The role vocabulary a manifest is written in, as {string -> Role}. The pack
+## format carries roles as WORDS so its validator can run with no autoloads at
+## all (tools/validate_house_pack.gd); this is the one place the words become
+## the enum, and tests/test_house_packs.gd asserts the two have not drifted.
+const ROLE_WORDS := {
+	"kit": Role.KIT, "natural": Role.NATURAL, "regalia": Role.REGALIA,
+	"heraldry": Role.HERALDRY, "effect": Role.EFFECT,
+}
+const STUFF_WORDS := {
+	"steel": Stuff.STEEL, "leather": Stuff.LEATHER, "wood": Stuff.WOOD,
+	"stone": Stuff.STONE, "skin": Stuff.SKIN, "bone": Stuff.BONE,
+	"coat": Stuff.COAT, "glow": Stuff.GLOW, "atlas": Stuff.ATLAS,
+	"none": Stuff.NONE,
+}
+
+
+## Every installed pack's role declarations, in MATERIAL_ROLES shape. Built
+## once and rebuilt only when the roster is reloaded.
+func pack_rules() -> Array:
+	if _pack_rules_built:
+		return _pack_rules
+	_pack_rules_built = true
+	var declared: Dictionary = HouseRegistry.all_material_roles()
+	for surface in declared:
+		var spec: Dictionary = declared[surface]
+		_pack_rules.append({
+			"n": str(surface),
+			"role": ROLE_WORDS.get(str(spec["role"]), Role.UNCLASSIFIED),
+			"stuff": STUFF_WORDS.get(str(spec.get("stuff", "none")), Stuff.NONE),
+		})
+	return _pack_rules
+
+
+## Fold ONE pack's declarations into the live table without installing it —
+## how tools/validate_house_pack.gd judges a folder that is not in
+## user://houses/ yet. `materials` is HouseRegistry.material_roles() shape.
+## Safe to call repeatedly: declared names are house-id-prefixed, so a pack
+## under test can only ever shadow itself.
+func declare_pack_rules(materials: Dictionary) -> void:
+	pack_rules()   # the installed ones first, so this is an ADDITION
+	for surface in materials:
+		var spec: Dictionary = materials[surface]
+		_pack_rules.push_front({
+			"n": str(surface),
+			"role": ROLE_WORDS.get(str(spec["role"]), Role.UNCLASSIFIED),
+			"stuff": STUFF_WORDS.get(str(spec.get("stuff", "none")), Stuff.NONE),
+		})
+
+
+## Drop the merged pack table (after HouseRegistry.reload()).
+func reload_pack_rules() -> void:
+	_pack_rules.clear()
+	_pack_rules_built = false
+	_pack_scene_cache.clear()
 
 
 # -- the tint pipeline, dispatched on role ---------------------------------
@@ -762,63 +863,41 @@ func kit_color(house_id: String) -> Color:
 # wear the house kit" rule fires. Hartcrown's copper jersey is a bay's own
 # colour, which is exactly why the stag rides a grey.
 #
-# Each palette names the horse's own material set (tools/props/convert_horse.py):
-# Main is the hide, Main_Light the blaze/socks, Main_Dark the ears and
-# shading, Muzzle the nose, Hair the mane and tail, Hooves the feet. The
-# MANE is deliberately pushed off the hide's own value in every coat — a
-# real chestnut's mane is the same colour as its body, and rendered at
-# chess-piece scale that is a horse with no mane and no tail (the exact
-# defect the pack's flat browns caused before). So the chestnut goes
-# flaxen, the liver chestnut goes near-black, and the pale grey's mane
-# drops a step: all four are real coats, chosen for the one that reads. Nothing
-# here may be a house hue — tests/test_costumes.gd paints a horse blue and the
-# role gate has to go red.
-const COAT_PALETTES := {
-	"bay": {
-		"Main": "#6b4526", "Main_Light": "#8a5c33", "Main_Dark": "#4a2f19",
-		"Muzzle": "#3a2515", "Hair": "#211a14", "Hooves": "#2b2724"},
-	"dark_bay": {
-		"Main": "#4a3320", "Main_Light": "#63452a", "Main_Dark": "#33220f",
-		"Muzzle": "#2a1d12", "Hair": "#1a1512", "Hooves": "#262320"},
-	"chestnut": {
-		"Main": "#8f4a22", "Main_Light": "#b3663a", "Main_Dark": "#6b3517",
-		"Muzzle": "#5a2d15", "Hair": "#d0a877", "Hooves": "#40342c"},
-	"liver_chestnut": {
-		"Main": "#6b3218", "Main_Light": "#8a4626", "Main_Dark": "#4d2210",
-		"Muzzle": "#3d1c0e", "Hair": "#3a1a0c", "Hooves": "#38302a"},
-	"black": {
-		"Main": "#232120", "Main_Light": "#3a3634", "Main_Dark": "#171514",
-		"Muzzle": "#141312", "Hair": "#121110", "Hooves": "#262422"},
-	"white_grey": {
-		"Main": "#b8b4ac", "Main_Light": "#d0ccc4", "Main_Dark": "#9a968e",
-		"Muzzle": "#837f78", "Hair": "#8a867e", "Hooves": "#55514b"},
-	"dapple_grey": {
-		"Main": "#8e8d88", "Main_Light": "#ada9a2", "Main_Dark": "#6a6864",
-		"Muzzle": "#575551", "Hair": "#4e4c49", "Hooves": "#3d3a36"},
-	"drowned_grey": {
-		"Main": "#4a4f4c", "Main_Light": "#626765", "Main_Dark": "#363a38",
-		"Muzzle": "#2b2f2d", "Hair": "#242827", "Hooves": "#222523"},
-	"dun": {
-		"Main": "#b0956a", "Main_Light": "#cbb289", "Main_Dark": "#8a7350",
-		"Muzzle": "#6e5c40", "Hair": "#3a3126", "Hooves": "#3a352e"},
-}
+# THE TABLE ITSELF NOW LIVES IN DATA: src/houses/coats.json, read by HousePack.
+# It moved there in the house-pack pass (2026-08-09) for one reason — it is the
+# CLOSED LIST a third-party manifest's `coat` field must name, and the
+# validator a modder runs (tools/validate_house_pack.gd) has no autoloads and
+# so cannot see this script at all. Same nine coats, same hexes; the file
+# carries the reasoning about manes and values that used to sit here.
 ## Legacy FROST/EMBER sides have no house entry, so they ride the default.
 const COAT_DEFAULT := "bay"
 
 
-## The coat palette a house's mount wears, as {material name -> Color}.
+## The coat palette a house's mount wears, as {material name -> Color}. A pack
+## may name one of the natural coats or declare its own (held to the same law:
+## near-colourless, or in the warm-brown band — never a house hue).
 func coat_palette(house_id: String) -> Dictionary:
-	var name := COAT_DEFAULT
-	if HouseRegistry.has_house(house_id):
-		name = HouseRegistry.get_house_coat(house_id)
-	if not COAT_PALETTES.has(name):
-		push_error("PieceAssets.coat_palette: house '%s' names coat '%s', which is not in COAT_PALETTES"
-				% [house_id, name])
-		name = COAT_DEFAULT
-	var out := {}
-	for key in COAT_PALETTES[name]:
-		out[key] = Color.html(COAT_PALETTES[name][key])
+	if not HouseRegistry.has_house(house_id):
+		return _coat_by_name(COAT_DEFAULT)
+	var out: Dictionary = HouseRegistry.get_coat_palette(house_id)
+	if out.is_empty():
+		push_error("PieceAssets.coat_palette: house '%s' names coat '%s', which is not a natural coat"
+				% [house_id, HouseRegistry.get_house_coat(house_id)])
+		return _coat_by_name(COAT_DEFAULT)
 	return out
+
+
+func _coat_by_name(name: String) -> Dictionary:
+	var raw: Dictionary = HousePack.natural_coats().get(name, {})
+	var out := {}
+	for key in raw:
+		out[key] = Color.html(str(raw[key]))
+	return out
+
+
+## The natural coats a house may name, for anything that wants to list them.
+func coat_names() -> Array:
+	return HousePack.coat_names()
 
 
 ## The coat's own colour for one horse material — NATURAL, never house-hued.

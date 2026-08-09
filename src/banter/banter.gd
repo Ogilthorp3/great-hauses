@@ -280,6 +280,14 @@ static func _ensure_pools() -> void:
 		push_error("BanterEngine: %s is not a valid banter-lines file" % LINES_PATH)
 		return
 	_pools = parsed["houses"]
+	# ...and then whatever the installed HOUSE PACKS brought with them. A house
+	# is a folder now (docs/HOUSE-PACK.md), and a house that ships its own voice
+	# should speak in it: a pack's "banter" block lands here beside the nine.
+	# A pack may also OVERRIDE a shipped house's pool by declaring the same id,
+	# which is how a translation or a re-write ships without touching this file.
+	var from_packs: Dictionary = HouseRegistry.all_banter_pools()
+	for hid in from_packs:
+		_pools[hid] = from_packs[hid]
 
 
 ## Force a re-read of banter_lines.json (tests / hot-reload).

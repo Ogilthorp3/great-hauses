@@ -153,7 +153,11 @@ func _test_duel_restore() -> void:
 	check("ctx: attacker resolved", "knight", ctx["ap"])
 	check("ctx: victim house resolved", "House Ember", ctx["vh"])
 	# Canonical HouseRegistry resolution (id / display name / archetype)
-	if FileAccess.file_exists("res://src/houses/houses.json"):
+	# Ask the ROSTER, not a file path. This used to test for
+	# res://src/houses/houses.json; houses are discovered house PACKS now
+	# (docs/HOUSE-PACK.md), and a guard naming a file that no longer exists
+	# would have quietly skipped these three checks forever.
+	if HouseRegistry.has_house("winterfang"):
 		check("canon: id resolves", "House Winterfang", d.resolve_house_name("winterfang"))
 		check("canon: archetype resolves", "House Winterfang", d.resolve_house_name("wolf"))
 		var mctx := d.duel_context(a, v,

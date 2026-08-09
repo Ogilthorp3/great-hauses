@@ -41,10 +41,10 @@ signal cinematic_finished(kind: String)
 signal victory_panel_requested(winning_house: String)
 
 const LINES_PATH := "res://src/cinematics/kill_lines.json"
-## Canonical nine-house registry (HouseRegistry module). When present, house
-## identity passed via meta ("winterfang", "House Winterfang", or an
-## archetype like "wolf") resolves to the registry's names/mottos/colors.
-const HOUSES_REGISTRY_PATH := "res://src/houses/houses.json"
+## House identity passed via meta ("winterfang", "House Winterfang", or an
+## archetype like "wolf") resolves against the HouseRegistry roster — see
+## _load_canonical_houses, which reads the roster rather than a data file
+## since houses became discovered PACKS (docs/HOUSE-PACK.md).
 ## Index-aligned with PieceView.Type and PieceView.House.
 const PIECE_NAMES: Array[String] = ["pawn", "rook", "knight", "bishop", "queen", "king"]
 const HOUSE_KEYS: Array[String] = ["FROST", "EMBER"]
@@ -1197,18 +1197,21 @@ func _load_lines() -> void:
 	_load_canonical_houses()
 
 
-## Merge the HouseRegistry nine-house roster (if shipped) so meta-passed
-## house ids/names/archetypes resolve to the canonical display identity.
+## Merge the HouseRegistry roster so meta-passed house ids/names/archetypes
+## resolve to the canonical display identity.
+##
+## IT ASKS THE ROSTER NOW, NOT A FILE (house-pack pass, 2026-08-09). This used
+## to FileAccess-read res://src/houses/houses.json directly. Houses are
+## discovered house PACKS since then — one folder each, and a player may add
+## more (docs/HOUSE-PACK.md) — so that path stopped existing and _canon went
+## empty, which turns the checkmate caption from "House Winterfang takes the
+## throne" into "winterfang takes the throne". Reading the roster instead fixes
+## that AND gives a dropped-in house its proper name in the cinematic for free.
 func _load_canonical_houses() -> void:
 	_canon.clear()
-	var f := FileAccess.open(HOUSES_REGISTRY_PATH, FileAccess.READ)
-	if f == null:
-		return   # registry not present — the local houses table covers it
-	var data = JSON.parse_string(f.get_as_text())
-	if typeof(data) != TYPE_DICTIONARY:
-		return
-	for h in data.get("houses", []):
-		if typeof(h) != TYPE_DICTIONARY:
+	for hid in HouseRegistry.house_ids():
+		var h: Dictionary = HouseRegistry.get_house(hid)
+		if h.is_empty():
 			continue
 		var colors: Dictionary = h.get("colors", {})
 		var info := {

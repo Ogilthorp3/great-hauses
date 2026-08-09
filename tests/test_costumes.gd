@@ -345,7 +345,15 @@ func _test_pawn_helms() -> void:
 				absf(float(preview.measured_height(pv))
 						- float(assets.piece_height(T_PAWN))) < 0.01)
 		pv.free()
-	check("helm: nine houses, nine distinct helm assets", 9,
+	# One helm per house, never a shared one — asserted against the ROSTER, not
+	# against the literal 9. Houses are discovered now (docs/HOUSE-PACK.md): the
+	# nine ship, and a player may drop more into user://houses/. The number 9
+	# used to be written here, which meant installing a house someone else wrote
+	# turned this suite red for a reason that had nothing to do with that house.
+	# With the shipped nine and nothing installed this is the same check it
+	# always was.
+	check("helm: every house has its own helm asset, no sharing",
+			registry.house_ids().size(),
 			scenes.values().size() - _dupes(scenes.values()))
 	# The Drowned Legion fields the pre-charred twin — same kraken geometry,
 	# iron and rim baked black, mirroring its charred charger.

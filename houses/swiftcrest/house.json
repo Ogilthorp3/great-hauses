@@ -1,0 +1,23 @@
+{
+  "format": 1,
+  "id": "swiftcrest",
+  "name": "House Swiftcrest",
+  "archetype": "falcon",
+  "seat": "Skyloft",
+  "motto": "Honor rides the high wind.",
+  "colors": {
+    "primary": "#7fb3d9",
+    "secondary": "#f2f6f9",
+    "accent": "#4f86ad"
+  },
+  "tints": {
+    "piece": "#6fc2c9",
+    "tower": "#5aa3ab",
+    "kit": "#37b0c8",
+    "saturation": 0.25
+  },
+  "coat": "bay",
+  "sigil": "res://assets/sigils/swiftcrest.png",
+  "crest": "res://assets/custom-props/crests/crest_swiftcrest.glb",
+  "pawn_helm": "res://assets/custom-props/pawn-helms/pawn_helm_swiftcrest.glb"
+}

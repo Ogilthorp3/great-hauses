@@ -1,0 +1,126 @@
+{
+  "_readme": [
+    "COPY THIS FOLDER, RENAME IT, EDIT THIS FILE. That is a house.",
+    "",
+    "  1. cp -R houses/_template  <somewhere>/mynewhouse",
+    "  2. change \"id\" to mynewhouse (lowercase, unique — it is how everything",
+    "     refers to this house, including your own material names below)",
+    "  3. put the folder in user://houses/ — on macOS:",
+    "     ~/Library/Application Support/Godot/app_userdata/Great Houses/houses/",
+    "  4. check it:  Godot --headless -s res://tools/validate_house_pack.gd -- <dir>",
+    "  5. start the game. Your banner is in the Hall.",
+    "",
+    "Every field below except \"id\" is optional and degrades to a documented",
+    "default with a warning. The full guide, and the reasons behind the two",
+    "hard rules (the natural coat, and material roles): docs/HOUSE-PACK.md",
+    "",
+    "JSON has no comments, so the notes live in these \"_\" keys. The loader",
+    "ignores them; you can delete them."
+  ],
+
+  "format": 1,
+  "id": "yourhouse",
+  "name": "House Yourhouse",
+
+  "_archetype": [
+    "Picks the VOICE your house taunts in (wolf, lion, stag, dragon, kraken,",
+    "rose, sun, falcon, trout, raven — or your own word, which falls back to a",
+    "generic proud-and-dangerous voice), and the mark tools/gen_sigils.gd draws",
+    "if you let it draw one."
+  ],
+  "archetype": "wolf",
+  "seat": "Yourseat",
+  "motto": "Say something they will remember.",
+
+  "_colors": [
+    "Your heraldry. primary is the banner field, secondary and accent its",
+    "charges. They are also the ONLY colours your kit is allowed to wear —",
+    "the role gate checks every dressed surface against these four."
+  ],
+  "colors": {
+    "primary": "#3f2436",
+    "secondary": "#e6e2d8",
+    "accent": "#e39ac0"
+  },
+
+  "_tints": [
+    "kit is THE JERSEY — the one saturated colour your tabards, cloaks, shield",
+    "faces, caparison, helm and crest are painted in. It can afford to be loud,",
+    "because since the material-role pass it is NOT painted on steel, leather,",
+    "skin, bone or the horse. piece and tower are the faint whisper natural",
+    "surfaces take so an army still hangs together; leave them out and they are",
+    "derived from your jersey."
+  ],
+  "tints": {
+    "kit": "#b8397f",
+    "piece": "#a86088",
+    "tower": "#8d4e70"
+  },
+
+  "_coat": [
+    "THE HARD RULE. Your horse is a horse: bay, dark_bay, chestnut,",
+    "liver_chestnut, black, white_grey, dapple_grey, drowned_grey, dun.",
+    "Pick one that stands off your jersey — a mount's house identity is worn on",
+    "its caparison, not grown on the animal. (You may also declare your own",
+    "\"coat_palette\", but every colour in it must still be a colour a horse",
+    "comes in: near-colourless, or a warm brown.)"
+  ],
+  "coat": "dapple_grey",
+
+  "_art": [
+    "Paths are relative to this folder (or absolute res:// / user://).",
+    "sigil      256x256 PNG with transparency — your shield. No sigil and the",
+    "           Hall hangs a flat primary-colour shield instead.",
+    "           Godot --headless -s res://tools/gen_sigils.gd -- --pack <dir>",
+    "           will draw you one from the fields above.",
+    "pawn_helm  the footmen's half-helm. Name its two surfaces pawnhelm_iron",
+    "           (the dome) and pawnhelm_accent (rim + motif) and the game paints",
+    "           them for you. Keep it small: it WRAPS the skull.",
+    "crest      the knights'/queens'/kings' crest. Name the MESH NODE Crest_*",
+    "           and it takes the jersey. This one TOWERS over the head.",
+    "Both are ordinary .glb files — they do not need importing.",
+    "houses/_examples/ravenmark/make_props.gd builds a working pair of both in",
+    "~200 lines of GDScript if you have no modelling tool."
+  ],
+  "sigil": "sigil.png",
+
+  "_materials": [
+    "THE OTHER HARD RULE, and the reason this format exists.",
+    "",
+    "The game paints your house colour on KIT and on nothing else. Steel,",
+    "leather, wood, stone, skin, bone and the horse's coat are NATURAL and keep",
+    "their own colours; a crown is REGALIA and stays metal; a sigil or banner is",
+    "HERALDRY and carries its own artwork. Four rounds of art work went into",
+    "that rule, and a pack cannot undo it: you may only declare surfaces whose",
+    "names begin with \"<your id>_\", and a surface whose own name says steel,",
+    "leather, bone, hide or coat may not be declared kit.",
+    "",
+    "Anything your models add BEYOND the contract names above must be declared",
+    "here, or the engine will refuse to paint it and the role gate will fail:",
+    "",
+    "  \"materials\": {",
+    "    \"yourhouse_plume\":    \"kit\",",
+    "    \"yourhouse_beak\":     \"natural:bone\",",
+    "    \"yourhouse_pauldron\": \"natural:steel\",",
+    "    \"yourhouse_strap\":    \"natural:leather\"",
+    "  }",
+    "",
+    "roles:  kit · natural:<stuff> · regalia · heraldry · effect",
+    "stuffs: steel leather wood stone skin bone coat glow atlas none"
+  ],
+
+  "_extras": [
+    "Optional, all of them:",
+    "  \"army\":   { \"pawn\": \"minion.glb\", ... } to field your own cast",
+    "            (types: pawn knight bishop queen king — there is no rook, the",
+    "            rook is a watchtower flying your banner). If you override the",
+    "            army you must declare at least one natural: a soldier made",
+    "            entirely of house colour is the monochrome army this whole",
+    "            system exists to end.",
+    "  \"banter\": { \"game_start\": [ 8 lines ], ... } — your rival's taunts.",
+    "            Beats: game_start player_captured rival_captured check_given",
+    "            check_received game_end. <=90 characters, {piece} substitutes.",
+    "  \"music\":  \"march.ogg\" — your house's own theme.",
+    "See houses/_examples/ravenmark/house.json for all three, filled in."
+  ]
+}

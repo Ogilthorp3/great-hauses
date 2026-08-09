@@ -55,12 +55,28 @@ static func create(player_house_id: String, rival_ids: Array = [],
 	return t
 
 
-## The other 8 houses in HouseRegistry file order (= seed order).
+## The bracket is an eight-rival ladder — play-in, QF, SF, final.
+const BRACKET_RIVALS := 8
+
+
+## The other houses in HouseRegistry order (= seed order), capped at the eight
+## the bracket holds.
+##
+## THE CAP IS NOT COSMETIC (house-pack pass, 2026-08-09). Houses are DISCOVERED
+## now — nine ship, and a player may drop more into user://houses/ — so "every
+## house that is not mine" stopped being a synonym for "eight". With ten houses
+## installed this returned nine, `create` refused the count, and picking
+## "Begin Tournament" silently produced no bracket at all: the one way an
+## installed pack could take a game mode down with it. The seed ORDER is
+## unchanged (shipped houses first, in index order, then installed ones
+## alphabetically), so a nine-house roster seeds exactly as it always did.
 static func seeded_rivals(player_house_id: String) -> Array[String]:
 	var out: Array[String] = []
 	for id in HouseRegistry.house_ids():
 		if id != player_house_id:
 			out.append(id)
+	if out.size() > BRACKET_RIVALS:
+		out.resize(BRACKET_RIVALS)
 	return out
 
 

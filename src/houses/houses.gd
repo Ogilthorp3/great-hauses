@@ -1,12 +1,27 @@
 class_name HouseRegistry
 extends RefCounted
-## Loader for the Nine Great Houses (src/houses/houses.json).
+## The roster of Great Houses — discovered from HOUSE PACKS, not hardcoded.
+##
+## A house is a FOLDER holding a house.json manifest (see HousePack and
+## docs/HOUSE-PACK.md). This registry finds them in two places:
+##
+##   res://houses/    the nine that ship with the game, in index.json order
+##                    (that order IS the tournament seed order)
+##   user://houses/   anything a player dropped in, alphabetically — a DLC
+##                    house needs no rebuild, no recompile and no patch
 ##
 ## Static registry — no autoload needed; any script can call
-## `HouseRegistry.get_house("winterfang")`. Data is loaded once from JSON and
-## cached in a static Dictionary (plain data only, no Resources, so the
-## static-var-holding-Resources shutdown crash documented in piece_assets.gd
-## does not apply here).
+## `HouseRegistry.get_house("winterfang")`. Data is loaded once and cached in a
+## static Dictionary (PLAIN DATA ONLY, no Resources: script statics holding
+## Resources crash Godot during engine shutdown — the scar documented in
+## piece_assets.gd. Sigils and models are therefore returned as PATHS, and the
+## PieceAssets autoload owns the loaded-resource caches).
+##
+## EVERY MANIFEST IS VALIDATED ON LOAD and one bad pack never takes down the
+## others: a pack with errors is skipped, its reasons printed once, and the
+## rest of the roster loads. `load_report()` hands the whole record back for
+## tests, the validator tool and anything that wants to show a modder what
+## happened.
 ##
 ## Piece colouring: `get_house_tint(house, "kit")` is the house's JERSEY — the
 ## one saturated colour its kit is painted in (PieceAssets.kit_material);
@@ -15,43 +30,138 @@ extends RefCounted
 ## the horse's natural coat. Which surface gets which is decided by
 ## PieceAssets.MATERIAL_ROLES, never here.
 
-const DATA_PATH := "res://src/houses/houses.json"
+## Where the shipped houses live, and where a dropped-in one goes.
+const BUILTIN_DIR := "res://houses"
+const USER_DIR := "user://houses"
+## Names the shipped packs load in — the tournament seed order. Directories not
+## listed here are still discovered (a house you are working on), appended in
+## alphabetical order after the ones that are.
+const INDEX_PATH := "res://houses/index.json"
 
 static var _by_id: Dictionary = {}     # id -> house Dictionary
-static var _order: Array[String] = []  # ids in file order (= seed order)
+static var _order: Array[String] = []  # ids in load order (= seed order)
+static var _builtin: Array[String] = []
+static var _installed: Array[String] = []
+static var _reports: Array = []        # every pack's load report, good or bad
+static var _loaded := false
 
 
 static func _ensure_loaded() -> void:
-	if not _by_id.is_empty():
+	if _loaded:
 		return
-	var f := FileAccess.open(DATA_PATH, FileAccess.READ)
-	if f == null:
-		push_error("HouseRegistry: cannot open %s" % DATA_PATH)
+	_loaded = true
+	for dir_path in _pack_dirs(BUILTIN_DIR, _index_order()):
+		_ingest(HousePack.load_from_dir(dir_path, "builtin"))
+	for dir_path in _pack_dirs(USER_DIR, []):
+		_ingest(HousePack.load_from_dir(dir_path, "installed"))
+	if _by_id.is_empty():
+		push_error(("HouseRegistry: no house packs found. The nine ship in %s; "
+				+ "a house you add goes in %s/<id>/house.json")
+				% [BUILTIN_DIR, USER_DIR])
+
+
+## Fold one pack report into the roster, or refuse it out loud.
+static func _ingest(rep: Dictionary) -> void:
+	_reports.append(rep)
+	var id := str(rep["id"])
+	var where := str(rep["dir"])
+	if not rep["ok"]:
+		# A refused pack is a paragraph a modder can act on, printed ONCE, and
+		# it costs the rest of the roster nothing.
+		push_warning("house pack refused: %s" % where)
+		print("HOUSE PACK REFUSED  %s" % where)
+		for e in rep["errors"]:
+			print("    error: %s" % str(e))
 		return
-	var parsed: Variant = JSON.parse_string(f.get_as_text())
-	if parsed == null or not parsed is Dictionary or not parsed.has("houses"):
-		push_error("HouseRegistry: %s is not a valid houses file" % DATA_PATH)
+	if _by_id.has(id):
+		var clash := str(_by_id[id].get("pack_dir", "?"))
+		rep["ok"] = false
+		(rep["errors"] as Array).append(("house id '%s' is already provided by %s "
+				+ "— two packs cannot claim the same id; rename one") % [id, clash])
+		print("HOUSE PACK REFUSED  %s\n    error: %s" % [where, rep["errors"][-1]])
 		return
-	for h: Dictionary in parsed["houses"]:
-		var id := str(h.get("id", ""))
-		if id.is_empty():
-			push_error("HouseRegistry: house entry without id skipped")
+	for w in rep["warnings"]:
+		print("house pack %-14s warning: %s" % [id, str(w)])
+	_by_id[id] = rep["house"]
+	_order.append(id)
+	if str(rep["source"]) == "builtin":
+		_builtin.append(id)
+	else:
+		_installed.append(id)
+		print("HOUSE PACK LOADED   %s (%s) from %s"
+				% [str(rep["house"]["name"]), id, where])
+
+
+## Pack directories under `root`, `first` (index order) leading, then whatever
+## else is there alphabetically. Directories whose name starts with "_" are
+## ignored on purpose: that is where the TEMPLATE and the examples live.
+static func _pack_dirs(root: String, first: Array) -> Array[String]:
+	var out: Array[String] = []
+	var seen := {}
+	for name in first:
+		var p := root.path_join(str(name))
+		if FileAccess.file_exists(p.path_join(HousePack.MANIFEST_NAME)):
+			out.append(p)
+			seen[str(name)] = true
+	var dir := DirAccess.open(root)
+	if dir == null:
+		return out
+	var extra: Array[String] = []
+	for name in dir.get_directories():
+		if name.begins_with("_") or name.begins_with(".") or seen.has(name):
 			continue
-		_by_id[id] = h
-		_order.append(id)
+		if FileAccess.file_exists(root.path_join(name).path_join(HousePack.MANIFEST_NAME)):
+			extra.append(root.path_join(name))
+	extra.sort()
+	out.append_array(extra)
+	return out
 
 
-## Force a re-read of houses.json (tests / hot-reload).
+static func _index_order() -> Array:
+	var f := FileAccess.open(INDEX_PATH, FileAccess.READ)
+	if f == null:
+		return []
+	var parsed: Variant = JSON.parse_string(f.get_as_text())
+	if parsed is Dictionary and (parsed as Dictionary).get("order") is Array:
+		return (parsed as Dictionary)["order"]
+	return []
+
+
+## Force a re-scan of both pack directories (tests / a pack installed while the
+## game is running).
 static func reload() -> void:
 	_by_id.clear()
 	_order.clear()
+	_builtin.clear()
+	_installed.clear()
+	_reports.clear()
+	_loaded = false
 	_ensure_loaded()
 
 
-## All house ids in file order — this order is the tournament seed order.
+## All house ids in load order — this order is the tournament seed order.
 static func house_ids() -> Array[String]:
 	_ensure_loaded()
 	return _order.duplicate()
+
+
+## Just the houses that ship with the game.
+static func builtin_house_ids() -> Array[String]:
+	_ensure_loaded()
+	return _builtin.duplicate()
+
+
+## Just the houses a player dropped into user://houses/.
+static func installed_house_ids() -> Array[String]:
+	_ensure_loaded()
+	return _installed.duplicate()
+
+
+## Every pack's load report — {ok, id, dir, source, house, errors, warnings}.
+## Refused packs are in here too; that is the point.
+static func load_report() -> Array:
+	_ensure_loaded()
+	return _reports.duplicate()
 
 
 ## Full data Dictionary for a house id ({} if unknown).
@@ -85,8 +195,8 @@ static func get_colors(house) -> Dictionary:
 ##                  no longer painted on steel, skin, leather, bone or horse.
 ##   "tower"/"rook" the whisper the rook's masonry takes.
 ##   "piece"        (default) the whisper every other natural surface takes.
-## Houses written before the kit tint existed fall back to their piece tint, so
-## an incomplete houses.json degrades to the old look rather than to white.
+## A pack that declares no kit tint falls back to its piece tint, so an
+## incomplete manifest degrades to the old look rather than to white.
 static func get_house_tint(house, side_role: String = "piece") -> Color:
 	var h := _resolve(house)
 	if h.is_empty():
@@ -103,35 +213,112 @@ static func get_house_tint(house, side_role: String = "piece") -> Color:
 	return Color.html(tints[key])
 
 
-## The house's horse COAT name (PieceAssets.COAT_PALETTES) — bay, chestnut,
-## black, white_grey, dun and their variants. Never a house hue: a mount's
-## house identity is worn on the caparison, not grown on the animal.
+## The house's horse COAT name — bay, chestnut, black, white_grey, dun and
+## their variants (src/houses/coats.json). Never a house hue: a mount's house
+## identity is worn on the caparison, not grown on the animal.
 static func get_house_coat(house) -> String:
 	var h := _resolve(house)
-	return str(h.get("coat", "bay"))
+	return str(h.get("coat", HousePack.coat_default()))
+
+
+## The coat palette a house's mount wears, as {material name -> Color}. A pack
+## may name one of the natural coats or supply its own (validated against the
+## same law either way — see HousePack.is_natural_color).
+static func get_coat_palette(house) -> Dictionary:
+	var h := _resolve(house)
+	var custom: Dictionary = h.get("coat_palette", {})
+	var raw: Dictionary = custom if not custom.is_empty() \
+			else HousePack.natural_coats().get(get_house_coat(h), {})
+	if raw.is_empty():
+		return {}
+	var out := {}
+	for key in raw:
+		out[key] = Color.html(str(raw[key]))
+	return out
 
 
 ## Legacy saturation argument (the pre-role multiply pipeline). Kept because
-## houses.json still carries the field; nothing in the costume path reads it.
+## manifests still carry the field; nothing in the costume path reads it.
 static func get_tint_saturation(house) -> float:
 	var h := _resolve(house)
 	if h.is_empty():
-		return 0.25
-	return float(h["tints"].get("saturation", 0.25))
+		return HousePack.DEFAULT_TINT_SATURATION
+	return float(h["tints"].get("saturation", HousePack.DEFAULT_TINT_SATURATION))
 
 
-## res:// path of the house's generated sigil PNG.
+## Path of the house's sigil image ("" when the pack ships none).
 static func sigil_path(house) -> String:
 	var h := _resolve(house)
 	return str(h.get("sigil", ""))
 
 
+## Path of the house's helm-crest model, worn by knight/queen/king ("" = none).
+static func crest_path(house) -> String:
+	var h := _resolve(house)
+	return str(h.get("crest", ""))
+
+
+## Path of the house's PAWN half-helm model ("" = none).
+static func pawn_helm_path(house) -> String:
+	var h := _resolve(house)
+	return str(h.get("pawn_helm", ""))
+
+
+## Army model overrides, {piece type int -> path}. {} = the shipped cast.
+static func army_overrides(house) -> Dictionary:
+	var h := _resolve(house)
+	return h.get("army", {})
+
+
+## The pack's own MATERIAL ROLE declarations, {surface name -> {role, stuff}}
+## as validated strings. PieceAssets folds these into its classification table.
+static func material_roles(house) -> Dictionary:
+	var h := _resolve(house)
+	return h.get("materials", {})
+
+
+## Every installed pack's role declarations, merged. Surface names are prefixed
+## with the house id by construction, so this merge cannot collide.
+static func all_material_roles() -> Dictionary:
+	_ensure_loaded()
+	var out := {}
+	for id in _order:
+		for surface in (_by_id[id].get("materials", {}) as Dictionary):
+			out[surface] = (_by_id[id]["materials"] as Dictionary)[surface]
+	return out
+
+
+## The taunt pool a pack ships with, {beat -> [lines]} ({} = none; the house
+## then uses whatever src/banter/banter_lines.json holds for it).
+static func banter_pool(house) -> Dictionary:
+	var h := _resolve(house)
+	return h.get("banter", {})
+
+
+## Every pack-supplied taunt pool, {house id -> {beat -> [lines]}}.
+static func all_banter_pools() -> Dictionary:
+	_ensure_loaded()
+	var out := {}
+	for id in _order:
+		var pool: Dictionary = _by_id[id].get("banter", {})
+		if not pool.is_empty():
+			out[id] = pool
+	return out
+
+
+## Path of the house's own music ("" = the shipped playlist).
+static func music_path(house) -> String:
+	var h := _resolve(house)
+	return str(h.get("music", ""))
+
+
 ## The sigil as a Texture2D; falls back to a flat primary-color texture if the
-## generated PNG is missing (e.g. before tools/gen_sigils.gd has run).
+## pack ships none (or its file cannot be read). Dropped-in PNGs are decoded at
+## runtime — they never went through the editor's import pipeline.
 static func load_sigil(house) -> Texture2D:
-	var path := sigil_path(house)
-	if not path.is_empty() and ResourceLoader.exists(path):
-		return load(path)
+	var tex := HousePack.load_texture(sigil_path(house))
+	if tex != null:
+		return tex
 	var img := Image.create(64, 64, false, Image.FORMAT_RGBA8)
 	img.fill(get_colors(house)["primary"])
 	return ImageTexture.create_from_image(img)

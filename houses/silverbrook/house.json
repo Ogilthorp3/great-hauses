@@ -1,0 +1,23 @@
+{
+  "format": 1,
+  "id": "silverbrook",
+  "name": "House Silverbrook",
+  "archetype": "trout",
+  "seat": "Rivergate",
+  "motto": "The river binds us all.",
+  "colors": {
+    "primary": "#2c4d7c",
+    "secondary": "#c9d3dc",
+    "accent": "#8fb3d9"
+  },
+  "tints": {
+    "piece": "#6e8fc4",
+    "tower": "#5d7aa9",
+    "kit": "#3560ad",
+    "saturation": 0.25
+  },
+  "coat": "dark_bay",
+  "sigil": "res://assets/sigils/silverbrook.png",
+  "crest": "res://assets/custom-props/crests/crest_silverbrook.glb",
+  "pawn_helm": "res://assets/custom-props/pawn-helms/pawn_helm_silverbrook.glb"
+}

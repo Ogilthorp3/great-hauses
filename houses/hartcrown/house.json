@@ -1,0 +1,23 @@
+{
+  "format": 1,
+  "id": "hartcrown",
+  "name": "House Hartcrown",
+  "archetype": "stag",
+  "seat": "Stormrest",
+  "motto": "The storm answers to us.",
+  "colors": {
+    "primary": "#1d1a17",
+    "secondary": "#cfa63b",
+    "accent": "#e8c866"
+  },
+  "tints": {
+    "piece": "#8f5218",
+    "tower": "#784514",
+    "kit": "#7a3410",
+    "saturation": 0.25
+  },
+  "coat": "dapple_grey",
+  "sigil": "res://assets/sigils/hartcrown.png",
+  "crest": "res://assets/custom-props/crests/crest_hartcrown.glb",
+  "pawn_helm": "res://assets/custom-props/pawn-helms/pawn_helm_hartcrown.glb"
+}

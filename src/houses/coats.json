@@ -1,0 +1,54 @@
+{
+	"_readme": [
+		"THE NATURAL COATS — the only colours a horse in this game is allowed to be.",
+		"",
+		"'Horse should be brown, black or white, something majestic.' (the owner,",
+		"2026-08-09, looking at nine armies riding nine horses dyed in nine house",
+		"colours). A blue horse is a bug, not heraldry: a mount's house identity",
+		"lives in its CAPARISON, and the animal under that cloth is an animal.",
+		"",
+		"So this table is a CLOSED LIST, and it is the list a house pack's `coat`",
+		"field must name (docs/HOUSE-PACK.md). A pack may also declare its own",
+		"palette inline, but every colour in it is held to the same law the role",
+		"gate holds a rendered coat to: saturation <= 0.20, OR hue inside the",
+		"warm-brown band 5-58 degrees. Nothing else is a horse.",
+		"",
+		"Each palette names the horse's own material set (tools/props/convert_horse.py):",
+		"Main is the hide, Main_Light the blaze/socks, Main_Dark the ears and",
+		"shading, Muzzle the nose, Hair the mane and tail, Hooves the feet. The",
+		"MANE is deliberately pushed off the hide's own value in every coat — a",
+		"real chestnut's mane is the same colour as its body, and rendered at",
+		"chess-piece scale that is a horse with no mane and no tail."
+	],
+	"version": 1,
+	"default": "bay",
+	"coats": {
+		"bay": {
+			"Main": "#6b4526", "Main_Light": "#8a5c33", "Main_Dark": "#4a2f19",
+			"Muzzle": "#3a2515", "Hair": "#211a14", "Hooves": "#2b2724"},
+		"dark_bay": {
+			"Main": "#4a3320", "Main_Light": "#63452a", "Main_Dark": "#33220f",
+			"Muzzle": "#2a1d12", "Hair": "#1a1512", "Hooves": "#262320"},
+		"chestnut": {
+			"Main": "#8f4a22", "Main_Light": "#b3663a", "Main_Dark": "#6b3517",
+			"Muzzle": "#5a2d15", "Hair": "#d0a877", "Hooves": "#40342c"},
+		"liver_chestnut": {
+			"Main": "#6b3218", "Main_Light": "#8a4626", "Main_Dark": "#4d2210",
+			"Muzzle": "#3d1c0e", "Hair": "#3a1a0c", "Hooves": "#38302a"},
+		"black": {
+			"Main": "#232120", "Main_Light": "#3a3634", "Main_Dark": "#171514",
+			"Muzzle": "#141312", "Hair": "#121110", "Hooves": "#262422"},
+		"white_grey": {
+			"Main": "#b8b4ac", "Main_Light": "#d0ccc4", "Main_Dark": "#9a968e",
+			"Muzzle": "#837f78", "Hair": "#8a867e", "Hooves": "#55514b"},
+		"dapple_grey": {
+			"Main": "#8e8d88", "Main_Light": "#ada9a2", "Main_Dark": "#6a6864",
+			"Muzzle": "#575551", "Hair": "#4e4c49", "Hooves": "#3d3a36"},
+		"drowned_grey": {
+			"Main": "#4a4f4c", "Main_Light": "#626765", "Main_Dark": "#363a38",
+			"Muzzle": "#2b2f2d", "Hair": "#242827", "Hooves": "#222523"},
+		"dun": {
+			"Main": "#b0956a", "Main_Light": "#cbb289", "Main_Dark": "#8a7350",
+			"Muzzle": "#6e5c40", "Hair": "#3a3126", "Hooves": "#3a352e"}
+	}
+}

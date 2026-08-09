@@ -1,0 +1,23 @@
+{
+  "format": 1,
+  "id": "duskfire",
+  "name": "House Duskfire",
+  "archetype": "sun",
+  "seat": "Sunspire",
+  "motto": "The sun kneels for no one.",
+  "colors": {
+    "primary": "#c96a1e",
+    "secondary": "#a3282a",
+    "accent": "#f0a03c"
+  },
+  "tints": {
+    "piece": "#e07b2f",
+    "tower": "#c2691f",
+    "kit": "#e85f14",
+    "saturation": 0.25
+  },
+  "coat": "liver_chestnut",
+  "sigil": "res://assets/sigils/duskfire.png",
+  "crest": "res://assets/custom-props/crests/crest_duskfire.glb",
+  "pawn_helm": "res://assets/custom-props/pawn-helms/pawn_helm_duskfire.glb"
+}

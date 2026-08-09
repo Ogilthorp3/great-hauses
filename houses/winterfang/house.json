@@ -1,0 +1,23 @@
+{
+  "format": 1,
+  "id": "winterfang",
+  "name": "House Winterfang",
+  "archetype": "wolf",
+  "seat": "Frosthollow",
+  "motto": "The wolf remembers.",
+  "colors": {
+    "primary": "#8d99a6",
+    "secondary": "#eef2f5",
+    "accent": "#7fb0d4"
+  },
+  "tints": {
+    "piece": "#9fb4cc",
+    "tower": "#8ca1b8",
+    "kit": "#6f9fc9",
+    "saturation": 0.25
+  },
+  "coat": "white_grey",
+  "sigil": "res://assets/sigils/winterfang.png",
+  "crest": "res://assets/custom-props/crests/crest_winterfang.glb",
+  "pawn_helm": "res://assets/custom-props/pawn-helms/pawn_helm_winterfang.glb"
+}

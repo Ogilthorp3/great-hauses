@@ -1,0 +1,23 @@
+{
+  "format": 1,
+  "id": "goldclaw",
+  "name": "House Goldclaw",
+  "archetype": "lion",
+  "seat": "Gildenspire",
+  "motto": "A lion settles every account.",
+  "colors": {
+    "primary": "#8e1f2c",
+    "secondary": "#d9a441",
+    "accent": "#f0c96a"
+  },
+  "tints": {
+    "piece": "#d4a43c",
+    "tower": "#b8862f",
+    "kit": "#f0cc2a",
+    "saturation": 0.25
+  },
+  "coat": "chestnut",
+  "sigil": "res://assets/sigils/goldclaw.png",
+  "crest": "res://assets/custom-props/crests/crest_goldclaw.glb",
+  "pawn_helm": "res://assets/custom-props/pawn-helms/pawn_helm_goldclaw.glb"
+}

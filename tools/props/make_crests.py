@@ -37,8 +37,10 @@ SEED = 9917
 
 argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 OUT_DIR = argv[0] if argv else "."
-HOUSES_JSON = argv[1] if len(argv) > 1 else os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "..", "..", "src", "houses", "houses.json")
+# Houses are HOUSE PACKS now (docs/HOUSE-PACK.md): one folder each under
+# houses/, holding a house.json. This used to read a single src/houses/houses.json.
+HOUSES_DIR = argv[1] if len(argv) > 1 else os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "..", "houses")
 
 TRI_BUDGET = 600
 
@@ -52,8 +54,24 @@ def hex_to_linear(h):
     return tuple(srgb_to_linear(int(h[i:i + 2], 16) / 255.0) for i in (0, 2, 4))
 
 
-with open(HOUSES_JSON) as f:
-    HOUSES = {h["id"]: h for h in json.load(f)["houses"]}
+def _load_house_packs(root):
+    """Every houses/<id>/house.json, keyed by id. Folders starting with "_"
+    are the template and the examples, and are skipped exactly as the game's
+    discovery skips them."""
+    out = {}
+    for name in sorted(os.listdir(root)):
+        if name.startswith("_") or name.startswith("."):
+            continue
+        manifest = os.path.join(root, name, "house.json")
+        if not os.path.isfile(manifest):
+            continue
+        with open(manifest) as fh:
+            house = json.load(fh)
+        out[house["id"]] = house
+    return out
+
+
+HOUSES = _load_house_packs(HOUSES_DIR)
 
 
 def make_material(name, base, metallic=0.0, rough=0.8, emission=None, emission_strength=0.0):

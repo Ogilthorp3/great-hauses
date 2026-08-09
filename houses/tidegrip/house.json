@@ -1,0 +1,30 @@
+{
+  "format": 1,
+  "id": "tidegrip",
+  "name": "House Tidegrip",
+  "archetype": "kraken",
+  "seat": "Brinehold",
+  "motto": "The tide takes what it pleases.",
+  "colors": {
+    "primary": "#4c6357",
+    "secondary": "#14181a",
+    "accent": "#7d9c8d"
+  },
+  "tints": {
+    "piece": "#6f8a7d",
+    "tower": "#5d7568",
+    "kit": "#3f8a6d",
+    "saturation": 0.25
+  },
+  "coat": "drowned_grey",
+  "sigil": "res://assets/sigils/tidegrip.png",
+  "crest": "res://assets/custom-props/crests/crest_tidegrip.glb",
+  "pawn_helm": "res://assets/custom-props/pawn-helms/pawn_helm_tidegrip_charred.glb",
+  "army": {
+    "pawn": "res://assets/kaykit-skeletons/Skeleton_Minion.glb",
+    "knight": "res://assets/kaykit-skeletons/Skeleton_Warrior.glb",
+    "bishop": "res://assets/kaykit-skeletons/Skeleton_Mage.glb",
+    "queen": "res://assets/kaykit-skeletons/Skeleton_Rogue.glb",
+    "king": "res://assets/kaykit-skeletons/Skeleton_Warrior.glb"
+  }
+}

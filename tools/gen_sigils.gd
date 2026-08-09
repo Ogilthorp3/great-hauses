@@ -9,11 +9,17 @@ extends SceneTree
 ##   /Applications/Godot.app/Contents/MacOS/Godot --path . --headless \
 ##       -s res://tools/gen_sigils.gd
 ## Exit code 0 = every sigil written, 1 = any failure.
-## Re-run + `--import` + commit the PNGs whenever houses.json colors change.
+## Re-run + `--import` + commit the PNGs whenever a house's colors change.
+##
+## MODDERS: it also draws a sigil for ONE house pack, straight into the pack
+## folder, so a new house has heraldry before it has an artist:
+##   ... -s res://tools/gen_sigils.gd -- --pack ~/houses/ravenmark
+## The mark is picked by the pack's `archetype`; an archetype this generator
+## does not know falls back to the wolf's bars, which is a fine placeholder and
+## an obvious one. See docs/HOUSE-PACK.md.
 
 const SIZE := 256
 const OUT_DIR := "res://assets/sigils"
-const HOUSES_JSON := "res://src/houses/houses.json"
 
 # Heater-shield silhouette: straight-sided box on top, a two-circle lens
 # tapering to the point below. Constants solved so the sides (x = ±0.78 at
@@ -25,9 +31,17 @@ const LENS_R := 0.9685
 
 
 func _initialize() -> void:
+	var args := OS.get_cmdline_user_args()
+	var pack_dir := ""
+	for i in args.size():
+		if str(args[i]) == "--pack" and i + 1 < args.size():
+			pack_dir = str(args[i + 1])
+	if not pack_dir.is_empty():
+		quit(_render_one_pack(pack_dir))
+		return
 	var houses := _load_houses()
 	if houses.is_empty():
-		push_error("gen_sigils: no houses loaded from %s" % HOUSES_JSON)
+		push_error("gen_sigils: no house packs found under %s" % HouseRegistry.BUILTIN_DIR)
 		quit(1)
 		return
 	var abs_dir := ProjectSettings.globalize_path(OUT_DIR)
@@ -47,14 +61,36 @@ func _initialize() -> void:
 	quit(1 if failures > 0 else 0)
 
 
+## The shipped houses, straight out of their packs.
 func _load_houses() -> Array:
-	var f := FileAccess.open(HOUSES_JSON, FileAccess.READ)
-	if f == null:
-		return []
-	var parsed: Variant = JSON.parse_string(f.get_as_text())
-	if parsed == null or not parsed is Dictionary:
-		return []
-	return parsed.get("houses", [])
+	var out: Array = []
+	for id in HouseRegistry.builtin_house_ids():
+		out.append(HouseRegistry.get_house(id))
+	return out
+
+
+## One pack folder -> <folder>/sigil.png. Takes the pack's OWN manifest, so a
+## modder can iterate on colours and re-draw without touching the game.
+func _render_one_pack(dir_path: String) -> int:
+	var rep: Dictionary = HousePack.load_from_dir(dir_path, "installed")
+	for e in rep["errors"]:
+		print("  error: %s" % str(e))
+	if str(rep["id"]).is_empty():
+		print("SIGIL FAIL  %s has no readable house.json" % dir_path)
+		return 1
+	var house: Dictionary = rep["house"]
+	var out_path := dir_path.path_join("sigil.png")
+	if not dir_path.begins_with("res://") and not dir_path.begins_with("user://"):
+		out_path = dir_path.rstrip("/") + "/sigil.png"
+	else:
+		out_path = ProjectSettings.globalize_path(out_path)
+	var err := _render_sigil(house).save_png(out_path)
+	if err != OK:
+		print("SIGIL FAIL  %s (save_png err=%d)" % [out_path, err])
+		return 1
+	print("SIGIL OK    %s (%s) -> %s" % [str(house["id"]), str(house["archetype"]), out_path])
+	print("            add  \"sigil\": \"sigil.png\"  to house.json if it is not there yet")
+	return 0
 
 
 # -- rendering --------------------------------------------------------------
@@ -214,8 +250,15 @@ func _house_layers(archetype: String, primary: Color, secondary: Color, accent: 
 			return _mark_falcon(secondary)
 		"trout":
 			return _mark_trout(secondary, primary)
-	push_error("gen_sigils: unknown archetype '%s'" % archetype)
-	return []
+		"raven":
+			return _mark_raven(secondary, accent)
+	# An archetype this generator has never heard of is a MODDER, not a bug: draw
+	# the wolf's rake so the pack has heraldry to look at, and say so once.
+	push_warning(("gen_sigils: no mark for archetype '%s' — drawing the wolf rake "
+			+ "as a placeholder. Add a _mark_%s() beside the others, or draw your "
+			+ "own sigil.png and point house.json at it")
+			% [archetype, archetype.to_snake_case()])
+	return _mark_wolf(secondary)
 
 
 ## Wolf — angular triple-claw chevron rake.
@@ -310,6 +353,40 @@ func _mark_sun(ink: Color, spear: Color) -> Array:
 		{"color": ink, "shapes": shapes},
 		{"color": spear, "shapes": spear_shapes},
 	]
+
+
+## Raven — a bird at rest, wings CLOSED and folded down the back, head turned
+## in profile with the beak to sinister. Deliberately unlike the falcon, which
+## is the same animal class and must not read as the same mark: the falcon
+## flies (wings swept UP and out, head to the chief, a diamond tail), the raven
+## perches. Silhouette does the telling — at board size these two are 40 px
+## apart and only their outline survives.
+func _mark_raven(ink: Color, eye: Color) -> Array:
+	var body: Array = [
+		# breast and back: a hunched body, shoulders standing higher than the
+		# head — the posture is the whole difference between a raven and a hawk
+		_poly([Vector2(-0.17, -0.30), Vector2(0.04, -0.42), Vector2(0.24, -0.10),
+			Vector2(0.22, 0.26), Vector2(0.00, 0.42), Vector2(-0.20, 0.10)]),
+		# the folded wing, laid over the flank, its tip reaching the tail
+		_poly([Vector2(0.02, -0.24), Vector2(0.24, -0.02), Vector2(0.18, 0.34),
+			Vector2(-0.04, 0.10)]),
+		# tail: the long squared-off corvid wedge, carried low
+		_poly([Vector2(0.06, 0.18), Vector2(0.26, 0.10), Vector2(0.50, 0.56),
+			Vector2(0.22, 0.52)]),
+		# neck, head and the heavy straight beak, all one silhouette
+		_poly([Vector2(-0.10, -0.28), Vector2(0.06, -0.40), Vector2(-0.04, -0.52),
+			Vector2(-0.20, -0.44)]),
+		_cir(-0.20, -0.50, 0.115),
+		_poly([Vector2(-0.27, -0.565), Vector2(-0.60, -0.45), Vector2(-0.26, -0.415)]),
+		# feet, and the bare branch they hold
+		_seg(-0.06, 0.40, -0.10, 0.56, 0.045),
+		_seg(0.10, 0.36, 0.10, 0.56, 0.045),
+		_seg(-0.56, 0.62, 0.56, 0.54, 0.05),
+		_seg(-0.30, 0.585, -0.40, 0.42, 0.035),
+	]
+	# ...and one bright eye, which is the whole reason a raven is unsettling.
+	return [{"color": ink, "shapes": body},
+		{"color": eye, "shapes": [_cir(-0.225, -0.515, 0.032)]}]
 
 
 ## Falcon — twin swept wings over a diamond tail, head to the chief.

@@ -1,0 +1,23 @@
+{
+  "format": 1,
+  "id": "thornvale",
+  "name": "House Thornvale",
+  "archetype": "rose",
+  "seat": "Bloomhall",
+  "motto": "Every rose keeps its thorns.",
+  "colors": {
+    "primary": "#2f5d3a",
+    "secondary": "#d3b04a",
+    "accent": "#8fbf6a"
+  },
+  "tints": {
+    "piece": "#79a04a",
+    "tower": "#648540",
+    "kit": "#4f9235",
+    "saturation": 0.25
+  },
+  "coat": "dun",
+  "sigil": "res://assets/sigils/thornvale.png",
+  "crest": "res://assets/custom-props/crests/crest_thornvale.glb",
+  "pawn_helm": "res://assets/custom-props/pawn-helms/pawn_helm_thornvale.glb"
+}
