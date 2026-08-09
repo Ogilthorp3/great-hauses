@@ -55,7 +55,7 @@ func _initialize() -> void:
 
 
 func _main() -> void:
-	print("=== Great Houses — costumes headless suite ===")
+	print("=== Great Hauses — costumes headless suite ===")
 	# Shim the PieceAssets autoload FIRST (see NOTE above), then load.
 	assets = (load("res://src/board/piece_assets.gd") as GDScript).new()
 	assets.name = "PieceAssets"
@@ -347,7 +347,7 @@ func _test_pawn_helms() -> void:
 		pv.free()
 	# One helm per house, never a shared one — asserted against the ROSTER, not
 	# against the literal 9. Houses are discovered now (docs/HOUSE-PACK.md): the
-	# nine ship, and a player may drop more into user://houses/. The number 9
+	# nine ship, and a player may drop more into user://hauses/. The number 9
 	# used to be written here, which meant installing a house someone else wrote
 	# turned this suite red for a reason that had nothing to do with that house.
 	# With the shipped nine and nothing installed this is the same check it

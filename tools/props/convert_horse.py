@@ -25,11 +25,11 @@ frozen standing pose (Idle frame 0) and PieceView drives idle-sway, walk-bob
 and the death collapse procedurally on the node — the exact pattern the
 banner-rook already uses (glide+bob, tilt-crumble), proven at this scale.
 
-WAR-TACK (original geometry, authored in the house art style):
+WAR-TACK (original geometry, authored in the haus art style):
   - "Saddle": chunky low-poly seat with pommel + cantle, leather brown.
   - "Caparison": two draped cloth panels down the flanks, UV-mapped 0..1
     per panel with v=0 at the TOP (Godot image convention) so the runtime
-    can drop PieceAssets.banner_texture(house_id) straight in — the house
+    can drop PieceAssets.banner_texture(house_id) straight in — the haus
     sigil reads on the horse's flank at distance.
 
 Node/mesh names are runtime API (piece_view.gd): Horse · Saddle · Caparison.
@@ -404,8 +404,8 @@ bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
 # answer is added ARMOUR that has plan-view area, on the two parts that a
 # top-down view otherwise loses:
 #
-#   CRINET   house cloth over the whole NECK, withers to poll. From above it
-#            paints the neck as a long house-coloured band reaching forward
+#   CRINET   haus cloth over the whole NECK, withers to poll. From above it
+#            paints the neck as a long haus-coloured band reaching forward
 #            out of the rider — the shape that says "there is an animal under
 #            this man" before any detail is legible.
 #   CHANFRON a face plate with a brow spike at the end of that band. Small,

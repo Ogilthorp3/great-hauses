@@ -1,20 +1,20 @@
 class_name HousePack
 extends RefCounted
-## ONE HOUSE, ONE FOLDER — the house-pack format and its validator.
+## ONE HAUS, ONE FOLDER — the haus-pack format and its validator.
 ##
-## A house is DATA, not code. Everything the game knows about a Great House
-## lives in one directory holding a `house.json` manifest and (optionally) the
-## house's own art:
+## A haus is DATA, not code. Everything the game knows about a Great Haus
+## lives in one directory holding a `haus.json` manifest and (optionally) the
+## haus's own art:
 ##
-##     houses/ravenmark/
-##       house.json          the manifest — this file's subject
+##     hauses/ravenmark/
+##       haus.json           the manifest — this file's subject
 ##       sigil.png           its heraldry
 ##       pawn_helm.glb       its footmen's half-helm      (optional)
 ##       crest.glb           its knights'/royals' crest   (optional)
 ##
 ## The game discovers packs in TWO places (HouseRegistry):
-##   res://houses/    the nine that ship with the game
-##   user://houses/   anything a player drops in — a DLC house needs NO rebuild
+##   res://hauses/    the nine that ship with the game
+##   user://hauses/   anything a player drops in — a DLC haus needs NO rebuild
 ##
 ## This script is deliberately dependency-free: it never names the PieceAssets
 ## autoload, so `godot --headless -s res://tools/validate_house_pack.gd` (which
@@ -24,15 +24,15 @@ extends RefCounted
 ##
 ## ── THE ONE RULE A PACK CANNOT BREAK ──────────────────────────────────────
 ##
-## The game paints the house colour on KIT and on nothing else. Steel, leather,
+## The game paints the haus colour on KIT and on nothing else. Steel, leather,
 ## wood, stone, skin, bone and the horse's COAT are NATURAL and keep their own
 ## colours; the crown is REGALIA and stays metal; the sigil, banner and glyph
 ## ring are HERALDRY and carry their own artwork (PieceAssets.MATERIAL_ROLES).
-## That discipline is four rounds of art work, and a stranger's house must not
+## That discipline is four rounds of art work, and a stranger's haus must not
 ## be able to undo it. So it is enforced BY CONSTRUCTION, in three layers:
 ##
 ##   1. A pack may only declare roles for surfaces it OWNS. Every declared
-##      surface name must begin with "<house id>_", which makes a collision
+##      surface name must begin with "<haus id>_", which makes a collision
 ##      with an engine surface — or with another pack's — impossible. A pack
 ##      cannot say "the horse's Main mesh is kit", because it cannot name it.
 ##   2. The engine's dressing CONTRACT names (pawnhelm_iron, pawnhelm_accent,
@@ -55,7 +55,7 @@ extends RefCounted
 const FORMAT := 1
 
 const COATS_PATH := "res://src/houses/coats.json"
-const MANIFEST_NAME := "house.json"
+const MANIFEST_NAME := "haus.json"
 
 ## Roles a pack may declare for its own surfaces. Mirrors PieceAssets.Role,
 ## minus MIXED — the per-triangle atlas split is for the shipped marketplace
@@ -68,7 +68,7 @@ const STUFFS := ["steel", "leather", "wood", "stone", "skin", "bone", "coat",
 	"glow", "atlas", "none"]
 
 ## The engine's dressing contract: name a surface one of these in your own
-## model and the game paints it for you (the helm's dome and rim in the house
+## model and the game paints it for you (the helm's dome and rim in the haus
 ## colour and its charge, the crest as kit). They belong to the engine, so a
 ## pack neither declares them nor may shadow them.
 const CONTRACT_MATERIALS := ["pawnhelm_iron", "pawnhelm_accent", "Crest_*"]
@@ -113,18 +113,18 @@ const COAT_PARTS := ["Main", "Main_Light", "Main_Dark", "Muzzle", "Hair", "Hoove
 const COAT_MAX_SAT := 0.20
 const COAT_WARM_LO := 5.0
 const COAT_WARM_HI := 58.0
-## How far a natural surface must stay from the house's kit colour.
+## How far a natural surface must stay from the haus's kit colour.
 ## costume_preview.NATURAL_KIT_DISTANCE.
 const COAT_KIT_DISTANCE := 0.14
 ## A jersey below this saturation reads as grey at board distance
 ## (tests/test_costumes.gd asserts it for the shipped nine). WARNING, not an
-## error — a house may want a pale jersey, it just wants to know.
+## error — a haus may want a pale jersey, it just wants to know.
 const KIT_MIN_SAT := 0.40
-## Two houses whose jerseys sit closer than this are hard to tell apart on the
+## Two hauses whose jerseys sit closer than this are hard to tell apart on the
 ## board. WARNING: what else is installed is not the pack author's fault.
 const KIT_DISTINCT := 0.20
 
-## Defaults, all documented in docs/HOUSE-PACK.md.
+## Defaults, all documented in docs/HAUS-PACK.md.
 const DEFAULT_COLORS := {"primary": "#8d99a6", "secondary": "#eef2f5", "accent": "#b9c4cf"}
 const DEFAULT_TINT_SATURATION := 0.25
 const DEFAULT_ARCHETYPE := "wolf"
@@ -132,7 +132,7 @@ const DEFAULT_ARCHETYPE := "wolf"
 
 ## Read + validate one pack directory.
 ##
-## `dir_path` is a res:// or user:// directory holding house.json; `source` is
+## `dir_path` is a res:// or user:// directory holding haus.json; `source` is
 ## "builtin" or "installed" (bookkeeping only — the rules are identical).
 ## Never throws, never push_error()s: the report IS the output.
 ##
@@ -141,7 +141,7 @@ static func load_from_dir(dir_path: String, source: String = "installed") -> Dic
 	var manifest_path := dir_path.path_join(MANIFEST_NAME)
 	var rep := _empty_report(dir_path, source)
 	if not FileAccess.file_exists(manifest_path):
-		rep["errors"].append("no %s in %s — a house pack is a FOLDER containing that file"
+		rep["errors"].append("no %s in %s — a haus pack is a FOLDER containing that file"
 				% [MANIFEST_NAME, dir_path])
 		return rep
 	var f := FileAccess.open(manifest_path, FileAccess.READ)
@@ -181,9 +181,9 @@ static func parse(m: Dictionary, dir_path: String,
 	# -- id: the one field with no default ---------------------------------
 	var id := str(m.get("id", "")).strip_edges()
 	if id.is_empty():
-		errors.append("no \"id\" — every house needs one, lowercase and unique "
+		errors.append("no \"id\" — every haus needs one, lowercase and unique "
 				+ "(e.g. \"ravenmark\"); it is how saves, the tournament bracket "
-				+ "and your asset names refer to this house")
+				+ "and your asset names refer to this haus")
 		return rep
 	if not _is_valid_id(id):
 		errors.append(("id '%s' is not a legal id — use lowercase letters, digits "
@@ -202,13 +202,13 @@ static func parse(m: Dictionary, dir_path: String,
 		# the template manifest carries its own instructions.
 		if not str(key).begins_with("_") and not KNOWN_KEYS.has(str(key)):
 			warnings.append("unknown key \"%s\" ignored — check the spelling against "
-					% str(key) + "docs/HOUSE-PACK.md")
+					% str(key) + "docs/HAUS-PACK.md")
 
 	# -- the words on the banner -------------------------------------------
 	var house := {"id": id}
 	house["name"] = str(m.get("name", "")).strip_edges()
 	if house["name"].is_empty():
-		house["name"] = "House %s" % id.capitalize()
+		house["name"] = "Haus %s" % id.capitalize()
 		warnings.append("no \"name\" — the Hall of Banners will read \"%s\"" % house["name"])
 	house["archetype"] = str(m.get("archetype", "")).strip_edges()
 	if house["archetype"].is_empty():
@@ -223,7 +223,7 @@ static func parse(m: Dictionary, dir_path: String,
 		warnings.append("no \"seat\" — the Hall of Banners will read \"an old keep\"")
 	house["motto"] = str(m.get("motto", ""))
 	if str(house["motto"]).is_empty():
-		warnings.append("no \"motto\" — the house rides to war in silence "
+		warnings.append("no \"motto\" — the haus rides to war in silence "
 				+ "(the pledge banner and the rival's persona prompt both use it)")
 
 	# -- colours ------------------------------------------------------------
@@ -247,7 +247,7 @@ static func parse(m: Dictionary, dir_path: String,
 	house["crest"] = _read_asset(m, "crest", dir_path, warnings,
 			"knights, queens and kings ride bare-headed (no crest is not an error)")
 	house["pawn_helm"] = _read_asset(m, "pawn_helm", dir_path, warnings,
-			"pawns keep the cast's own headgear instead of a house half-helm")
+			"pawns keep the cast's own headgear instead of a haus half-helm")
 
 	# -- material roles: the pack's half of the discipline -------------------
 	house["materials"] = _read_materials(m, id, errors, warnings)
@@ -256,7 +256,7 @@ static func parse(m: Dictionary, dir_path: String,
 	house["army"] = _read_army(m, dir_path, house["materials"], errors, warnings)
 	house["banter"] = _read_banter(m, warnings)
 	house["music"] = _read_asset(m, "music", dir_path, warnings,
-			"the house rides to the shipped playlist")
+			"the haus rides to the shipped playlist")
 
 	house["pack_dir"] = dir_path
 	house["source"] = source
@@ -293,7 +293,7 @@ static func _read_colors(m: Dictionary, warnings: Array[String]) -> Dictionary:
 
 ## tints.kit is THE JERSEY; tints.piece / tints.tower are the faint whisper
 ## natural surfaces take so an army still hangs together. A pack that declares
-## none of them inherits its heraldic colours, which is what a house with no
+## none of them inherits its heraldic colours, which is what a haus with no
 ## opinion should look like.
 static func _read_tints(m: Dictionary, colors: Dictionary,
 		warnings: Array[String]) -> Dictionary:
@@ -315,7 +315,7 @@ static func _read_tints(m: Dictionary, colors: Dictionary,
 		if v.is_empty() or not Color.html_is_valid(v):
 			# The whisper defaults to a DESATURATED cut of the jersey — loud on
 			# the kit, a hint on the steel, which is the whole point of the
-			# split. Nothing to warn about; this is a sane house.
+			# split. Nothing to warn about; this is a sane haus.
 			var base := Color.html(kit)
 			var soft := Color.from_hsv(base.h, minf(base.s, 0.45),
 					clampf(base.v * (1.0 if key == "piece" else 0.86), 0.05, 1.0))
@@ -332,7 +332,7 @@ static func _read_tints(m: Dictionary, colors: Dictionary,
 
 ## THE HARD RULE. `coat` names one of the natural coats in coats.json, or the
 ## pack supplies its own palette inline — and either way every colour in it is
-## held to the law a rendered coat is held to. A house's identity is worn on
+## held to the law a rendered coat is held to. A haus's identity is worn on
 ## the caparison; the animal under it is an animal.
 static func _read_coat(m: Dictionary, house: Dictionary, kit: Color,
 		errors: Array[String], warnings: Array[String]) -> void:
@@ -345,7 +345,7 @@ static func _read_coat(m: Dictionary, house: Dictionary, kit: Color,
 
 	if name.is_empty() and custom.is_empty():
 		house["coat"] = coat_default()
-		warnings.append(("no \"coat\" — the house rides a %s. Pick one of: %s")
+		warnings.append(("no \"coat\" — the haus rides a %s. Pick one of: %s")
 				% [coat_default(), ", ".join(coat_names())])
 	elif not custom.is_empty():
 		# An inline palette: the pack is authoring a new coat. Every part must
@@ -374,7 +374,7 @@ static func _read_coat(m: Dictionary, house: Dictionary, kit: Color,
 
 	# ...and whichever coat won, it may not be the jersey. This is the exact
 	# check the role gate makes on the rendered horse (a NATURAL surface may
-	# not wear the house kit) — caught here, it costs a sentence instead of a
+	# not wear the haus kit) — caught here, it costs a sentence instead of a
 	# red gate and a screenshot.
 	var palette: Dictionary = house["coat_palette"]
 	if palette.is_empty():
@@ -388,17 +388,17 @@ static func _read_coat(m: Dictionary, house: Dictionary, kit: Color,
 		if gap <= COAT_KIT_DISTANCE:
 			errors.append(("coat '%s' part %s (%s) is your own jersey colour (%s) "
 					+ "— they sit %.2f apart and the role gate refuses anything "
-					+ "under %.2f. A horse wearing the house colour IS the defect "
+					+ "under %.2f. A horse wearing the haus colour IS the defect "
 					+ "this rule exists for: pick a coat that stands off your kit "
-					+ "(Hartcrown's bronze house rides a grey for exactly this "
+					+ "(Hartcrown's bronze haus rides a grey for exactly this "
 					+ "reason)") % [str(house["coat"]), part, v, kit.to_html(false),
 					gap, COAT_KIT_DISTANCE])
 			break
 
 
 static func _unknown_coat_message(id: String, name: String) -> String:
-	return ("house '%s': coat '%s' is not a natural coat — allowed: %s. "
-			+ "A mount's house identity lives in its CAPARISON, not in the animal: "
+	return ("haus '%s': coat '%s' is not a natural coat — allowed: %s. "
+			+ "A mount's haus identity lives in its CAPARISON, not in the animal: "
 			+ "declare one of those, or supply your own \"coat_palette\" of real "
 			+ "horse colours (near-colourless, or in the warm-brown band %d-%d°)."
 			) % [id, name, ", ".join(coat_names()), int(COAT_WARM_LO), int(COAT_WARM_HI)]
@@ -406,7 +406,7 @@ static func _unknown_coat_message(id: String, name: String) -> String:
 
 static func _unnatural_coat_message(id: String, field: String, hex: String,
 		c: Color) -> String:
-	return ("house '%s': %s = %s is not a coat a horse comes in (saturation %.2f, "
+	return ("haus '%s': %s = %s is not a coat a horse comes in (saturation %.2f, "
 			+ "hue %d°) — a coat colour is either near-colourless (s <= %.2f: black, "
 			+ "grey, white) or a warm brown (hue %d-%d°: bay, chestnut, dun). "
 			+ "Blue horses are a bug, not heraldry."
@@ -466,7 +466,7 @@ static func _read_materials(m: Dictionary, id: String, errors: Array[String],
 			continue
 		if not ROLES.has(role):
 			errors.append(("materials: '%s' has role \"%s\", which is not a role — "
-					+ "use one of: %s. KIT carries the house colour; NATURAL keeps "
+					+ "use one of: %s. KIT carries the haus colour; NATURAL keeps "
 					+ "its own (say what of: natural:steel, natural:leather, "
 					+ "natural:bone…); REGALIA stays metal; HERALDRY carries its own "
 					+ "artwork; EFFECT owns its own light")
@@ -486,7 +486,7 @@ static func _read_materials(m: Dictionary, id: String, errors: Array[String],
 			var offender := _natural_word_in(surface)
 			if not offender.is_empty():
 				errors.append(("materials: '%s' is declared KIT, but its own name "
-						+ "says %s — and %s is NATURAL. The house colour goes on the "
+						+ "says %s — and %s is NATURAL. The haus colour goes on the "
 						+ "kit (tabard, cloak, shield face, caparison, helm, crest) "
 						+ "and nowhere else: steel stays steel, leather stays "
 						+ "leather, and the horse keeps its coat. Declare it "
@@ -563,7 +563,7 @@ static func _read_army(m: Dictionary, dir_path: String, materials: Dictionary,
 		if not has_natural:
 			errors.append(("army: you override %d model(s) and every one of the %d "
 					+ "surfaces you declare is KIT — that is an army painted "
-					+ "entirely in the house colour, which is the exact failure the "
+					+ "entirely in the haus colour, which is the exact failure the "
 					+ "role system exists to end. Real soldiers are mostly steel, "
 					+ "leather, skin and bone; declare at least one natural:<stuff>")
 					% [out.size(), materials.size()])
@@ -684,7 +684,7 @@ static func load_scene(path: String) -> PackedScene:
 		return null
 	# pack() only keeps nodes it OWNS, and generate_scene hands back a tree
 	# whose children have no owner set — without this the PackedScene is an
-	# empty root and the house silently rides bare-headed.
+	# empty root and the haus silently rides bare-headed.
 	_own_all(scene, scene)
 	var packed := PackedScene.new()
 	if packed.pack(scene) != OK:

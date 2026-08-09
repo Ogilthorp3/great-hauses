@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://del3np7yhu4i0"
-path="res://.godot/imported/pawn_helm.glb-97358a2d528d48c5191144dfb610672f.scn"
+uid="uid://d214tebp8hr8w"
+path="res://.godot/imported/crest.glb-5a2aa07b745d2ba9e7bb2a92e626d79b.scn"
 
 [deps]
 
-source_file="res://houses/_examples/ravenmark/pawn_helm.glb"
-dest_files=["res://.godot/imported/pawn_helm.glb-97358a2d528d48c5191144dfb610672f.scn"]
+source_file="res://hauses/_examples/ravenmark/crest.glb"
+dest_files=["res://.godot/imported/crest.glb-5a2aa07b745d2ba9e7bb2a92e626d79b.scn"]
 
 [params]
 

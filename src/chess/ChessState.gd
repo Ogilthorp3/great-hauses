@@ -6,7 +6,7 @@ class_name ChessState
 # Faithful port of the rules engine (Chess.gd): board state, FEN in/out, legal move
 # generation (castling / en passant / promotion), check/mate/stalemate and draw rules
 # (threefold, fifty-move, insufficient material), plus SAN notation.
-# Great Houses additions: API aliases (legal_moves / apply_move / get_result),
+# Great Hauses additions: API aliases (legal_moves / apply_move / get_result),
 # move_from_uci helper, presentation metadata on constructed moves. No UI dependencies.
 
 const MoveScript := preload("res://src/chess/ChessMove.gd")
@@ -688,7 +688,7 @@ func generate_legal_moves(notate_san := true, only_captures := false) -> Array:
 	return moves
 
 
-## PUBLIC API ALIASES (Great Houses additions) ##
+## PUBLIC API ALIASES (Great Hauses additions) ##
 
 # Fast by default (no SAN); pass notate_san = true when you need SAN strings on the moves
 func legal_moves(notate_san := false) -> Array:

@@ -4,7 +4,7 @@ class_name ChessAI
 # Ported from "Stop Waiting For Godot" chess (https://github.com/thearst3rd/stopwaitingforgodot)
 # Copyright (c) 2021 Terry Hearst, MIT License — see LICENSE-stopwaitingforgodot in this directory.
 # Faithful port of the negamax + quiescence engine (ChessEngine.gd).
-# Great Houses additions: difficulty tiers, and an async choose_move() that runs the
+# Great Hauses additions: difficulty tiers, and an async choose_move() that runs the
 # search on WorkerThreadPool (replacing the source game's manual Thread + call_deferred
 # pattern) so callers can simply `await` the move. No UI dependencies.
 

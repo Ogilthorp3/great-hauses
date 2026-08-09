@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# build.sh — one command to produce (and PROVE) a Great Houses release build.
+# build.sh — one command to produce (and PROVE) a Great Hauses release build.
 #
 #   ./tools/build/build.sh                 # windows + macos + verify
 #   ./tools/build/build.sh windows         # just the .exe
@@ -26,8 +26,8 @@ TEMPLATE_ROOT="$HOME/Library/Application Support/Godot/export_templates"
 
 WIN_PRESET="Windows Desktop"
 MAC_PRESET="macOS"
-WIN_OUT_NAME="GreatHouses.exe"
-MAC_OUT_NAME="GreatHouses.app"
+WIN_OUT_NAME="GreatHauses.exe"
+MAC_OUT_NAME="GreatHauses.app"
 
 RC=0
 note() { printf '[build] %s\n' "$*"; }
@@ -39,14 +39,14 @@ fail() { printf '[build] FAIL: %s\n' "$*"; RC=1; }
 # export_filter="all_resources". Assert them every single build.
 #
 # 2026-08-09: `src/houses/houses.json` USED to be here and is now deleted — a
-# Great House became a FOLDER under res://houses/. The roster is discovered at
-# runtime from houses/index.json, and each pack's own house.json is read the
+# Great Haus became a FOLDER under res://hauses/. The roster is discovered at
+# runtime from hauses/index.json, and each pack's own haus.json is read the
 # same FileAccess way, so the same trap applies to all ten files. winterfang is
 # asserted as the representative pack (it is index.json's first seed); coats.json
 # is the shared material table that survived the refactor.
 ASSERT_PRESENT=(
-  "houses/index.json"
-  "houses/winterfang/house.json"
+  "hauses/index.json"
+  "hauses/winterfang/haus.json"
   "src/houses/coats.json"
   "src/banter/banter_lines.json"
   "src/cinematics/kill_lines.json"
@@ -59,12 +59,12 @@ ASSERT_PRESENT=(
 # test code shipped inside the Windows pck. It is registered at runtime now
 # (src/main.gd::_install_e2e_harness) and excluded from every export.
 #
-# houses/_template/ and houses/_examples/ are the MODDER's scaffolding — a blank
-# house.json and the Ravenmark demo pack with its own .glb/.png art. They are
+# hauses/_template/ and hauses/_examples/ are the MODDER's scaffolding — a blank
+# haus.json and the Ravenmark demo pack with its own .glb/.png art. They are
 # documentation, not content: shipping _examples would hang a tenth banner in
 # every player's Hall. export_presets.cfg excludes both; this proves it did.
 ASSERT_ABSENT=( "test_e2e/" "res://tests/" "res://tools/" ".md"
-                "houses/_template/" "houses/_examples/" )
+                "hauses/_template/" "hauses/_examples/" )
 
 # macOS ships bash 3.2, which has no `mapfile` — build the argv in a global.
 PCK_ARGS=()
@@ -103,18 +103,18 @@ check_toolchain() {
   # Icons are another agent's deliverable; report status, never block.
   # macOS embeds its .icns directly. Windows needs BOTH a .ico AND rcedit,
   # so a .ico appearing on its own is still not enough.
-  if [ -f "$PROJ/assets/branding/GreatHouses.icns" ]; then
-    note "icon(mac) : GreatHouses.icns present — embedded in the .app"
+  if [ -f "$PROJ/assets/branding/GreatHauses.icns" ]; then
+    note "icon(mac) : GreatHauses.icns present — embedded in the .app"
   else
     note "icon(mac) : no .icns — bundle keeps the default Godot icon"
   fi
   # Godot 4.7 stamps the PE icon + version info natively — no rcedit needed.
-  if [ -f "$PROJ/assets/branding/GreatHouses.ico" ]; then
+  if [ -f "$PROJ/assets/branding/GreatHauses.ico" ]; then
     if grep -q '^application/icon=""' "$PROJ/export_presets.cfg"; then
-      note "NOTE: assets/branding/GreatHouses.ico EXISTS but a preset still has"
-      note "      application/icon=\"\" — point it at res://assets/branding/GreatHouses.ico"
+      note "NOTE: assets/branding/GreatHauses.ico EXISTS but a preset still has"
+      note "      application/icon=\"\" — point it at res://assets/branding/GreatHauses.ico"
     else
-      note "icon(win) : GreatHouses.ico present — stamped into the .exe"
+      note "icon(win) : GreatHauses.ico present — stamped into the .exe"
     fi
   else
     note "icon(win) : no .ico — .exe keeps the default Godot icon (see BUILDING.md)"
@@ -189,20 +189,20 @@ do_import() {
 # export never ships cannot make the artifact stale, and treating it as if it
 # could would make this gate cry wolf every time a doc or a test changed.
 #
-# 2026-08-09, the second staleness catch: res://houses/ was NOT in this find's
-# root list when a Great House became a folder, so twenty files of shipped game
-# content — the entire nine-house roster — could change without the gate
+# 2026-08-09, the second staleness catch: res://hauses/ was NOT in this find's
+# root list when a Great Haus became a folder, so twenty files of shipped game
+# content — the entire nine-haus roster — could change without the gate
 # noticing. A gate that watches four of the five directories it ships is a gate
-# that says GREEN over a stale artifact. houses/ is a root now; its _template/
+# that says GREEN over a stale artifact. hauses/ is a root now; its _template/
 # and _examples/ subtrees are pruned because export_presets.cfg excludes them
 # (same mirror rule as the -name exclusions below).
 verify_freshness() {
   local artifact="$1" newer
   if [ ! -e "$artifact" ]; then fail "freshness: no artifact at $artifact"; return 1; fi
-  newer="$(find "$PROJ/src" "$PROJ/scenes" "$PROJ/assets" "$PROJ/houses" \
+  newer="$(find "$PROJ/src" "$PROJ/scenes" "$PROJ/assets" "$PROJ/hauses" \
                 "$PROJ/project.godot" "$PROJ/export_presets.cfg" \
-             \( -path "$PROJ/houses/_template/*" \
-                -o -path "$PROJ/houses/_examples/*" \) -prune -o \
+             \( -path "$PROJ/hauses/_template/*" \
+                -o -path "$PROJ/hauses/_examples/*" \) -prune -o \
              -type f -newer "$artifact" \
              -not -name '*.md' -not -name '*.py' -not -name '*.sh' \
              -print \
@@ -273,7 +273,7 @@ build_macos() {
   # moves when anything inside it is touched (the boot smoke test below writes
   # nothing into it, but codesign does), whereas the pck is written exactly
   # once, by the export.
-  verify_freshness "$target/Contents/Resources/Great Houses.pck" || return 1
+  verify_freshness "$target/Contents/Resources/Great Hauses.pck" || return 1
 
   # The macOS bundle is the ONLY artifact we can actually execute here, so it
   # doubles as the smoke test for filters that are shared with Windows: a

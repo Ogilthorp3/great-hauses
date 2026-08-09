@@ -41,7 +41,7 @@ func _initialize() -> void:
 
 
 func _main() -> void:
-	print("=== Great Houses — cinematics (DuelDirector) headless suite ===")
+	print("=== Great Hauses — cinematics (DuelDirector) headless suite ===")
 	await process_frame   # let the tree start: nodes added before the first
 	await process_frame   # frame get no _ready/get_tree during _initialize
 	Engine.time_scale = 1.0
@@ -135,8 +135,8 @@ func _test_lines_pool() -> void:
 	check("lines: promotion pool present", true, data.get("promotion_lines", []).size() >= 3)
 	# Token formatting
 	var out := DD.format_line("The {aa} of {ah} remembers, ser {vp}.",
-		{"aa": "wolf", "ah": "House Frost", "vp": "queen"})
-	check("lines: format_line substitutes", "The wolf of House Frost remembers, ser queen.", out)
+		{"aa": "wolf", "ah": "Haus Frost", "vp": "queen"})
+	check("lines: format_line substitutes", "The wolf of Haus Frost remembers, ser queen.", out)
 
 
 func _test_duel_restore() -> void:
@@ -151,18 +151,18 @@ func _test_duel_restore() -> void:
 	# Kill-line picks are fully formatted (no leftover tokens), 30 samples.
 	var ctx := d.duel_context(a, v, {})
 	check("ctx: attacker resolved", "knight", ctx["ap"])
-	check("ctx: victim house resolved", "House Ember", ctx["vh"])
+	check("ctx: victim house resolved", "Haus Ember", ctx["vh"])
 	# Canonical HouseRegistry resolution (id / display name / archetype)
 	# Ask the ROSTER, not a file path. This used to test for
 	# res://src/houses/houses.json; houses are discovered house PACKS now
 	# (docs/HOUSE-PACK.md), and a guard naming a file that no longer exists
 	# would have quietly skipped these three checks forever.
 	if HouseRegistry.has_house("winterfang"):
-		check("canon: id resolves", "House Winterfang", d.resolve_house_name("winterfang"))
-		check("canon: archetype resolves", "House Winterfang", d.resolve_house_name("wolf"))
+		check("canon: id resolves", "Haus Winterfang", d.resolve_house_name("winterfang"))
+		check("canon: archetype resolves", "Haus Winterfang", d.resolve_house_name("wolf"))
 		var mctx := d.duel_context(a, v,
 			{"attacker_house": "goldclaw", "victim_house": "winterfang"})
-		check("canon: meta house override", "House Goldclaw", mctx["ah"])
+		check("canon: meta house override", "Haus Goldclaw", mctx["ah"])
 	var clean := true
 	for i in 30:
 		var line := d.pick_kill_line(ctx)
@@ -279,7 +279,7 @@ func _test_checkmate_restore() -> void:
 		await create_timer(0.1, true, false, true).timeout
 	await d.play_checkmate(king, "EMBER", death)
 	check("checkmate: time_scale restored", true, is_equal_approx(Engine.time_scale, 1.0))
-	check("checkmate: victory hook fired", "House Ember", got["house"])
+	check("checkmate: victory hook fired", "Haus Ember", got["house"])
 	check("checkmate: inactive after", false, d.is_active())
 	d.free()
 	king.free()
@@ -404,7 +404,7 @@ func _test_dracarys_lift_is_real() -> void:
 	var base: float = env.tonemap_exposure
 	var peak := {"exp": base, "glow": env.glow_intensity}
 	var runner := func() -> void:
-		await s.play_ashfall(1, "House Winterfang", stage["losers"])
+		await s.play_ashfall(1, "Haus Winterfang", stage["losers"])
 	runner.call()
 	var sampler := func() -> void:
 		while is_instance_valid(s) and s.is_ashfall_active():
@@ -424,7 +424,7 @@ func _test_dracarys_lift_is_real() -> void:
 func _test_dracarys_restore_normal() -> void:
 	var stage := _fire_stage(0.6)
 	var s: DragonSpectator = stage["s"]
-	await s.play_ashfall(1, "House Winterfang", stage["losers"])
+	await s.play_ashfall(1, "Haus Winterfang", stage["losers"])
 	await process_frame
 	await process_frame
 	check("fire-normal: ceremony inactive", false, s.is_ashfall_active())
@@ -441,7 +441,7 @@ func _test_dracarys_restore_skip() -> void:
 	var s: DragonSpectator = stage["s"]
 	var env: Environment = stage["env"]
 	var runner := func() -> void:
-		await s.play_ashfall(1, "House Winterfang", stage["losers"])
+		await s.play_ashfall(1, "Haus Winterfang", stage["losers"])
 	runner.call()
 	var lifted: bool = await _wait_until(
 		func() -> bool: return env.tonemap_exposure > stage["saved"][0] * 1.02, 8.0)
@@ -463,7 +463,7 @@ func _test_dracarys_restore_free() -> void:
 	var s: DragonSpectator = stage["s"]
 	var env: Environment = stage["env"]
 	var runner := func() -> void:
-		await s.play_ashfall(1, "House Winterfang", stage["losers"])
+		await s.play_ashfall(1, "Haus Winterfang", stage["losers"])
 	runner.call()
 	var lifted: bool = await _wait_until(
 		func() -> bool: return env.tonemap_exposure > stage["saved"][0] * 1.02, 8.0)

@@ -1,6 +1,6 @@
 #!/usr/bin/env blender --python
 """
-make_watchtower.py — Great Houses: the BANNER-ROOK battle-worn watchtower.
+make_watchtower.py — Great Hauses: the BANNER-ROOK battle-worn watchtower.
 
 Run headless:
   /Applications/Blender.app/Contents/MacOS/Blender -b --python \
@@ -9,13 +9,13 @@ Run headless:
 Output: watchtower.glb — an original low-poly stone watchtower that replaces
 the Kenney tower as the rook:
   - great-hall-matched stone tones (board LIGHT_STONE is (0.36,0.33,0.30);
-    the tower stone sits just under it so the house tower-tint multiply in
+    the tower stone sits just under it so the haus tower-tint multiply in
     PieceAssets.tinted_material lands in the same family)
   - crenellated parapet with seeded merlon jitter; two merlons chipped and
     tilted — battle-worn, not pristine
   - "BannerCloth": a rippled cloth sheet hanging down the tower's front
     face, UV-mapped 0..1 (u across, v=0 at the TOP — Godot image convention)
-    so the runtime can drop the house sigil PNG straight in as albedo.
+    so the runtime can drop the haus sigil PNG straight in as albedo.
     Kept a SEPARATE object so PieceView can find it by name, re-skin it,
     and detach it to fall when the tower crumbles.
   - "Pennant" on "PennantPole": a small triangular flag at the top. The

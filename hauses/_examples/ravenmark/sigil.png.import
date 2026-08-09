@@ -3,15 +3,15 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://d0sy00wb58qf3"
-path="res://.godot/imported/sigil.png-ba2893f67a2e89452f4a53d8faa20888.ctex"
+path="res://.godot/imported/sigil.png-8e3a705bd27fde4016e80196385a37a3.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://houses/_examples/ravenmark/sigil.png"
-dest_files=["res://.godot/imported/sigil.png-ba2893f67a2e89452f4a53d8faa20888.ctex"]
+source_file="res://hauses/_examples/ravenmark/sigil.png"
+dest_files=["res://.godot/imported/sigil.png-8e3a705bd27fde4016e80196385a37a3.ctex"]
 
 [params]
 

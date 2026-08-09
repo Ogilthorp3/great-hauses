@@ -1,12 +1,12 @@
 #!/usr/bin/env blender --python
 """
-make_pawn_helms.py — Great Houses: nine per-house PAWN half-helms (HOUSE layer).
+make_pawn_helms.py — Great Hauses: nine per-haus PAWN half-helms (HAUS layer).
 
 Run headless:
   /Applications/Blender.app/Contents/MacOS/Blender -b --python \
       tools/props/make_pawn_helms.py -- <out_dir>
 
-Outputs pawn_helm_<house_id>.glb for each of the nine houses, plus
+Outputs pawn_helm_<house_id>.glb for each of the nine hauses, plus
 pawn_helm_tidegrip_charred.glb (an optional zero-code Drowned-Legion variant —
 identical geometry, pre-charred materials; the preferred convention is the
 runtime darken documented in the assets README).
@@ -16,11 +16,11 @@ WHY THESE ARE NOT CRESTS (ISSUES.md #3)
 The royal crest (tools/props/make_crests.py, <=600 tris) sits ABOVE the skull
 and exists to build a tall, proud silhouette for knight/queen/king. A PAWN helm
 does the opposite job: it WRAPS the skull, adds almost nothing to the
-silhouette, and carries only a small house motif. A player must read "pawn"
-first and "which house" second. Hard rules enforced here:
+silhouette, and carries only a small haus motif. A player must read "pawn"
+first and "which haus" second. Hard rules enforced here:
 
   * <= 250 tris per helm (TRI_BUDGET; the decimate fallback is a guard, not a
-    plan — every house is authored under budget)
+    plan — every haus is authored under budget)
   * nothing rises more than MOTIF_CEILING above the skull crown — a sixth of a
     head, against the crests' half-a-head. Asserted at export.
   * no tall spikes, no ring that could read as a circlet, no fan silhouettes
@@ -93,7 +93,7 @@ CLEARANCE = 0.030
 # crown downward, which absorbs them.
 SKULL_SLICES = {
     # Barbarian.glb / Barbarian_Head — the PAWN body for the eight
-    # adventurer houses. (Barbarian_BearHat is a separate mesh; see README —
+    # adventurer hauses. (Barbarian_BearHat is a separate mesh; see README —
     # it must be hidden when the helm is worn.)
     "adventurer": [
         (+0.000, 0.2248, -0.2248, +0.2248),
@@ -138,9 +138,9 @@ OUT_DIR = argv[0] if argv else "."
 # Two materials, THE SAME NAMES in all nine GLBs, so the wiring agent finds the
 # tintable surface by name and never by index:
 #   pawnhelm_iron   — plain dark iron; the helm proper. Left alone by the tint.
-#   pawnhelm_accent — rim + house motif. Deliberately NEAR-WHITE so that
+#   pawnhelm_accent — rim + haus motif. Deliberately NEAR-WHITE so that
 #                     PieceAssets.tinted_material's `albedo_color * tint`
-#                     multiply lands the house colour TRUE instead of muddying
+#                     multiply lands the haus colour TRUE instead of muddying
 #                     it. (Assigning albedo_color outright works too.)
 IRON_RGB = (0.168, 0.180, 0.200)      # cold near-black steel (~#2b3037)
 ACCENT_RGB = (0.878, 0.878, 0.878)    # multiply-safe near-white
@@ -517,7 +517,7 @@ def helm_tidegrip(shell, iron, accent):
     tails 0.150 clear of the cap; on the board that read as "a five-spike
     black crown over a bare glowing-eyed face — grander than Thornvale's or
     Hartcrown's ROYAL crests. It reads as a king, not a foot soldier." A pawn
-    outranking other houses' kings is a rank-legibility bug, so the tails now
+    outranking other hauses' kings is a rank-legibility bug, so the tails now
     barely lift off the shell and the limbs are thinner: the kraken still
     grips the helm, it no longer wears it as a diadem.
 
@@ -699,7 +699,7 @@ BUILDERS = {
     "silverbrook": helm_silverbrook,
 }
 
-# Tidegrip's pawn is a Skeleton_Minion; every other house's is a Barbarian.
+# Tidegrip's pawn is a Skeleton_Minion; every other haus's is a Barbarian.
 SKELETON_HOUSE = "tidegrip"
 
 
@@ -708,7 +708,7 @@ def build_dome(shell, iron, accent, n_seg=12, n_rows=3,
                flare=0.038, flare_drop=0.052):
     """The helm proper: a faceted skullcap following the measured profile from
     the crown down to the brow, finished with a flared rim in the ACCENT
-    material (so every house reads its colour even when the motif is tiny).
+    material (so every haus reads its colour even when the motif is tiny).
 
     Tris = n_seg*2*n_rows (wall) + (n_seg-2) (crown cap) + n_seg*2 (rim)."""
     me = bpy.data.meshes.new("HelmDome")

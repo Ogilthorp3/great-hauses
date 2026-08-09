@@ -1,4 +1,4 @@
-# Great Houses — Music Credits & Licenses
+# Great Hauses — Music Credits & Licenses
 
 All tracks are openly licensed (CC BY 4.0 or CC0 1.0). Every track has a matching
 `.license.txt` file beside it with full provenance. Full license texts are in

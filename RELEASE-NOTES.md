@@ -1,7 +1,7 @@
-# Great Houses — v0.1.0
+# Great Hauses — v0.1.0
 
 **Gritty medieval battle chess.** Chess rules, exactly. But every piece rides for a
-Great House, every capture is fought as a duel in slow motion, and the last king to
+Great Haus, every capture is fought as a duel in slow motion, and the last king to
 fall is burned off the board by a dragon.
 
 Built with Godot 4.7.1. Runs on macOS and Windows.
@@ -9,11 +9,11 @@ Built with Godot 4.7.1. Runs on macOS and Windows.
 > ### ⚠ Release status: NOT YET SHIPPABLE — the artifact must be re-exported
 >
 > The `.exe` and `.app` currently sitting in `great-houses-dist/` were exported at
-> **06:47 on 2026-08-09, before the house-pack refactor landed**. Their embedded
+> **06:47 on 2026-08-09, before the haus-pack refactor landed**. Their embedded
 > package still contains the deleted `src/houses/houses.json` and **none** of
-> `houses/index.json` or the nine `house.json` packs — verified by parsing the
+> `hauses/index.json` or the nine `haus.json` packs — verified by parsing the
 > shipped binary, not inferred. The friend-facing zip
-> `for-a-friend/GreatHouses-windows-v0.1.0.zip` wraps that same stale binary.
+> `for-a-friend/GreatHauses-windows-v0.1.0.zip` wraps that same stale binary.
 >
 > **A player running it today would get the previous game.** Re-export before
 > sending anything to anyone:
@@ -21,11 +21,11 @@ Built with Godot 4.7.1. Runs on macOS and Windows.
 > ```bash
 > ./tools/build/build.sh          # both presets + all gates
 > cd ../great-houses-dist/for-a-friend
-> cp ../windows/GreatHouses.exe .
-> zip -9 -X GreatHouses-windows-v0.1.0.zip GreatHouses.exe README.txt && rm GreatHouses.exe
+> cp ../windows/GreatHauses.exe .
+> zip -9 -X GreatHauses-windows-v0.1.0.zip GreatHauses.exe README.txt && rm GreatHauses.exe
 > ```
 >
-> The freshness gate now reports this correctly, including the `houses/` tree it was
+> The freshness gate now reports this correctly, including the `hauses/` tree it was
 > previously blind to. Everything else in this document describes the source tree,
 > which is complete.
 
@@ -33,12 +33,12 @@ Built with Godot 4.7.1. Runs on macOS and Windows.
 
 ## What's in it
 
-**Nine Great Houses, and a tenth is a folder away.** Winterfang, Goldclaw, Hartcrown,
+**Nine Great Hauses, and a tenth is a folder away.** Winterfang, Goldclaw, Hartcrown,
 Ashwyrm, Tidegrip, Thornvale, Duskfire, Swiftcrest, Silverbrook — each with its own
 banner, heraldic colours, motto, seat, horse coat, sigil, helm and crest, and its own
-voice when it taunts you. None of them are hardcoded: a house is a **directory with a
-`house.json` in it**, and the game discovers them at runtime from `res://houses/` and
-from `user://houses/` alike. Yours loads by exactly the same path theirs do.
+voice when it taunts you. None of them are hardcoded: a haus is a **directory with a
+`haus.json` in it**, and the game discovers them at runtime from `res://hauses/` and
+from `user://hauses/` alike. Yours loads by exactly the same path theirs do.
 
 **A tournament for the throne.** Single-elimination, nine contenders: a play-in, the
 quarterfinals, the semifinals, the grand final. You fight one match per round — three
@@ -73,7 +73,7 @@ stingers over the duels, and separate victory / defeat / championship fanfares.
 ### macOS
 
 ```bash
-open great-houses-dist/macos/GreatHouses.app
+open great-houses-dist/macos/GreatHauses.app
 ```
 
 The bundle is **ad-hoc signed only and not notarized**, so on any Mac other than the
@@ -82,7 +82,7 @@ gives a refusal with no override button on it.
 
 ### Windows
 
-Unzip, double-click `GreatHouses.exe`. One self-contained file, no installer, nothing
+Unzip, double-click `GreatHauses.exe`. One self-contained file, no installer, nothing
 written outside its own folder; delete the file to uninstall.
 
 Windows will show **"Windows protected your PC"** on first launch — click *More info*
@@ -105,7 +105,7 @@ the end-to-end suite with `./test_e2e/run_e2e.sh` (see `docs/BUILDING.md`).
 Both of you need the **same build**; the protocol version is checked at connect and a
 mismatch says so in plain words.
 
-1. One of you picks a house, chooses **Play a Friend** → **Host a Match**, picks a
+1. One of you picks a haus, chooses **Play a Friend** → **Host a Match**, picks a
    side, and clicks *Open the Gates*.
 2. The host panel lists its addresses, best-first, and each line says what it is good
    for. Copy one and send it.
@@ -124,26 +124,26 @@ zero-configuration.** Port-forwarding UDP 7777 is the fallback.
 
 ---
 
-## Write your own house
+## Write your own haus
 
-The full guide is [`docs/HOUSE-PACK.md`](docs/HOUSE-PACK.md); `houses/_template/` is a
-commented starting point and `houses/_examples/ravenmark/` is a complete worked
+The full guide is [`docs/HAUS-PACK.md`](docs/HAUS-PACK.md); `hauses/_template/` is a
+commented starting point and `hauses/_examples/ravenmark/` is a complete worked
 example, including a ~200-line GDScript that builds a helm and a crest if you have no
 modelling tool.
 
-The short version: copy `houses/_template/`, rename it, edit `house.json`, drop the
-folder into `user://houses/`, start the game.
+The short version: copy `hauses/_template/`, rename it, edit `haus.json`, drop the
+folder into `user://hauses/`, start the game.
 
-| platform | `user://houses/` is |
+| platform | `user://hauses/` is |
 |---|---|
-| macOS | `~/Library/Application Support/Godot/app_userdata/Great Houses/houses/` |
-| Windows | `%APPDATA%\Godot\app_userdata\Great Houses\houses\` |
+| macOS | `~/Library/Application Support/Godot/app_userdata/Great Hauses/hauses/` |
+| Windows | `%APPDATA%\Godot\app_userdata\Great Hauses\hauses\` |
 
 ```jsonc
 {
   "format": 1,
   "id": "ravenmark",                    // the ONLY required field
-  "name": "House Ravenmark",
+  "name": "Haus Ravenmark",
   "archetype": "raven",                 // picks the voice it taunts in
   "seat": "The Drowned Rookery",
   "motto": "We remember.",
@@ -155,18 +155,18 @@ folder into `user://houses/`, start the game.
 
 Everything except `id` degrades to a documented default **with a warning naming the
 field**, so a half-finished pack still loads and still tells you what it fell back to.
-A pack that is genuinely broken is refused by name (`HOUSE PACK REFUSED <dir>`, with
-the error) and the other houses load anyway.
+A pack that is genuinely broken is refused by name (`HAUS PACK REFUSED <dir>`, with
+the error) and the other hauses load anyway.
 
 Two rules a pack cannot talk its way out of, both earned over four rounds of art work:
 
-- **Your horse is a horse.** `coat` must be a colour horses come in. House identity is
+- **Your horse is a horse.** `coat` must be a colour horses come in. Haus identity is
   worn on the caparison, not grown on the animal.
-- **House colour goes on kit, and nothing else.** Steel, leather, wood, stone, skin,
+- **Haus colour goes on kit, and nothing else.** Steel, leather, wood, stone, skin,
   bone and hide keep their own colours; crowns stay metal; sigils carry artwork. You
   may only declare materials prefixed with your own id, and you may not declare a
   surface whose name says *steel* or *leather* or *bone* to be kit. This is what stops
-  a house from being a monochrome plastic army.
+  a haus from being a monochrome plastic army.
 
 Check a pack before you ship it:
 
@@ -183,7 +183,7 @@ Ordered by how likely they are to bite you.
 1. **The Windows `.exe` has never been executed on Windows. Not once, by anybody.**
    It is built and verified on a Mac. What is actually proven: it is a valid PE32+
    GUI x86-64 binary, and its embedded package was parsed file-by-file to confirm it
-   contains the house packs, the branding, the music and the multiplayer code and none
+   contains the haus packs, the branding, the music and the multiplayer code and none
    of the test harness. Everything from the window opening onward — graphics, sound,
    input, the game — is unobserved on Windows.
 
@@ -203,14 +203,14 @@ Ordered by how likely they are to bite you.
    ```
 
 3. **The Hall of Banners still says "Nine banners. One throne."** — a hardcoded
-   subtitle in `src/ui/house_select.gd:474`. Install a tenth house and it hangs under
+   subtitle in `src/ui/house_select.gd:474`. Install a tenth haus and it hangs under
    a caption that says nine. Cosmetic; one line.
 
 4. **`tests/test_banter.gd` asserts a roster of exactly nine.** Install a pack into
-   your real `user://houses/` and that suite goes red for a *roster* reason rather than
+   your real `user://hauses/` and that suite goes red for a *roster* reason rather than
    a real one.
 
-5. **The example pack's helm is unproven on screen.** `houses/_examples/ravenmark/`
+5. **The example pack's helm is unproven on screen.** `hauses/_examples/ravenmark/`
    ships a generated `pawn_helm.glb` whose winding was measured and corrected after a
    proof screenshot showed bare skulls — but the proof was never re-rendered. The mesh
    measures in-family with the shipped helms; "it renders" is inference, not evidence.
@@ -242,10 +242,10 @@ real defect:
 ```bash
 ./tools/build/build.sh freshness       # is the artifact older than its own sources?
 python3 tools/build/pck_list.py <artifact> --count-only \
-    --assert-present houses/index.json --assert-absent test_e2e/
+    --assert-present hauses/index.json --assert-absent test_e2e/
 ```
 
-The freshness gate exists because a `GreatHouses.exe` once sat one step from being
+The freshness gate exists because a `GreatHauses.exe` once sat one step from being
 sent to a friend with the entire branding set newer than it — `file` was happy, the
 size was right, every content assertion passed. **An export is a photograph.** All the
 checks in the world confirm the photograph is well-formed; only the timestamps tell

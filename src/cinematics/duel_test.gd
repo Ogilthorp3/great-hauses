@@ -16,7 +16,7 @@ const SHOT_FACING := "res://test_e2e/artifacts/module-previews/facing.png"
 
 ## The mock fighters carry no house id, so DuelDirector used to fall back to
 ## the LEGACY FROST/EMBER table and the saved facing.png read "So falls the
-## queen of House Ember" — a house that is not one of the shipped Nine
+## queen of Haus Ember" — a haus that is not one of the shipped Nine
 ## (ISSUES.md #16). The fixture now names two real houses, and every frame it
 ## saves is stamped FIXTURE so a capsule stand-in can never be mistaken for a
 ## shipped gameplay frame.
@@ -153,7 +153,7 @@ func _run_acts() -> void:
 	# the victory hook fires with the director's resolved house name.
 	await _director.play_checkmate(king, "winterfang", death)
 	_check("checkmate-restores-timescale", is_equal_approx(Engine.time_scale, 1.0))
-	_check("checkmate-victory-hook", _victory_house == "House Winterfang")
+	_check("checkmate-victory-hook", _victory_house == "Haus Winterfang")
 	_check("checkmate-king-died", king.died_flag)
 	_check("checkmate-inactive-after", not _director.is_active())
 
@@ -273,4 +273,4 @@ func _show_hint(text: String) -> void:
 		l.add_theme_color_override("font_color", Color(0.8, 0.76, 0.66))
 		l.position = Vector2(18, 14)
 		layer.add_child(l)
-	(layer.get_node("Hint") as Label).text = "Great Houses — battle-cam test stage\n" + text
+	(layer.get_node("Hint") as Label).text = "Great Hauses — battle-cam test stage\n" + text

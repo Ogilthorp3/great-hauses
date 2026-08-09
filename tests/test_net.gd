@@ -43,7 +43,7 @@ var failures := 0
 
 
 func _initialize() -> void:
-	print("=== Great Houses — head-to-head network test suite ===")
+	print("=== Great Hauses — head-to-head network test suite ===")
 	_test_move_wire()
 	_test_validator_accepts()
 	_test_client_cannot_force_illegal_moves()

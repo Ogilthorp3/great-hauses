@@ -1,6 +1,6 @@
 class_name PieceView
 extends Node3D
-## A Great Houses combatant on the board — a real KayKit character (the
+## A Great Hauses combatant on the board — a real KayKit character (the
 ## banner watchtower for the rook, a MOUNTED horse+rider ensemble for the
 ## knight — ISSUES.md #1), tinted per house, animated from the shared
 ## Rig_Medium animation libraries (the mount carries no rig at all — it is

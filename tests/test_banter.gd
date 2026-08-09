@@ -411,7 +411,7 @@ func _test_llm_mock() -> void:
 		check("llm: system+user messages", 2, msgs.size())
 		if msgs.size() == 2:
 			var sys := str((msgs[0] as Dictionary).get("content", ""))
-			check("llm: system carries the persona", true, sys.contains("House Winterfang"))
+			check("llm: system carries the persona", true, sys.contains("Haus Winterfang"))
 			check("llm: system carries the voice", true, sys.contains("laconic"))
 			check("llm: system carries the rules", true, sys.contains("wit over cruelty"))
 			var user := str((msgs[1] as Dictionary).get("content", ""))

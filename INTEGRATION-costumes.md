@@ -1,4 +1,4 @@
-# INTEGRATION — House Costumes + Piece Readability + Banner-Rook
+# INTEGRATION — Haus Costumes + Piece Readability + Banner-Rook
 
 Module landed 2026-08-08. Owner files: `src/board/piece_view.gd`,
 `src/board/piece_assets.gd`, `src/board/costume_preview.gd`,
@@ -12,8 +12,8 @@ Module landed 2026-08-08. Owner files: `src/board/piece_view.gd`,
 Two layers, never confused:
 
 - **piece TYPE** = silhouette + signature gear + height grading — identical
-  logic across all houses, instantly readable.
-- **HOUSE** = crest / shield sigil / palette flourish — never changes the
+  logic across all hauses, instantly readable.
+- **HAUS** = crest / shield sigil / palette flourish — never changes the
   type silhouette.
 
 ## What the integrator gets for free (no call-site changes)
@@ -34,8 +34,8 @@ compatible (`house_id == ""` = legacy FROST/EMBER). Every existing flow
   "uncrowned" for the e2e Crown-node check.)
 - Type-glyph ring under every piece (front medallion, engraved emissive
   chess glyph).
-- House crests on knight/queen/king; sigil decals on shields; the rook is
-  now the banner watchtower (house-sigil banner + fluttering pennant);
+- Haus crests on knight/queen/king; sigil decals on shields; the rook is
+  now the banner watchtower (haus-sigil banner + fluttering pennant);
   Tidegrip fields the KayKit skeleton cast.
 
 ## ONE opt-in hook — selection feedback
@@ -94,7 +94,7 @@ elsewhere): `CHARACTER_SCALE`, `KING_SCALE`, `TOWER_SCALE`,
 run_suite costumes-suite res://tests/test_costumes.gd || SUITE_RC=1
 ```
 
-Optional second gate (66 house×type assembly combos, exit code 0/1):
+Optional second gate (66 haus×type assembly combos, exit code 0/1):
 
 ```bash
 "$GODOT" --headless --path "$PROJ" res://scenes/costume_preview.tscn
@@ -107,7 +107,7 @@ Optional second gate (66 house×type assembly combos, exit code 0/1):
 Godot --headless --path . res://scenes/costume_preview.tscn
 # full costume suite (77 checks)
 Godot --headless --path . -s res://tests/test_costumes.gd
-# visual grid: per-house + overview screenshots ->
+# visual grid: per-haus + overview screenshots ->
 #   test_e2e/artifacts/module-previews/costumes/
 Godot --path . res://scenes/costume_preview.tscn
 ```

@@ -47,14 +47,14 @@ static func binary_name() -> String:
 
 
 ## Directories searched before PATH, in order. On Windows this is what makes
-## "drop stockfish.exe next to GreatHouses.exe" work — the friend never has
+## "drop stockfish.exe next to GreatHauses.exe" work — the friend never has
 ## to touch their PATH. On macOS the executable lives inside the bundle, so
 ## the folder CONTAINING the .app is searched too.
 static func sidecar_dirs() -> Array[String]:
 	var exe_dir := OS.get_executable_path().get_base_dir()
 	var dirs: Array[String] = [exe_dir, exe_dir.path_join("stockfish")]
 	if OS.has_feature("macos"):
-		# <dir>/Great Houses.app/Contents/MacOS/<bin> -> <dir>
+		# <dir>/Great Hauses.app/Contents/MacOS/<bin> -> <dir>
 		var outside := exe_dir.get_base_dir().get_base_dir().get_base_dir()
 		if not outside.is_empty():
 			dirs.append(outside)
@@ -114,7 +114,7 @@ static func find_stockfish() -> String:
 ## THIS platform's player should put the binary.
 static func install_hint() -> String:
 	if OS.has_feature("windows"):
-		return "put stockfish.exe next to GreatHouses.exe"
+		return "put stockfish.exe next to GreatHauses.exe"
 	if OS.has_feature("macos"):
 		return "brew install stockfish"
 	return "install stockfish from your package manager"

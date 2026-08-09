@@ -22,7 +22,7 @@ func _initialize() -> void:
 
 
 func _main() -> void:
-	print("=== Great Houses Music — headless test suite ===")
+	print("=== Great Hauses Music — headless test suite ===")
 	_mark = Time.get_ticks_msec()
 	_cleanup_settings()
 	_test_playlists_and_files()

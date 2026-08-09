@@ -111,7 +111,7 @@ static func validate_piece(pv: PieceView, piece_type: int, house_id: String) -> 
 			if hide_mesh == null:
 				errs.append("%s: horse hide mesh missing" % tag)
 			elif hide_mesh.get_surface_override_material(0) == null:
-				errs.append("%s: horse hide not wearing the house tint" % tag)
+				errs.append("%s: horse hide not wearing the haus tint" % tag)
 		if pv._sway_tween == null or not pv._sway_tween.is_running():
 			errs.append("%s: mount's idle sway not running" % tag)
 		if pv._rider != null and pv._rider.position.y < 0.5:
@@ -188,9 +188,9 @@ static func _validate_helm(pv: PieceView, piece_type: int, house_id: String,
 					and mi.get_surface_override_material(s) != null:
 				shell_dressed = true
 	if not accent_dressed:
-		errs.append("%s: helm rim/motif not wearing the house charge" % tag)
+		errs.append("%s: helm rim/motif not wearing the haus charge" % tag)
 	if not shell_dressed:
-		errs.append("%s: helm dome not wearing the house color" % tag)
+		errs.append("%s: helm dome not wearing the haus color" % tag)
 	# The bear hood must be HIDDEN (never freed — see PieceView._doff_bear_hood).
 	for mi: MeshInstance3D in pv.find_children(
 			PieceAssets.BEAR_HOOD_PATTERN, "MeshInstance3D", true, false):
@@ -320,7 +320,7 @@ static func _judge_kit(tag: String, flat: Color, house_colors: Array[Color],
 	for c: Color in house_colors:
 		best = minf(best, _normalized_distance(flat, c))
 	if best > KIT_MATCH:
-		errs.append("%s: KIT colour %s matches no house colour (nearest %.2f > %.2f)"
+		errs.append("%s: KIT colour %s matches no haus colour (nearest %.2f > %.2f)"
 				% [tag, flat.to_html(false), best, KIT_MATCH])
 	return errs
 
@@ -347,7 +347,7 @@ static func _judge_natural(tag: String, flat: Color, kit: Color,
 	var errs: Array[String] = []
 	var dist := Vector3(flat.r - kit.r, flat.g - kit.g, flat.b - kit.b).length()
 	if dist < NATURAL_KIT_DISTANCE:
-		errs.append("%s: NATURAL surface is wearing the house kit (%s, distance %.2f)"
+		errs.append("%s: NATURAL surface is wearing the haus kit (%s, distance %.2f)"
 				% [tag, flat.to_html(false), dist])
 	if flat.s * flat.v <= ROLE_CHROMA_FLOOR:
 		return errs   # neutral: iron, shadow, a black horse — legal by nature
@@ -380,7 +380,7 @@ static func _judge_regalia(tag: String, flat: Color, kit: Color) -> Array[String
 				% [tag, flat.s, flat.to_html(false)])
 	var dist := Vector3(flat.r - kit.r, flat.g - kit.g, flat.b - kit.b).length()
 	if dist < NATURAL_KIT_DISTANCE:
-		errs.append("%s: REGALIA is wearing the house kit (%s) — the crown must contrast"
+		errs.append("%s: REGALIA is wearing the haus kit (%s) — the crown must contrast"
 				% [tag, flat.to_html(false)])
 	return errs
 

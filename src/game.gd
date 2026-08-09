@@ -1,5 +1,5 @@
 extends Node3D
-## Great Houses — game root. The player's chosen Great House battles a rival
+## Great Hauses — game root. The player's chosen Great Haus battles a rival
 ## house across a torch-lit hall: full rules via src/chess, capture duels in
 ## slow motion (DuelDirector), house-dyed armies and banners, SAN move list,
 ## tournament bracket between matches, an optional DS4-Oracle opponent,
@@ -47,7 +47,7 @@ const TOURNAMENT_UNDO_LIMIT := 3     # take-backs per tournament game (single: u
 
 const RESULT_TEXT := {
 	ChessState.RESULT.STALEMATE: "Stalemate — the war ends in a draw",
-	ChessState.RESULT.INSUFFICIENT: "Draw — neither house can force mate",
+	ChessState.RESULT.INSUFFICIENT: "Draw — neither haus can force mate",
 	ChessState.RESULT.FIFTY_MOVE: "Draw — fifty quiet moves",
 	ChessState.RESULT.THREEFOLD: "Draw — threefold repetition",
 }
@@ -69,8 +69,8 @@ var _oracle_think_start_ms := 0
 
 var player_house_id := ""            # "" = legacy Frost/Ember skin
 var rival_house_id := ""
-var _player_display := "House Frost"
-var _rival_display := "House Ember"
+var _player_display := "Haus Frost"
+var _rival_display := "Haus Ember"
 
 # -- which army is MINE ------------------------------------------------------
 # Single player is always White, and for four months "the player's turn" was
@@ -427,7 +427,7 @@ func _resolve_identity() -> void:
 
 func _house_name(id: String) -> String:
 	var h := HouseRegistry.get_house(id)
-	return str(h.get("name", "House " + id.capitalize()))
+	return str(h.get("name", "Haus " + id.capitalize()))
 
 
 func _dress_hall() -> void:
@@ -1276,7 +1276,7 @@ func _show_match_end(player_won: bool, base_text: String) -> void:
 		if t.is_champion():
 			var motto := str(HouseRegistry.get_house(player_house_id).get("motto", ""))
 			lines = ["THE THRONE IS WON",
-				"%s rules the Nine Houses." % _player_display, "“%s”" % motto]
+				"%s rules the Nine Hauses." % _player_display, "“%s”" % motto]
 			_next_action = "hall"
 			btn_text = "Return to the Hall of Banners"
 			start_championship_tableau()   # fire-and-forget coronation
@@ -1481,7 +1481,7 @@ const HUD_DIM := Color(0.75, 0.71, 0.62)
 const HUD_GOLD := Color(0.88, 0.70, 0.35)
 ## Every HUD line crosses BOTH the black hall and a torch-lit pale surface
 ## somewhere in a match. One flat color can never clear both, so each line
-## carries its own dark: a glyph outline (ISSUES.md P11 — "House Winterfang
+## carries its own dark: a glyph outline (ISSUES.md P11 — "Haus Winterfang
 ## to move" vanished into the pale Winterfang banner behind the throne).
 const HUD_OUTLINE := Color(0.02, 0.02, 0.03, 0.92)
 ## The top band also gets a scrim, because an outline alone leaves the text
@@ -1722,7 +1722,7 @@ func _build_hud() -> void:
 	_oracle_caption.offset_bottom = -10
 	hud.add_child(_oracle_caption)
 
-	# THE CHROME REGISTER. The title block ("HOUSE X vs HOUSE Y" + mottos +
+	# THE CHROME REGISTER. The title block ("HAUS X vs HAUS Y" + mottos +
 	# turn line) lay exactly across the dragon's neck and skull in
 	# showcase/10_throne_room.png — the best frame in the game had no readable
 	# dragon head. Everything a cinematic must not have to draw around is

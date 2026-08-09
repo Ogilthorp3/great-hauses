@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# run_e2e.sh — Great Houses in-engine E2E suite.
+# run_e2e.sh — Great Hauses in-engine E2E suite.
 #
 # Steps:
 #   preflight   import-artifacts check (the empty-.godot/imported scar) +
@@ -62,7 +62,7 @@
 #   showcase    windowed 45 s zero-error soak + beauty shots + the
 #               championship throne-room tableau                 — Gate C
 #
-# Every windowed scenario navigates the Hall of Banners (house select) by
+# Every windowed scenario navigates the Hall of Banners (haus select) by
 # synthesized clicks first — the select screen IS part of the tested flow.
 #
 # Scenario launches are WINDOWED (screenshots need rendering) — a game
@@ -114,7 +114,7 @@ BOARD_FEN="r3k2r/8/8/8/8/8/3PP3/R2QK2R w KQkq - 0 1"
 # defend it): first-blood taunt at fullmove 1, rate-limited gloat at 2.
 BANTER_FEN="k7/8/8/3p3p/4P2P/8/8/3QK3 w - - 0 1"
 # Dragon-live scenario: Ra8# is mate-in-1 (back rank, f7/g7/h7 lock the
-# king's own escape) and the mated house leaves three pawns standing —
+# king's own escape) and the mated haus leaves three pawns standing —
 # fuel for the ASHFALL pyre.
 DRAGON_FEN="6k1/5ppp/8/8/8/8/8/R3K3 w - - 0 1"
 

@@ -606,7 +606,7 @@ func pack_rules() -> Array:
 
 ## Fold ONE pack's declarations into the live table without installing it —
 ## how tools/validate_house_pack.gd judges a folder that is not in
-## user://houses/ yet. `materials` is HouseRegistry.material_roles() shape.
+## user://hauses/ yet. `materials` is HouseRegistry.material_roles() shape.
 ## Safe to call repeatedly: declared names are house-id-prefixed, so a pack
 ## under test can only ever shadow itself.
 func declare_pack_rules(materials: Dictionary) -> void:
@@ -881,7 +881,7 @@ func coat_palette(house_id: String) -> Dictionary:
 		return _coat_by_name(COAT_DEFAULT)
 	var out: Dictionary = HouseRegistry.get_coat_palette(house_id)
 	if out.is_empty():
-		push_error("PieceAssets.coat_palette: house '%s' names coat '%s', which is not a natural coat"
+		push_error("PieceAssets.coat_palette: haus '%s' names coat '%s', which is not a natural coat"
 				% [house_id, HouseRegistry.get_house_coat(house_id)])
 		return _coat_by_name(COAT_DEFAULT)
 	return out

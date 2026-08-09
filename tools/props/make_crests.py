@@ -1,12 +1,12 @@
 #!/usr/bin/env blender --python
 """
-make_crests.py — Great Houses: nine helmet-crest attachments (HOUSE layer).
+make_crests.py — Great Hauses: nine helmet-crest attachments (HAUS layer).
 
 Run headless:
   /Applications/Blender.app/Contents/MacOS/Blender -b --python \
       tools/props/make_crests.py -- <out_dir> [<houses_json>]
 
-Outputs: crest_<house_id>.glb for each of the nine houses:
+Outputs: crest_<house_id>.glb for each of the nine hauses:
   antlers (hartcrown) · wolf-pelt hood (winterfang) · dragon fins (ashwyrm) ·
   tentacle sweep (tidegrip) · rose ring (thornvale) · sun rays (duskfire) ·
   falcon wings (swiftcrest) · fish-fin crest (silverbrook) ·
@@ -14,7 +14,7 @@ Outputs: crest_<house_id>.glb for each of the nine houses:
 
 Design constraints (art direction: gritty low-poly medieval):
   - each crest <= 600 tris (decimate fallback enforces the budget)
-  - house-colored Principled BSDF constants read from src/houses/houses.json
+  - haus-colored Principled BSDF constants read from src/houses/houses.json
     (primary/secondary/accent, sRGB hex -> linear)
   - authored in KayKit Rig_Medium HEAD-BONE space: origin = skull-top contact
     point, +Z up (Blender) -> Y-up GLB, front faces Blender -Y -> Godot +Z.
@@ -37,10 +37,10 @@ SEED = 9917
 
 argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 OUT_DIR = argv[0] if argv else "."
-# Houses are HOUSE PACKS now (docs/HOUSE-PACK.md): one folder each under
-# houses/, holding a house.json. This used to read a single src/houses/houses.json.
+# Hauses are HAUS PACKS now (docs/HAUS-PACK.md): one folder each under
+# hauses/, holding a haus.json. This used to read a single src/houses/houses.json.
 HOUSES_DIR = argv[1] if len(argv) > 1 else os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "..", "..", "houses")
+    os.path.dirname(os.path.abspath(__file__)), "..", "..", "hauses")
 
 TRI_BUDGET = 600
 
@@ -55,14 +55,14 @@ def hex_to_linear(h):
 
 
 def _load_house_packs(root):
-    """Every houses/<id>/house.json, keyed by id. Folders starting with "_"
+    """Every hauses/<id>/haus.json, keyed by id. Folders starting with "_"
     are the template and the examples, and are skipped exactly as the game's
     discovery skips them."""
     out = {}
     for name in sorted(os.listdir(root)):
         if name.startswith("_") or name.startswith("."):
             continue
-        manifest = os.path.join(root, name, "house.json")
+        manifest = os.path.join(root, name, "haus.json")
         if not os.path.isfile(manifest):
             continue
         with open(manifest) as fh:

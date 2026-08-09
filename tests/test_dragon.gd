@@ -67,7 +67,7 @@ func _initialize() -> void:
 
 
 func _main() -> void:
-	print("=== Great Houses — dragon spectator/ashfall headless suite ===")
+	print("=== Great Hauses — dragon spectator/ashfall headless suite ===")
 	await process_frame
 	await process_frame
 	Engine.time_scale = 1.0
@@ -178,8 +178,8 @@ func _test_kill_lines() -> void:
 		if not str(l).contains("{wh}"):
 			all_have_token = false
 	check("lines: every line carries {wh}", true, all_have_token)
-	var out := DD.format_line("What {wh} cannot rule, it burns.", {"wh": "House Winterfang"})
-	check("lines: format substitutes", "What House Winterfang cannot rule, it burns.", out)
+	var out := DD.format_line("What {wh} cannot rule, it burns.", {"wh": "Haus Winterfang"})
+	check("lines: format substitutes", "What Haus Winterfang cannot rule, it burns.", out)
 
 
 func _test_rate_limit_and_gate() -> void:
@@ -224,7 +224,7 @@ func _test_ashfall_completion() -> void:
 			await process_frame
 	sampler.call()
 	var t0 := Time.get_ticks_msec()
-	await s.play_ashfall(1, "House Winterfang", losers)
+	await s.play_ashfall(1, "Haus Winterfang", losers)
 	var wall := float(Time.get_ticks_msec() - t0) / 1000.0
 	await process_frame
 	await process_frame
@@ -273,7 +273,7 @@ func _test_ashfall_skip() -> void:
 	var losers := _spawn_army(1, 4, 1.5)
 	var done := {"v": false}
 	var runner := func() -> void:
-		await s.play_ashfall(1, "House Winterfang", losers)
+		await s.play_ashfall(1, "Haus Winterfang", losers)
 		done["v"] = true
 	runner.call()
 	var slowed: bool = await _wait_until(
@@ -323,7 +323,7 @@ func _test_skeleton_swap() -> void:
 	await process_frame
 	var losers := _spawn_army(1, 3, 1.5)
 	var runner := func() -> void:
-		await s.play_ashfall(1, "House Winterfang", losers)
+		await s.play_ashfall(1, "Haus Winterfang", losers)
 	runner.call()
 	var seen: bool = await _wait_until(func() -> bool: return s.remains_count() > 0, 4.0)
 	check("mk: skeletons stand in mid-sequence", true, seen)
@@ -354,7 +354,7 @@ func _test_tidegrip_chars_in_place() -> void:
 		d.position = Vector3(-1.0 + i * 1.2, 0.0, 1.8)
 		losers.append(d)
 	var runner := func() -> void:
-		await s.play_ashfall(1, "House Tidegrip", losers)
+		await s.play_ashfall(1, "Haus Tidegrip", losers)
 	runner.call()
 	var started: bool = await _wait_until(func() -> bool: return s.is_ashfall_active(), 2.0)
 	check("tidegrip: ceremony started", true, started)
@@ -398,7 +398,7 @@ func _test_ashfall_mounted_knight() -> void:
 		losers.append(pv)
 	check("mounted burn: both knights ride in mounted", 2, _mount_count())
 	var runner := func() -> void:
-		await s.play_ashfall(1, "House Goldclaw", losers)
+		await s.play_ashfall(1, "Haus Goldclaw", losers)
 	runner.call()
 	var seen: bool = await _wait_until(func() -> bool: return s.remains_count() > 0, 6.0)
 	check("mounted burn: charred bones stand in mid-sequence", true, seen)
@@ -434,7 +434,7 @@ func _test_skip_every_phase() -> void:
 		await process_frame
 		var losers := _spawn_army(1, 3, 1.5)
 		var runner := func() -> void:
-			await s.play_ashfall(1, "House Winterfang", losers)
+			await s.play_ashfall(1, "Haus Winterfang", losers)
 		runner.call()
 		await _wait_wall(delay)
 		s.skip()
@@ -456,7 +456,7 @@ func _test_skip_every_phase() -> void:
 		await process_frame
 		var losers2 := _spawn_army(1, 2, 1.5)
 		var runner2 := func() -> void:
-			await s2.play_ashfall(1, "House Winterfang", losers2, true)
+			await s2.play_ashfall(1, "Haus Winterfang", losers2, true)
 		runner2.call()
 		await _wait_wall(delay)
 		s2.skip()
@@ -479,7 +479,7 @@ func _test_championship_tier() -> void:
 	await process_frame
 	var losers := _spawn_army(1, 3, 1.5)
 	var t0 := Time.get_ticks_msec()
-	await s.play_ashfall(1, "House Winterfang", losers, true)
+	await s.play_ashfall(1, "Haus Winterfang", losers, true)
 	var wall := float(Time.get_ticks_msec() - t0) / 1000.0
 	await process_frame
 	await process_frame
@@ -503,7 +503,7 @@ func _test_match_defaults_budget() -> void:
 	await process_frame
 	var losers := _spawn_army(1, 5, 1.5)
 	var t0 := Time.get_ticks_msec()
-	await s.play_ashfall(1, "House Winterfang", losers)
+	await s.play_ashfall(1, "Haus Winterfang", losers)
 	var wall := float(Time.get_ticks_msec() - t0) / 1000.0
 	print("  (default-timing match ceremony wall=%.2fs)" % wall)
 	check("defaults: match ceremony <= 12 s wall", true, wall <= 12.0)
@@ -630,7 +630,7 @@ func _test_fire_wiring() -> void:
 	var losers := _spawn_army(1, 3, 1.5)
 	var saw_fire := {"v": false}
 	var runner := func() -> void:
-		await s.play_ashfall(1, "House Winterfang", losers)
+		await s.play_ashfall(1, "Haus Winterfang", losers)
 	runner.call()
 	var sampler := func() -> void:
 		while is_instance_valid(s) and s.is_ashfall_active():
@@ -670,7 +670,7 @@ func _test_phase_and_jet_probes() -> void:
 	var seen := {}
 	var jet_phase := {"v": ""}
 	var runner := func() -> void:
-		await s.play_ashfall(1, "House Winterfang", losers)
+		await s.play_ashfall(1, "Haus Winterfang", losers)
 	runner.call()
 	var sampler := func() -> void:
 		while is_instance_valid(s) and s.is_ashfall_active():

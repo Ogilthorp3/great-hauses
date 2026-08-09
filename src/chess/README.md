@@ -1,4 +1,4 @@
-# Great Houses Chess Engine (`src/chess/`)
+# Great Hauses Chess Engine (`src/chess/`)
 
 Standalone, headless-testable chess rules engine + AI in pure GDScript (Godot 4.x).
 No scene, node, or UI dependencies — `RefCounted` all the way down, safe to use from
@@ -9,7 +9,7 @@ any presentation layer (2D, 3D, server-side) or from worker threads.
 The rules engine and negamax AI are ported from
 [**Stop Waiting For Godot** by Terry Hearst (thearst3rd)](https://github.com/thearst3rd/stopwaitingforgodot),
 MIT License — see [`LICENSE-stopwaitingforgodot`](./LICENSE-stopwaitingforgodot).
-The port keeps the proven engine logic verbatim; Great Houses additions are limited to
+The port keeps the proven engine logic verbatim; Great Hauses additions are limited to
 API aliases, presentation metadata on moves, UCI helpers, difficulty tiers, and the
 `WorkerThreadPool`-based async search.
 

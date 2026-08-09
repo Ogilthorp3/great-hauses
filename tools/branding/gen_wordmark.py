@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-GREAT HOUSES — title wordmark for the Hall of Banners.
+GREAT HAUSES — title wordmark for the Hall of Banners.
 
     python3 tools/branding/gen_wordmark.py
 
@@ -11,7 +11,7 @@ Writes  assets/branding/wordmark-great-houses.png   (1600x760, transparent)
 Lockup: CREST OVER TYPE.  A shield's native lockup is the crest above the
 name — it is why the app icon and the title can be the same mark twice without
 reading as a redundancy, and it is the one gate the runner-up concepts failed
-(a GH monogram set above the words GREAT HOUSES makes the reader parse the same
+(a GH monogram set above the words GREAT HAUSES makes the reader parse the same
 two letters twice).  So: shield, rule, name.  No monogram anywhere.
 
 Type: Luminari — a flared-serif medieval face that ships with macOS.  Set in
@@ -34,7 +34,7 @@ sys.path.insert(0, HERE)
 import gen_app_icon as G  # noqa: E402
 
 W, H = 1600, 760
-TITLE = "GREAT HOUSES"
+TITLE = "GREAT HAUSES"
 
 # Luminari first — it is the medieval serif on macOS.  The fallbacks are the
 # other flared/inscriptional faces that ship on the same machine, so a missing

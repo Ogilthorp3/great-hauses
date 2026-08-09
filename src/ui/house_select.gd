@@ -1,6 +1,6 @@
 class_name HouseSelect
 extends Control
-## The Hall of Banners — house-select screen for Great Houses.
+## The Hall of Banners — house-select screen for Great Hauses.
 ##
 ## Nine crests hang in a ring in a dark hall. Hover/arrow-key a crest to see
 ## the house's motto and colors; choose one, then pick an opponent (Engine
@@ -431,7 +431,7 @@ func _build_backdrop() -> void:
 
 func _build_title() -> void:
 	# The game's WORDMARK sits above the screen's heading: the mark says GREAT
-	# HOUSES (what the game is), the heading says THE HALL OF BANNERS (what this
+	# HAUSES (what the game is), the heading says THE HALL OF BANNERS (what this
 	# screen is). Different strings, both wanted. The FLAT wordmark (type only,
 	# no crest) is used on purpose — the ring below already hangs nine crests,
 	# and a tenth shield up here would compete with them.
@@ -440,7 +440,7 @@ func _build_title() -> void:
 	mark.name = "Wordmark"
 	mark.texture = load("res://assets/branding/wordmark-great-houses-flat.png")
 	# EXPAND_IGNORE_SIZE is load-bearing: the default (KEEP_SIZE) pins the
-	# control's minimum size to the TEXTURE's 1481x173, which overrides
+	# control's minimum size to the TEXTURE's 1485x176, which overrides
 	# custom_minimum_size and runs the wordmark off the right of the screen.
 	mark.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	mark.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
@@ -511,7 +511,7 @@ func _make_crest(house: Dictionary, index: int) -> Control:
 	crest.add_child(btn)
 	var label := Label.new()
 	label.name = "Name"
-	label.text = str(house["name"]).trim_prefix("House ")
+	label.text = str(house["name"]).trim_prefix("Haus ")
 	label.add_theme_font_size_override("font_size", 14)
 	label.add_theme_color_override("font_color", TEXT_WARM)
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -784,7 +784,7 @@ func _net_show_choice() -> void:
 	_net_copy_btn.visible = false
 	_net_copy_note.visible = false
 	_net_primary = ""
-	_net_status_label.text = "Two copies of Great Houses, one match. " \
+	_net_status_label.text = "Two copies of Great Hauses, one match. " \
 		+ "One of you hosts; the other joins by address."
 	_set_net_side_index(_net_side_index)
 

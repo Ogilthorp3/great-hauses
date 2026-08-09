@@ -3,7 +3,7 @@ extends RefCounted
 ## The cinematic barrier: turn flow may not advance while one player is still
 ## watching a duel.
 ##
-## A capture in Great Houses is not an instant — it is a several-second
+## A capture in Great Hauses is not an instant — it is a several-second
 ## slow-motion duel with a camera swoop and a kill line. Both players must see
 ## it. Without a barrier the fast machine finishes its animation, its player
 ## clicks the next move, the host validates it (the ENGINE is already ahead of

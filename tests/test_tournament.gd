@@ -16,7 +16,7 @@ var seeds := ["h1", "h2", "h3", "h4", "h5", "h6", "h7", "h8"]
 
 
 func _initialize() -> void:
-	print("=== Great Houses — tournament bracket test suite ===")
+	print("=== Great Hauses — tournament bracket test suite ===")
 	Tournament.clear_saved(SAVE)
 	_test_seeded_rivals()
 	_test_create_and_playin()

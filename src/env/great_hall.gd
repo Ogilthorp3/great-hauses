@@ -3,7 +3,7 @@ extends Node3D
 ## Builds the torch-lit great hall around the chess board: stone floor and
 ## perimeter walls (MultiMesh — 1 draw call each), corner pillars, two feast
 ## tables, eight flickering torches (src/env/torch.gd), NINE wall banners
-## (src/env/banner.gd) awaiting the Great Houses' colors, and the Throne of
+## (src/env/banner.gd) awaiting the Great Hauses' colors, and the Throne of
 ## Blades (custom prop) against the far wall. `summon_champion_dragon()` /
 ## `dragon_wink()` stage the championship dragon above it — no extra lights.
 ##
@@ -98,7 +98,7 @@ func _ready() -> void:
 		_fps_probe = true
 		print("ENV_FPS probe armed — 10 one-second samples then quit")
 	if args.has("--env-banner-test"):
-		# Nine original Great House colors (wolf/lion/stag/dragon/kraken/
+		# Nine original Great Haus colors (wolf/lion/stag/dragon/kraken/
 		# rose/sun/falcon/trout archetypes) — proves per-banner recolor.
 		set_banner_colors([
 			Color(0.75, 0.78, 0.82),  # House Winterhowl — grey wolf
@@ -313,7 +313,7 @@ func _build_torches() -> void:
 
 
 func _build_banners() -> void:
-	## Nine stations for the nine Great Houses — see the index map up top.
+	## Nine stations for the nine Great Hauses — see the index map up top.
 	var specs := [
 		[Vector3(-4.0, FLOOR_Y, WALL_HALF), PI],        # 0 far wall
 		[Vector3(0.0, FLOOR_Y, WALL_HALF), PI],         # 1 far wall center

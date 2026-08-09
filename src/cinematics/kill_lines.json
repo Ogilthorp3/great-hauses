@@ -1,15 +1,15 @@
 {
-  "_readme": "Caption pool for DuelDirector. Tokens: {ap}/{vp} attacker/victim piece, {ah}/{vh} house display names, {aa}/{va} house sigil animals, {am}/{vm} house mottos, {wh} winning house (checkmate only), {p}/{h}/{a}/{m} piece/house/animal/motto (promotion only). Entries may pin 'attacker' or 'victim' to a piece name (pawn/rook/knight/bishop/queen/king). All lines are original — archetype homage only, no borrowed dialogue or names.",
+  "_readme": "Caption pool for DuelDirector. Tokens: {ap}/{vp} attacker/victim piece, {ah}/{vh} haus display names, {aa}/{va} haus sigil animals, {am}/{vm} haus mottos, {wh} winning haus (checkmate only), {p}/{h}/{a}/{m} piece/haus/animal/motto (promotion only). Entries may pin 'attacker' or 'victim' to a piece name (pawn/rook/knight/bishop/queen/king). All lines are original — archetype homage only, no borrowed dialogue or names.",
   "houses": {
-    "FROST": { "name": "House Frost", "animal": "wolf", "motto": "The Cold Keeps Count", "color": "#9fc6ff" },
-    "EMBER": { "name": "House Ember", "animal": "lion", "motto": "Every Debt Burns", "color": "#ffb347" },
-    "STORM": { "name": "House Stormcrown", "animal": "stag", "motto": "Ours Is the Thunder", "color": "#f2e28a" },
-    "PYRE": { "name": "House Pyrewing", "animal": "dragon", "motto": "Fire Answers Fire", "color": "#ff6a4d" },
-    "TIDE": { "name": "House Saltide", "animal": "kraken", "motto": "The Deep Reclaims", "color": "#7fd0c9" },
-    "BLOOM": { "name": "House Highbloom", "animal": "rose", "motto": "Grow Where They Fall", "color": "#8fd17e" },
-    "DAWN": { "name": "House Dawnspear", "animal": "sun", "motto": "Unbent Beneath the Sun", "color": "#ffd36b" },
-    "GALE": { "name": "House Galecrest", "animal": "falcon", "motto": "The Sky Keeps Its Own", "color": "#cfd8ff" },
-    "FORD": { "name": "House Silverford", "animal": "trout", "motto": "The River Remembers", "color": "#b8c4cc" }
+    "FROST": { "name": "Haus Frost", "animal": "wolf", "motto": "The Cold Keeps Count", "color": "#9fc6ff" },
+    "EMBER": { "name": "Haus Ember", "animal": "lion", "motto": "Every Debt Burns", "color": "#ffb347" },
+    "STORM": { "name": "Haus Stormcrown", "animal": "stag", "motto": "Ours Is the Thunder", "color": "#f2e28a" },
+    "PYRE": { "name": "Haus Pyrewing", "animal": "dragon", "motto": "Fire Answers Fire", "color": "#ff6a4d" },
+    "TIDE": { "name": "Haus Saltide", "animal": "kraken", "motto": "The Deep Reclaims", "color": "#7fd0c9" },
+    "BLOOM": { "name": "Haus Highbloom", "animal": "rose", "motto": "Grow Where They Fall", "color": "#8fd17e" },
+    "DAWN": { "name": "Haus Dawnspear", "animal": "sun", "motto": "Unbent Beneath the Sun", "color": "#ffd36b" },
+    "GALE": { "name": "Haus Galecrest", "animal": "falcon", "motto": "The Sky Keeps Its Own", "color": "#cfd8ff" },
+    "FORD": { "name": "Haus Silverford", "animal": "trout", "motto": "The River Remembers", "color": "#b8c4cc" }
   },
   "kill_lines": [
     { "text": "The {aa} of {ah} remembers, ser {vp}." },

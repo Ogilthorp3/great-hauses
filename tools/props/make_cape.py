@@ -1,13 +1,13 @@
 #!/usr/bin/env blender --python
 """
-make_cape.py — Great Houses: the king's cape (TYPE signature gear).
+make_cape.py — Great Hauses: the king's cape (TYPE signature gear).
 
 Run headless:
   /Applications/Blender.app/Contents/MacOS/Blender -b --python \
       tools/props/make_cape.py -- <out_dir>
 
 Output: cape.glb — a low-poly draped cape sheet, neutral mid-grey cloth
-(runtime multiplies it with the house secondary color via the standard
+(runtime multiplies it with the haus secondary color via the standard
 tint pipeline; legacy sides get the FROST/EMBER tint).
 
 Authored in KayKit Rig_Medium CHEST-BONE space, mirroring the rigid

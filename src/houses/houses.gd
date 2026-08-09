@@ -1,14 +1,14 @@
 class_name HouseRegistry
 extends RefCounted
-## The roster of Great Houses — discovered from HOUSE PACKS, not hardcoded.
+## The roster of Great Hauses — discovered from HAUS PACKS, not hardcoded.
 ##
-## A house is a FOLDER holding a house.json manifest (see HousePack and
-## docs/HOUSE-PACK.md). This registry finds them in two places:
+## A haus is a FOLDER holding a haus.json manifest (see HousePack and
+## docs/HAUS-PACK.md). This registry finds them in two places:
 ##
-##   res://houses/    the nine that ship with the game, in index.json order
+##   res://hauses/    the nine that ship with the game, in index.json order
 ##                    (that order IS the tournament seed order)
-##   user://houses/   anything a player dropped in, alphabetically — a DLC
-##                    house needs no rebuild, no recompile and no patch
+##   user://hauses/   anything a player dropped in, alphabetically — a DLC
+##                    haus needs no rebuild, no recompile and no patch
 ##
 ## Static registry — no autoload needed; any script can call
 ## `HouseRegistry.get_house("winterfang")`. Data is loaded once and cached in a
@@ -23,20 +23,20 @@ extends RefCounted
 ## tests, the validator tool and anything that wants to show a modder what
 ## happened.
 ##
-## Piece colouring: `get_house_tint(house, "kit")` is the house's JERSEY — the
+## Piece colouring: `get_house_tint(house, "kit")` is the haus's JERSEY — the
 ## one saturated colour its kit is painted in (PieceAssets.kit_material);
 ## `get_house_tint(house, "piece"/"tower")` is the faint whisper natural
 ## surfaces take (PieceAssets.natural_material); `get_house_coat(house)` names
 ## the horse's natural coat. Which surface gets which is decided by
 ## PieceAssets.MATERIAL_ROLES, never here.
 
-## Where the shipped houses live, and where a dropped-in one goes.
-const BUILTIN_DIR := "res://houses"
-const USER_DIR := "user://houses"
+## Where the shipped hauses live, and where a dropped-in one goes.
+const BUILTIN_DIR := "res://hauses"
+const USER_DIR := "user://hauses"
 ## Names the shipped packs load in — the tournament seed order. Directories not
-## listed here are still discovered (a house you are working on), appended in
+## listed here are still discovered (a haus you are working on), appended in
 ## alphabetical order after the ones that are.
-const INDEX_PATH := "res://houses/index.json"
+const INDEX_PATH := "res://hauses/index.json"
 
 static var _by_id: Dictionary = {}     # id -> house Dictionary
 static var _order: Array[String] = []  # ids in load order (= seed order)
@@ -55,8 +55,8 @@ static func _ensure_loaded() -> void:
 	for dir_path in _pack_dirs(USER_DIR, []):
 		_ingest(HousePack.load_from_dir(dir_path, "installed"))
 	if _by_id.is_empty():
-		push_error(("HouseRegistry: no house packs found. The nine ship in %s; "
-				+ "a house you add goes in %s/<id>/house.json")
+		push_error(("HouseRegistry: no haus packs found. The nine ship in %s; "
+				+ "a haus you add goes in %s/<id>/haus.json")
 				% [BUILTIN_DIR, USER_DIR])
 
 
@@ -68,27 +68,27 @@ static func _ingest(rep: Dictionary) -> void:
 	if not rep["ok"]:
 		# A refused pack is a paragraph a modder can act on, printed ONCE, and
 		# it costs the rest of the roster nothing.
-		push_warning("house pack refused: %s" % where)
-		print("HOUSE PACK REFUSED  %s" % where)
+		push_warning("haus pack refused: %s" % where)
+		print("HAUS PACK REFUSED  %s" % where)
 		for e in rep["errors"]:
 			print("    error: %s" % str(e))
 		return
 	if _by_id.has(id):
 		var clash := str(_by_id[id].get("pack_dir", "?"))
 		rep["ok"] = false
-		(rep["errors"] as Array).append(("house id '%s' is already provided by %s "
+		(rep["errors"] as Array).append(("haus id '%s' is already provided by %s "
 				+ "— two packs cannot claim the same id; rename one") % [id, clash])
-		print("HOUSE PACK REFUSED  %s\n    error: %s" % [where, rep["errors"][-1]])
+		print("HAUS PACK REFUSED  %s\n    error: %s" % [where, rep["errors"][-1]])
 		return
 	for w in rep["warnings"]:
-		print("house pack %-14s warning: %s" % [id, str(w)])
+		print("haus pack %-14s warning: %s" % [id, str(w)])
 	_by_id[id] = rep["house"]
 	_order.append(id)
 	if str(rep["source"]) == "builtin":
 		_builtin.append(id)
 	else:
 		_installed.append(id)
-		print("HOUSE PACK LOADED   %s (%s) from %s"
+		print("HAUS PACK LOADED   %s (%s) from %s"
 				% [str(rep["house"]["name"]), id, where])
 
 
@@ -139,19 +139,19 @@ static func reload() -> void:
 	_ensure_loaded()
 
 
-## All house ids in load order — this order is the tournament seed order.
+## All haus ids in load order — this order is the tournament seed order.
 static func house_ids() -> Array[String]:
 	_ensure_loaded()
 	return _order.duplicate()
 
 
-## Just the houses that ship with the game.
+## Just the hauses that ship with the game.
 static func builtin_house_ids() -> Array[String]:
 	_ensure_loaded()
 	return _builtin.duplicate()
 
 
-## Just the houses a player dropped into user://houses/.
+## Just the hauses a player dropped into user://hauses/.
 static func installed_house_ids() -> Array[String]:
 	_ensure_loaded()
 	return _installed.duplicate()
@@ -164,7 +164,7 @@ static func load_report() -> Array:
 	return _reports.duplicate()
 
 
-## Full data Dictionary for a house id ({} if unknown).
+## Full data Dictionary for a haus id ({} if unknown).
 static func get_house(id: String) -> Dictionary:
 	_ensure_loaded()
 	return _by_id.get(id, {})
@@ -188,8 +188,8 @@ static func get_colors(house) -> Dictionary:
 	}
 
 
-## A house tint by role.
-##   "kit"          THE JERSEY — the one saturated colour the house paints its
+## A haus tint by role.
+##   "kit"          THE JERSEY — the one saturated colour the haus paints its
 ##                  KIT in (tabard, cloak, hood, shield face, caparison, helm,
 ##                  crest). Loud on purpose: since the material-ROLE pass it is
 ##                  no longer painted on steel, skin, leather, bone or horse.
@@ -213,15 +213,15 @@ static func get_house_tint(house, side_role: String = "piece") -> Color:
 	return Color.html(tints[key])
 
 
-## The house's horse COAT name — bay, chestnut, black, white_grey, dun and
-## their variants (src/houses/coats.json). Never a house hue: a mount's house
+## The haus's horse COAT name — bay, chestnut, black, white_grey, dun and
+## their variants (src/houses/coats.json). Never a haus hue: a mount's haus
 ## identity is worn on the caparison, not grown on the animal.
 static func get_house_coat(house) -> String:
 	var h := _resolve(house)
 	return str(h.get("coat", HousePack.coat_default()))
 
 
-## The coat palette a house's mount wears, as {material name -> Color}. A pack
+## The coat palette a haus's mount wears, as {material name -> Color}. A pack
 ## may name one of the natural coats or supply its own (validated against the
 ## same law either way — see HousePack.is_natural_color).
 static func get_coat_palette(house) -> Dictionary:
@@ -246,19 +246,19 @@ static func get_tint_saturation(house) -> float:
 	return float(h["tints"].get("saturation", HousePack.DEFAULT_TINT_SATURATION))
 
 
-## Path of the house's sigil image ("" when the pack ships none).
+## Path of the haus's sigil image ("" when the pack ships none).
 static func sigil_path(house) -> String:
 	var h := _resolve(house)
 	return str(h.get("sigil", ""))
 
 
-## Path of the house's helm-crest model, worn by knight/queen/king ("" = none).
+## Path of the haus's helm-crest model, worn by knight/queen/king ("" = none).
 static func crest_path(house) -> String:
 	var h := _resolve(house)
 	return str(h.get("crest", ""))
 
 
-## Path of the house's PAWN half-helm model ("" = none).
+## Path of the haus's PAWN half-helm model ("" = none).
 static func pawn_helm_path(house) -> String:
 	var h := _resolve(house)
 	return str(h.get("pawn_helm", ""))
@@ -278,7 +278,7 @@ static func material_roles(house) -> Dictionary:
 
 
 ## Every installed pack's role declarations, merged. Surface names are prefixed
-## with the house id by construction, so this merge cannot collide.
+## with the haus id by construction, so this merge cannot collide.
 static func all_material_roles() -> Dictionary:
 	_ensure_loaded()
 	var out := {}
@@ -288,14 +288,14 @@ static func all_material_roles() -> Dictionary:
 	return out
 
 
-## The taunt pool a pack ships with, {beat -> [lines]} ({} = none; the house
+## The taunt pool a pack ships with, {beat -> [lines]} ({} = none; the haus
 ## then uses whatever src/banter/banter_lines.json holds for it).
 static func banter_pool(house) -> Dictionary:
 	var h := _resolve(house)
 	return h.get("banter", {})
 
 
-## Every pack-supplied taunt pool, {house id -> {beat -> [lines]}}.
+## Every pack-supplied taunt pool, {haus id -> {beat -> [lines]}}.
 static func all_banter_pools() -> Dictionary:
 	_ensure_loaded()
 	var out := {}
@@ -306,7 +306,7 @@ static func all_banter_pools() -> Dictionary:
 	return out
 
 
-## Path of the house's own music ("" = the shipped playlist).
+## Path of the haus's own music ("" = the shipped playlist).
 static func music_path(house) -> String:
 	var h := _resolve(house)
 	return str(h.get("music", ""))
@@ -324,7 +324,7 @@ static func load_sigil(house) -> Texture2D:
 	return ImageTexture.create_from_image(img)
 
 
-## Accept either a house id String or an already-fetched house Dictionary.
+## Accept either a haus id String or an already-fetched haus Dictionary.
 static func _resolve(house) -> Dictionary:
 	if house is Dictionary:
 		return house

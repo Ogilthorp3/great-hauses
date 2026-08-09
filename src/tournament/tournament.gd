@@ -1,6 +1,6 @@
 class_name Tournament
 extends RefCounted
-## Single-elimination war for the throne — nine Great Houses, headless-testable.
+## Single-elimination war for the throne — nine Great Hauses, headless-testable.
 ##
 ## Bracket shape (9 contenders: the player's house + 8 seeded rivals):
 ##   Round 0  Play-In        rivals[6] vs rivals[7] (the two lowest seeds)
@@ -63,7 +63,7 @@ const BRACKET_RIVALS := 8
 ## the bracket holds.
 ##
 ## THE CAP IS NOT COSMETIC (house-pack pass, 2026-08-09). Houses are DISCOVERED
-## now — nine ship, and a player may drop more into user://houses/ — so "every
+## now — nine ship, and a player may drop more into user://hauses/ — so "every
 ## house that is not mine" stopped being a synonym for "eight". With ten houses
 ## installed this returned nine, `create` refused the count, and picking
 ## "Begin Tournament" silently produced no bracket at all: the one way an

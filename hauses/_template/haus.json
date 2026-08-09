@@ -1,29 +1,29 @@
 {
   "_readme": [
-    "COPY THIS FOLDER, RENAME IT, EDIT THIS FILE. That is a house.",
+    "COPY THIS FOLDER, RENAME IT, EDIT THIS FILE. That is a haus.",
     "",
-    "  1. cp -R houses/_template  <somewhere>/mynewhouse",
-    "  2. change \"id\" to mynewhouse (lowercase, unique — it is how everything",
-    "     refers to this house, including your own material names below)",
-    "  3. put the folder in user://houses/ — on macOS:",
-    "     ~/Library/Application Support/Godot/app_userdata/Great Houses/houses/",
+    "  1. cp -R hauses/_template  <somewhere>/mynewhaus",
+    "  2. change \"id\" to mynewhaus (lowercase, unique — it is how everything",
+    "     refers to this haus, including your own material names below)",
+    "  3. put the folder in user://hauses/ — on macOS:",
+    "     ~/Library/Application Support/Godot/app_userdata/Great Hauses/hauses/",
     "  4. check it:  Godot --headless -s res://tools/validate_house_pack.gd -- <dir>",
     "  5. start the game. Your banner is in the Hall.",
     "",
     "Every field below except \"id\" is optional and degrades to a documented",
     "default with a warning. The full guide, and the reasons behind the two",
-    "hard rules (the natural coat, and material roles): docs/HOUSE-PACK.md",
+    "hard rules (the natural coat, and material roles): docs/HAUS-PACK.md",
     "",
     "JSON has no comments, so the notes live in these \"_\" keys. The loader",
     "ignores them; you can delete them."
   ],
 
   "format": 1,
-  "id": "yourhouse",
-  "name": "House Yourhouse",
+  "id": "yourhaus",
+  "name": "Haus Yourhaus",
 
   "_archetype": [
-    "Picks the VOICE your house taunts in (wolf, lion, stag, dragon, kraken,",
+    "Picks the VOICE your haus taunts in (wolf, lion, stag, dragon, kraken,",
     "rose, sun, falcon, trout, raven — or your own word, which falls back to a",
     "generic proud-and-dangerous voice), and the mark tools/gen_sigils.gd draws",
     "if you let it draw one."
@@ -60,7 +60,7 @@
   "_coat": [
     "THE HARD RULE. Your horse is a horse: bay, dark_bay, chestnut,",
     "liver_chestnut, black, white_grey, dapple_grey, drowned_grey, dun.",
-    "Pick one that stands off your jersey — a mount's house identity is worn on",
+    "Pick one that stands off your jersey — a mount's haus identity is worn on",
     "its caparison, not grown on the animal. (You may also declare your own",
     "\"coat_palette\", but every colour in it must still be a colour a horse",
     "comes in: near-colourless, or a warm brown.)"
@@ -79,7 +79,7 @@
     "crest      the knights'/queens'/kings' crest. Name the MESH NODE Crest_*",
     "           and it takes the jersey. This one TOWERS over the head.",
     "Both are ordinary .glb files — they do not need importing.",
-    "houses/_examples/ravenmark/make_props.gd builds a working pair of both in",
+    "hauses/_examples/ravenmark/make_props.gd builds a working pair of both in",
     "~200 lines of GDScript if you have no modelling tool."
   ],
   "sigil": "sigil.png",
@@ -87,7 +87,7 @@
   "_materials": [
     "THE OTHER HARD RULE, and the reason this format exists.",
     "",
-    "The game paints your house colour on KIT and on nothing else. Steel,",
+    "The game paints your haus colour on KIT and on nothing else. Steel,",
     "leather, wood, stone, skin, bone and the horse's coat are NATURAL and keep",
     "their own colours; a crown is REGALIA and stays metal; a sigil or banner is",
     "HERALDRY and carries its own artwork. Four rounds of art work went into",
@@ -99,10 +99,10 @@
     "here, or the engine will refuse to paint it and the role gate will fail:",
     "",
     "  \"materials\": {",
-    "    \"yourhouse_plume\":    \"kit\",",
-    "    \"yourhouse_beak\":     \"natural:bone\",",
-    "    \"yourhouse_pauldron\": \"natural:steel\",",
-    "    \"yourhouse_strap\":    \"natural:leather\"",
+    "    \"yourhaus_plume\":    \"kit\",",
+    "    \"yourhaus_beak\":     \"natural:bone\",",
+    "    \"yourhaus_pauldron\": \"natural:steel\",",
+    "    \"yourhaus_strap\":    \"natural:leather\"",
     "  }",
     "",
     "roles:  kit · natural:<stuff> · regalia · heraldry · effect",
@@ -115,12 +115,12 @@
     "            (types: pawn knight bishop queen king — there is no rook, the",
     "            rook is a watchtower flying your banner). If you override the",
     "            army you must declare at least one natural: a soldier made",
-    "            entirely of house colour is the monochrome army this whole",
+    "            entirely of haus colour is the monochrome army this whole",
     "            system exists to end.",
     "  \"banter\": { \"game_start\": [ 8 lines ], ... } — your rival's taunts.",
     "            Beats: game_start player_captured rival_captured check_given",
     "            check_received game_end. <=90 characters, {piece} substitutes.",
-    "  \"music\":  \"march.ogg\" — your house's own theme.",
-    "See houses/_examples/ravenmark/house.json for all three, filled in."
+    "  \"music\":  \"march.ogg\" — your haus's own theme.",
+    "See hauses/_examples/ravenmark/haus.json for all three, filled in."
   ]
 }

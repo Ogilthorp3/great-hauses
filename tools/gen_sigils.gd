@@ -1,22 +1,22 @@
 extends SceneTree
 ## tools/gen_sigils.gd — procedural heraldic sigil generator.
 ##
-## Renders one 256x256 shield-shaped PNG per Great House into
+## Renders one 256x256 shield-shaped PNG per Great Haus into
 ## assets/sigils/<id>.png. Pure Image-API rasterization of signed distance
-## fields — abstract geometric marks in the house colors, zero external art.
+## fields — abstract geometric marks in the haus colors, zero external art.
 ##
 ## Run headless from the project root:
 ##   /Applications/Godot.app/Contents/MacOS/Godot --path . --headless \
 ##       -s res://tools/gen_sigils.gd
 ## Exit code 0 = every sigil written, 1 = any failure.
-## Re-run + `--import` + commit the PNGs whenever a house's colors change.
+## Re-run + `--import` + commit the PNGs whenever a haus's colors change.
 ##
-## MODDERS: it also draws a sigil for ONE house pack, straight into the pack
-## folder, so a new house has heraldry before it has an artist:
-##   ... -s res://tools/gen_sigils.gd -- --pack ~/houses/ravenmark
+## MODDERS: it also draws a sigil for ONE haus pack, straight into the pack
+## folder, so a new haus has heraldry before it has an artist:
+##   ... -s res://tools/gen_sigils.gd -- --pack ~/hauses/ravenmark
 ## The mark is picked by the pack's `archetype`; an archetype this generator
 ## does not know falls back to the wolf's bars, which is a fine placeholder and
-## an obvious one. See docs/HOUSE-PACK.md.
+## an obvious one. See docs/HAUS-PACK.md.
 
 const SIZE := 256
 const OUT_DIR := "res://assets/sigils"
@@ -41,7 +41,7 @@ func _initialize() -> void:
 		return
 	var houses := _load_houses()
 	if houses.is_empty():
-		push_error("gen_sigils: no house packs found under %s" % HouseRegistry.BUILTIN_DIR)
+		push_error("gen_sigils: no haus packs found under %s" % HouseRegistry.BUILTIN_DIR)
 		quit(1)
 		return
 	var abs_dir := ProjectSettings.globalize_path(OUT_DIR)
@@ -61,7 +61,7 @@ func _initialize() -> void:
 	quit(1 if failures > 0 else 0)
 
 
-## The shipped houses, straight out of their packs.
+## The shipped hauses, straight out of their packs.
 func _load_houses() -> Array:
 	var out: Array = []
 	for id in HouseRegistry.builtin_house_ids():
@@ -76,7 +76,7 @@ func _render_one_pack(dir_path: String) -> int:
 	for e in rep["errors"]:
 		print("  error: %s" % str(e))
 	if str(rep["id"]).is_empty():
-		print("SIGIL FAIL  %s has no readable house.json" % dir_path)
+		print("SIGIL FAIL  %s has no readable haus.json" % dir_path)
 		return 1
 	var house: Dictionary = rep["house"]
 	var out_path := dir_path.path_join("sigil.png")
@@ -89,7 +89,7 @@ func _render_one_pack(dir_path: String) -> int:
 		print("SIGIL FAIL  %s (save_png err=%d)" % [out_path, err])
 		return 1
 	print("SIGIL OK    %s (%s) -> %s" % [str(house["id"]), str(house["archetype"]), out_path])
-	print("            add  \"sigil\": \"sigil.png\"  to house.json if it is not there yet")
+	print("            add  \"sigil\": \"sigil.png\"  to haus.json if it is not there yet")
 	return 0
 
 
@@ -256,7 +256,7 @@ func _house_layers(archetype: String, primary: Color, secondary: Color, accent: 
 	# the wolf's rake so the pack has heraldry to look at, and say so once.
 	push_warning(("gen_sigils: no mark for archetype '%s' — drawing the wolf rake "
 			+ "as a placeholder. Add a _mark_%s() beside the others, or draw your "
-			+ "own sigil.png and point house.json at it")
+			+ "own sigil.png and point haus.json at it")
 			% [archetype, archetype.to_snake_case()])
 	return _mark_wolf(secondary)
 

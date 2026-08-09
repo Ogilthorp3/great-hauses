@@ -1,5 +1,5 @@
 extends Node
-## Great Houses — boot flow controller (the project's main scene).
+## Great Hauses — boot flow controller (the project's main scene).
 ##
 ## Boots into the Hall of Banners (house select). When the player completes a
 ## selection, fills Session and swaps to the game scene. Dev/CI probe flags

@@ -40,7 +40,7 @@ func _initialize() -> void:
 
 
 func _main() -> void:
-	print("=== Great Houses — duel facing headless suite ===")
+	print("=== Great Hauses — duel facing headless suite ===")
 	await process_frame
 	await process_frame
 	Engine.time_scale = 1.0

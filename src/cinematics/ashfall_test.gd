@@ -115,7 +115,7 @@ func _run() -> void:
 		if champ:
 			_schedule_shot(10.7, FINALE_DIR + "/crowning.png")  # wing-settle, throne
 			_schedule_shot(12.6, FINALE_DIR + "/tableau.png")   # the caption beat
-	await _spectator.play_ashfall(1, "House Winterfang", losers, champ)
+	await _spectator.play_ashfall(1, "Haus Winterfang", losers, champ)
 	var wall := float(Time.get_ticks_msec() - t0) / 1000.0
 	await _pause(0.1)   # let queue_free flush
 	_check("ashfall-finished-signal", finished["v"])
@@ -284,4 +284,4 @@ func _show_hint(text: String) -> void:
 		l.position = Vector2(18, 14)
 		layer.add_child(l)
 	(layer.get_node("Hint") as Label).text = \
-		"Great Houses — dragon spectator / ashfall test stage\n" + text
+		"Great Hauses — dragon spectator / ashfall test stage\n" + text

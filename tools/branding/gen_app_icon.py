@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-GREAT HOUSES — app icon, CONCEPT A: THE HERALDIC SHIELD.  (v2 — judged build)
+GREAT HAUSES — app icon, CONCEPT A: THE HERALDIC SHIELD.  (v2 — judged build)
 
-A heater shield (the same silhouette the in-game house sigils use, so the icon
+A heater shield (the same silhouette the in-game haus sigils use, so the icon
 belongs to the game) party per pale — crimson dexter, steel sinister, the two
 armies of the board — charged overall with a bold gold chess king.
 
@@ -654,7 +654,7 @@ def contact_sheet(icons):
 
     sheet = Image.new("RGB", (W, H), (0x22, 0x22, 0x24))
     d = ImageDraw.Draw(sheet)
-    d.text((PAD, 30), "GREAT HOUSES  ·  concept A — the heraldic shield  (v2, judged build)",
+    d.text((PAD, 30), "GREAT HAUSES  ·  concept A — the heraldic shield  (v2, judged build)",
            font=_font(38, True), fill=(0xE6, 0xD8, 0xB4))
 
     def band(y, bg, fg, label, notes=None):
@@ -689,7 +689,7 @@ def contact_sheet(icons):
     gold_t = (0xE6, 0xD8, 0xB4)
     pale = (0xC9, 0xC9, 0xCF)
     notes = [
-        ("A heater shield — the silhouette the in-game house sigils", _font(30), pale),
+        ("A heater shield — the silhouette the in-game haus sigils", _font(30), pale),
         ("already use — party per pale, crimson and steel: the two", _font(30), pale),
         ("armies of the board. Charged overall with a gold chess king.", _font(30), pale),
         ("", _font(12), pale),

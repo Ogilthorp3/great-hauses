@@ -1,4 +1,4 @@
-## perf_driver.gd — screenshot-free performance harness (Great Houses).
+## perf_driver.gd — screenshot-free performance harness (Great Hauses).
 ##
 ## THE INSTRUMENT LIES UNTIL PROVEN OTHERWISE. This file exists because this
 ## project already paid for that lesson once: an e2e run that takes

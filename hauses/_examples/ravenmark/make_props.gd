@@ -1,30 +1,30 @@
 extends SceneTree
-## make_props.gd — build House Ravenmark's own helm and crest, with no Blender.
+## make_props.gd — build Haus Ravenmark's own helm and crest, with no Blender.
 ##
 ##   /Applications/Godot.app/Contents/MacOS/Godot --headless --path <project> \
-##       -s res://houses/_examples/ravenmark/make_props.gd -- [out dir]
+##       -s res://hauses/_examples/ravenmark/make_props.gd -- [out dir]
 ##
-## Writes pawn_helm.glb and crest.glb next to house.json (or into `out dir`).
+## Writes pawn_helm.glb and crest.glb next to haus.json (or into `out dir`).
 ## It exists for two reasons:
 ##
-##   1. It is how this example pack's art was actually made — a house pack in
+##   1. It is how this example pack's art was actually made — a haus pack in
 ##      this repo with art nobody can regenerate is exactly the "artifact older
 ##      than its own sources" defect this project has already caught once.
 ##   2. It is the shortest possible demonstration of the ENGINE'S DRESSING
-##      CONTRACT (docs/HOUSE-PACK.md). Look at the material names below:
+##      CONTRACT (docs/HAUS-PACK.md). Look at the material names below:
 ##
 ##        pawnhelm_iron / pawnhelm_accent   the two surfaces the game paints on
 ##                                          a pawn's half-helm — dome in the
-##                                          house colour, rim and motif in its
+##                                          haus colour, rim and motif in its
 ##                                          charge. Name them this and you get
 ##                                          dressed for free.
 ##        the mesh node Crest_ravenmark     any mesh whose NODE name starts with
 ##                                          "Crest_" is KIT: the plume takes the
-##                                          house jersey.
+##                                          haus jersey.
 ##        ravenmark_beak                    ...and the one surface that must NOT
 ##                                          take it. A beak is BONE. It is
 ##                                          declared "natural:bone" in
-##                                          house.json, and that declaration is
+##                                          haus.json, and that declaration is
 ##                                          why this raven has a pale beak
 ##                                          instead of a purple one.
 ##
@@ -53,7 +53,7 @@ const C_BONE := Color(0.882, 0.855, 0.784)
 
 
 func _initialize() -> void:
-	var out_dir := "res://houses/_examples/ravenmark"
+	var out_dir := "res://hauses/_examples/ravenmark"
 	var args := OS.get_cmdline_user_args()
 	if args.size() > 0:
 		out_dir = str(args[0])
@@ -73,8 +73,8 @@ func _build_helm() -> Node3D:
 	var root := Node3D.new()
 	root.name = "pawn_helm_ravenmark"
 	var mi := MeshInstance3D.new()
-	# The mesh node carries the house name: the costume suite asserts a pawn's
-	# helm is ITS house's helm and not a shared one, by looking for the id here.
+	# The mesh node carries the haus name: the costume suite asserts a pawn's
+	# helm is ITS haus's helm and not a shared one, by looking for the id here.
 	mi.name = "Helm_ravenmark"
 	var mesh := ArrayMesh.new()
 
@@ -86,7 +86,7 @@ func _build_helm() -> Node3D:
 
 	var acc := SurfaceTool.new()
 	acc.begin(Mesh.PRIMITIVE_TRIANGLES)
-	# 2. the flared rim around the brow — every house's helm carries its charge
+	# 2. the flared rim around the brow — every haus's helm carries its charge
 	#    here, so a footman reads by COLOUR even when his motif is 4 px tall
 	_band(acc, -0.505, -0.415, HELM_R * 1.045, HELM_R * 1.10, 18)
 	# 3. the beak: a straight corvid wedge over the nose, pointing down +Z
@@ -117,8 +117,8 @@ func _build_crest() -> Node3D:
 	root.name = "crest_ravenmark"
 	var mi := MeshInstance3D.new()
 	# "Crest_*" is an ENGINE contract: any mesh node named this way is KIT and
-	# takes the house jersey. The house id in the name is the costume suite's
-	# per-house check, same as the helm.
+	# takes the haus jersey. The haus id in the name is the costume suite's
+	# per-haus check, same as the helm.
 	mi.name = "Crest_ravenmark"
 	var mesh := ArrayMesh.new()
 
@@ -143,8 +143,8 @@ func _build_crest() -> Node3D:
 			Vector3(side * 0.30, -0.10, -0.56))
 	_commit(mesh, plume, PLUME, C_PLUME, 0.75)
 
-	# THE BEAK IS BONE. Declared "natural:bone" in house.json, which is what
-	# keeps the house purple off it — the single most important line in this
+	# THE BEAK IS BONE. Declared "natural:bone" in haus.json, which is what
+	# keeps the haus purple off it — the single most important line in this
 	# whole example.
 	var bone := SurfaceTool.new()
 	bone.begin(Mesh.PRIMITIVE_TRIANGLES)

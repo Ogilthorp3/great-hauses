@@ -279,7 +279,7 @@ vacuously), all emitters silenced, `hard_stop()` idempotent, run under 13 s.
   emitters (peak *live* count is lower), plus one screen-texture pass.
   `heat_shimmer_enabled = false` is the first lever; the flame body's 820 is
   the second. Measured only on an M4 Pro — treat mobile cost as unknown.
-- Colour is currently one palette. If houses need tinted fire (green, blue),
+- Colour is currently one palette. If hauses need tinted fire (green, blue),
   the ramps should move behind a small palette resource.
 - The muzzle **flash and shock ring are camera-facing/axis-aligned quads**;
   from directly down the barrel the ring reads as a circle. Fine for the

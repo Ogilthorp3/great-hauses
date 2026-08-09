@@ -34,7 +34,7 @@ Conversion: source GLB -> game-ready static GLB via headless Blender 4.0.2,
   (vertex groups stripped, rig and actions dropped) and adds original
   war-tack authored in this project's art style: "Saddle" (leather seat with
   pommel + cantle) and "Caparison" (two draped flank panels, UV-mapped so the
-  runtime can drop the house banner cloth straight on). 2506 tris total.
+  runtime can drop the haus banner cloth straight on). 2506 tris total.
 
   WHY STATIC — the source rig is FBX lineage (armature node scale 100, tiny
   bone-space data). Godot renders its skinned mesh correctly at scale ~1 but

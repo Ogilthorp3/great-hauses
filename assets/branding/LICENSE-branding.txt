@@ -1,13 +1,13 @@
-app-icon-*.png, GreatHouses.icns/.ico, wordmark-great-houses*.png — license + provenance
+app-icon-*.png, GreatHauses.icns/.ico, wordmark-great-houses*.png — license + provenance
 =========================================================================================
 
 These assets are ORIGINAL procedural raster art generated for the "Great
-Houses" battle-chess project on 2026-08-09 by the committed scripts in
+Hauses" battle-chess project on 2026-08-09 by the committed scripts in
 tools/branding/ (Python 3 + Pillow, deterministic seeded RNG, SEED = 1077):
 
   app-icon-{32,64,128,256,512,1024}.png  <- tools/branding/gen_app_icon.py
-  GreatHouses.icns  (macOS, 16..1024)     <- tools/branding/make_icns.py
-  GreatHouses.ico   (Windows, 16..256)   <- tools/branding/make_icns.py
+  GreatHauses.icns  (macOS, 16..1024)     <- tools/branding/make_icns.py
+  GreatHauses.ico   (Windows, 16..256)   <- tools/branding/make_icns.py
   wordmark-great-houses.png              <- tools/branding/gen_wordmark.py
   wordmark-great-houses-flat.png         <- tools/branding/gen_wordmark.py
 
@@ -27,7 +27,7 @@ WHAT THE MARK IS
 ----------------
 A heater shield party per pale — crimson dexter, steel sinister, the two
 armies of the board — charged overall with a gold chess king. The heater
-silhouette is deliberately the same one the in-game house sigils already use
+silhouette is deliberately the same one the in-game haus sigils already use
 (assets/sigils/), so the app icon is continuous with the product rather than
 decoration bolted on top.
 
@@ -37,7 +37,7 @@ invented:
   gold     <- Goldclaw secondary #d9a441 + accent #f0c96a, Hartcrown #cfa63b
   steel    <- Silverbrook primary #2c4d7c, Winterfang accent #7fb0d4
 ...then value-separated (see "greyscale" below), so the shipped hexes differ
-from the house hexes on purpose.
+from the haus hexes on purpose.
 
 DETAIL TIERS — why the sizes are not downsamples of each other
 --------------------------------------------------------------
@@ -63,10 +63,10 @@ TWO SELF-CHECKS RUN ON EVERY BUILD (they print PASS/FAIL)
   ground. The gold perimeter is what buys that margin, which is why the
   forged-iron rim material is applied only at 128px and up.
 
-Font: the wordmark sets "GREAT HOUSES" in Luminari, a system face shipped
+Font: the wordmark sets "GREAT HAUSES" in Luminari, a system face shipped
 with macOS. Font OUTLINES are used as raster input only — no font file is
 copied, embedded or redistributed. Fallbacks (Herculanum, Trattatello,
 Copperplate, Baskerville) are likewise system faces used as outlines only.
 
-License: these assets belong to the Great Houses project (Bertrand Nepveu).
+License: these assets belong to the Great Hauses project (Bertrand Nepveu).
 Internal project use; relicense as the project owner sees fit.

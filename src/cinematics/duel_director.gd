@@ -44,7 +44,7 @@ const LINES_PATH := "res://src/cinematics/kill_lines.json"
 ## House identity passed via meta ("winterfang", "House Winterfang", or an
 ## archetype like "wolf") resolves against the HouseRegistry roster — see
 ## _load_canonical_houses, which reads the roster rather than a data file
-## since houses became discovered PACKS (docs/HOUSE-PACK.md).
+## since hauses became discovered PACKS (docs/HAUS-PACK.md).
 ## Index-aligned with PieceView.Type and PieceView.House.
 const PIECE_NAMES: Array[String] = ["pawn", "rook", "knight", "bishop", "queen", "king"]
 const HOUSE_KEYS: Array[String] = ["FROST", "EMBER"]
@@ -1172,7 +1172,7 @@ func _house_info(key_or_name: String) -> Dictionary:
 			if str(houses[k].get("name", "")).nocasecmp_to(key_or_name) == 0:
 				h = houses[k]
 				break
-	var fallback_name := key_or_name if not key_or_name.is_empty() else "an unnamed house"
+	var fallback_name := key_or_name if not key_or_name.is_empty() else "an unnamed haus"
 	return {
 		"name": str(h.get("name", fallback_name)),
 		"house": str(h.get("name", fallback_name)),
@@ -1203,8 +1203,8 @@ func _load_lines() -> void:
 ## IT ASKS THE ROSTER NOW, NOT A FILE (house-pack pass, 2026-08-09). This used
 ## to FileAccess-read res://src/houses/houses.json directly. Houses are
 ## discovered house PACKS since then — one folder each, and a player may add
-## more (docs/HOUSE-PACK.md) — so that path stopped existing and _canon went
-## empty, which turns the checkmate caption from "House Winterfang takes the
+## more (docs/HAUS-PACK.md) — so that path stopped existing and _canon went
+## empty, which turns the checkmate caption from "Haus Winterfang takes the
 ## throne" into "winterfang takes the throne". Reading the roster instead fixes
 ## that AND gives a dropped-in house its proper name in the cinematic for free.
 func _load_canonical_houses() -> void:

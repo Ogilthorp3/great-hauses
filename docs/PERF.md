@@ -130,7 +130,7 @@ LOADSTEP`, armed only when the harness is in the tree). Measured per load:
 Two distinct costs, with different cures:
 
 * **`spawn-32-pieces`: 362 ms cold → 15 ms warm.** First use builds each
-  *type × house* mesh/material pair into the `PieceAssets` cache. This is
+  *type × haus* mesh/material pair into the `PieceAssets` cache. This is
   **CPU construction, not shader compilation** — it happens inside
   `_spawn_from_state()`, before anything is drawn. Confirmed by repetition:
   a cost that vanishes on load 2 is first-use construction.
@@ -168,7 +168,7 @@ next person gets the breakdown for free instead of re-deriving it.
 ### What should be done instead — the fix that keeps the contract
 
 **Warm `game.tscn` during the Hall of Banners.**
-`main.gd::_on_selection_complete()` already waits **0.75 s** after the house is
+`main.gd::_on_selection_complete()` already waits **0.75 s** after the haus is
 chosen — a deliberate beat, *"let the 'rides to war' banner breathe before the
 hall doors open"* — and only then calls `change_scene_to_file`. A
 `ResourceLoader.load_threaded_request()` fired into that beat would leave the

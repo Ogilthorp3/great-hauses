@@ -51,47 +51,47 @@ const SKELETONS := "res://assets/kaykit-skeletons"
 ## field for field. This is the whole proof of "no behaviour change": the port
 ## moved bytes between files, and these are the bytes.
 const GOLDEN := [
-	{"id": "winterfang", "archetype": "wolf", "name": "House Winterfang",
+	{"id": "winterfang", "archetype": "wolf", "name": "Haus Winterfang",
 		"seat": "Frosthollow", "motto": "The wolf remembers.",
 		"primary": "#8d99a6", "secondary": "#eef2f5", "accent": "#7fb0d4",
 		"piece": "#9fb4cc", "tower": "#8ca1b8", "kit": "#6f9fc9",
 		"coat": "white_grey"},
-	{"id": "goldclaw", "archetype": "lion", "name": "House Goldclaw",
+	{"id": "goldclaw", "archetype": "lion", "name": "Haus Goldclaw",
 		"seat": "Gildenspire", "motto": "A lion settles every account.",
 		"primary": "#8e1f2c", "secondary": "#d9a441", "accent": "#f0c96a",
 		"piece": "#d4a43c", "tower": "#b8862f", "kit": "#f0cc2a",
 		"coat": "chestnut"},
-	{"id": "hartcrown", "archetype": "stag", "name": "House Hartcrown",
+	{"id": "hartcrown", "archetype": "stag", "name": "Haus Hartcrown",
 		"seat": "Stormrest", "motto": "The storm answers to us.",
 		"primary": "#1d1a17", "secondary": "#cfa63b", "accent": "#e8c866",
 		"piece": "#8f5218", "tower": "#784514", "kit": "#7a3410",
 		"coat": "dapple_grey"},
-	{"id": "ashwyrm", "archetype": "dragon", "name": "House Ashwyrm",
+	{"id": "ashwyrm", "archetype": "dragon", "name": "Haus Ashwyrm",
 		"seat": "Cinderhold", "motto": "From ash, dominion.",
 		"primary": "#171214", "secondary": "#b3282d", "accent": "#e04b3a",
 		"piece": "#b03a2e", "tower": "#93302a", "kit": "#c2261e",
 		"coat": "black"},
-	{"id": "tidegrip", "archetype": "kraken", "name": "House Tidegrip",
+	{"id": "tidegrip", "archetype": "kraken", "name": "Haus Tidegrip",
 		"seat": "Brinehold", "motto": "The tide takes what it pleases.",
 		"primary": "#4c6357", "secondary": "#14181a", "accent": "#7d9c8d",
 		"piece": "#6f8a7d", "tower": "#5d7568", "kit": "#3f8a6d",
 		"coat": "drowned_grey"},
-	{"id": "thornvale", "archetype": "rose", "name": "House Thornvale",
+	{"id": "thornvale", "archetype": "rose", "name": "Haus Thornvale",
 		"seat": "Bloomhall", "motto": "Every rose keeps its thorns.",
 		"primary": "#2f5d3a", "secondary": "#d3b04a", "accent": "#8fbf6a",
 		"piece": "#79a04a", "tower": "#648540", "kit": "#4f9235",
 		"coat": "dun"},
-	{"id": "duskfire", "archetype": "sun", "name": "House Duskfire",
+	{"id": "duskfire", "archetype": "sun", "name": "Haus Duskfire",
 		"seat": "Sunspire", "motto": "The sun kneels for no one.",
 		"primary": "#c96a1e", "secondary": "#a3282a", "accent": "#f0a03c",
 		"piece": "#e07b2f", "tower": "#c2691f", "kit": "#e85f14",
 		"coat": "liver_chestnut"},
-	{"id": "swiftcrest", "archetype": "falcon", "name": "House Swiftcrest",
+	{"id": "swiftcrest", "archetype": "falcon", "name": "Haus Swiftcrest",
 		"seat": "Skyloft", "motto": "Honor rides the high wind.",
 		"primary": "#7fb3d9", "secondary": "#f2f6f9", "accent": "#4f86ad",
 		"piece": "#6fc2c9", "tower": "#5aa3ab", "kit": "#37b0c8",
 		"coat": "bay"},
-	{"id": "silverbrook", "archetype": "trout", "name": "House Silverbrook",
+	{"id": "silverbrook", "archetype": "trout", "name": "Haus Silverbrook",
 		"seat": "Rivergate", "motto": "The river binds us all.",
 		"primary": "#2c4d7c", "secondary": "#c9d3dc", "accent": "#8fb3d9",
 		"piece": "#6e8fc4", "tower": "#5d7aa9", "kit": "#3560ad",
@@ -102,7 +102,7 @@ const GOLDEN := [
 ## so each one differs from a KNOWN-GOOD pack by exactly one field.
 const SANE := {
 	"id": "probehouse",
-	"name": "House Probe",
+	"name": "Haus Probe",
 	"archetype": "wolf",
 	"seat": "Probehold",
 	"motto": "We test what we ship.",
@@ -120,7 +120,7 @@ func _initialize() -> void:
 
 
 func _main() -> void:
-	print("=== Great Houses — house-pack headless suite ===")
+	print("=== Great Hauses — house-pack headless suite ===")
 	assets = (load("res://src/board/piece_assets.gd") as GDScript).new()
 	assets.name = "PieceAssets"
 	root.add_child(assets)
@@ -139,9 +139,9 @@ func _main() -> void:
 	check("final: no test silently aborted (checks >= %d)" % MIN_EXPECTED_CHECKS,
 			true, checks_run >= MIN_EXPECTED_CHECKS)
 	if failures == 0:
-		print("HOUSE PACKS OK — all %d checks passed" % checks_run)
+		print("HAUS PACKS OK — all %d checks passed" % checks_run)
 	else:
-		print("HOUSE PACKS FAILED — %d of %d checks failed" % [failures, checks_run])
+		print("HAUS PACKS FAILED — %d of %d checks failed" % [failures, checks_run])
 	quit(0 if failures == 0 else 1)
 
 
@@ -172,7 +172,12 @@ func _test_port_is_lossless() -> void:
 	var want_ids: Array = []
 	for g: Dictionary in GOLDEN:
 		want_ids.append(g["id"])
-	check("port: the nine load, in seed order", str(want_ids), str(ids))
+	# The SHIPPED nine lead the roster, in index.json order. Compare the leading
+	# slice, not the whole array: a haus a player dropped into user://hauses/ is
+	# appended after them and must not turn this suite red — that a tenth can be
+	# installed without breaking the nine IS the format's promise.
+	check("port: the nine load, in seed order", str(want_ids),
+			str(ids.slice(0, want_ids.size())))
 	check("port: all nine are builtin", str(want_ids),
 			str(HouseRegistry.builtin_house_ids()))
 	for g: Dictionary in GOLDEN:
@@ -289,7 +294,7 @@ func _test_shipped_packs_are_clean() -> void:
 func _test_refuses_unnatural_coats() -> void:
 	var m := SANE.duplicate(true)
 	m["coat"] = "electric_blue"
-	var rep := HousePack.parse(m, "res://houses/_probe")
+	var rep := HousePack.parse(m, "res://hauses/_probe")
 	check_error("coat/unknown-name", rep, "is not a natural coat")
 	check("coat/unknown-name: lists the allowed coats", true,
 			"\n".join(rep["errors"]).contains("bay") \
@@ -299,12 +304,12 @@ func _test_refuses_unnatural_coats() -> void:
 	m["coat_palette"] = {"Main": "#2e5cff", "Main_Light": "#5a80ff",
 		"Main_Dark": "#1a3ba8", "Muzzle": "#16307f", "Hair": "#0f2255",
 		"Hooves": "#2b2724"}
-	check_error("coat/blue-horse", HousePack.parse(m, "res://houses/_probe"),
+	check_error("coat/blue-horse", HousePack.parse(m, "res://hauses/_probe"),
 			"not a coat a horse comes in")
 
 	m = SANE.duplicate(true)
 	m["coat_palette"] = {"Main": "#6b4526", "Main_Light": "#8a5c33"}
-	check_error("coat/incomplete-palette", HousePack.parse(m, "res://houses/_probe"),
+	check_error("coat/incomplete-palette", HousePack.parse(m, "res://hauses/_probe"),
 			"missing \"Main_Dark\"")
 
 	# A coat that IS the jersey — the role gate would refuse the render, so the
@@ -312,11 +317,11 @@ func _test_refuses_unnatural_coats() -> void:
 	m = SANE.duplicate(true)
 	m["tints"] = {"kit": "#6b4526"}
 	m["coat"] = "bay"
-	check_error("coat/is-the-jersey", HousePack.parse(m, "res://houses/_probe"),
+	check_error("coat/is-the-jersey", HousePack.parse(m, "res://hauses/_probe"),
 			"is your own jersey colour")
 
 	# ...and a legal one passes, so the check is not simply "always red".
-	var ok := HousePack.parse(SANE.duplicate(true), "res://houses/_probe")
+	var ok := HousePack.parse(SANE.duplicate(true), "res://hauses/_probe")
 	check("coat/black-under-a-violet-jersey: accepted", true, ok["ok"])
 	check("coat/…: no errors", "[]", str(ok["errors"]))
 
@@ -329,7 +334,7 @@ func _test_refuses_kit_on_natural_stuff() -> void:
 		var m := SANE.duplicate(true)
 		m["materials"] = {surface: "kit"}
 		check_error("kit-on-natural/%s" % surface,
-				HousePack.parse(m, "res://houses/_probe"), "is NATURAL")
+				HousePack.parse(m, "res://hauses/_probe"), "is NATURAL")
 	# The same surfaces are perfectly legal as naturals.
 	var m2 := SANE.duplicate(true)
 	m2["materials"] = {
@@ -338,7 +343,7 @@ func _test_refuses_kit_on_natural_stuff() -> void:
 		"probehouse_plume": "kit",
 		"probehouse_torch": "effect",
 	}
-	var rep := HousePack.parse(m2, "res://houses/_probe")
+	var rep := HousePack.parse(m2, "res://hauses/_probe")
 	check("roles: an honest declaration is accepted", true, rep["ok"])
 	check("roles: kept all four", 4, (rep["house"]["materials"] as Dictionary).size())
 	check("roles: steel keeps its stuff", "steel",
@@ -346,17 +351,17 @@ func _test_refuses_kit_on_natural_stuff() -> void:
 	# An unknown role names the ones that exist.
 	var m3 := SANE.duplicate(true)
 	m3["materials"] = {"probehouse_thing": "shiny"}
-	check_error("roles/unknown", HousePack.parse(m3, "res://houses/_probe"),
+	check_error("roles/unknown", HousePack.parse(m3, "res://hauses/_probe"),
 			"which is not a role")
 	# natural WITHOUT a stuff is a half-answer.
 	var m4 := SANE.duplicate(true)
 	m4["materials"] = {"probehouse_thing": "natural:unobtainium"}
-	check_error("roles/unknown-stuff", HousePack.parse(m4, "res://houses/_probe"),
+	check_error("roles/unknown-stuff", HousePack.parse(m4, "res://hauses/_probe"),
 			"is not a material family")
 	# MIXED belongs to the shipped atlas casts and is not on offer.
 	var m5 := SANE.duplicate(true)
 	m5["materials"] = {"probehouse_body": "mixed"}
-	check_error("roles/mixed-is-reserved", HousePack.parse(m5, "res://houses/_probe"),
+	check_error("roles/mixed-is-reserved", HousePack.parse(m5, "res://hauses/_probe"),
 			"reserved")
 
 
@@ -368,21 +373,21 @@ func _test_refuses_surfaces_it_does_not_own() -> void:
 		var m := SANE.duplicate(true)
 		m["materials"] = {surface: "kit"}
 		check_error("ownership/%s" % surface,
-				HousePack.parse(m, "res://houses/_probe"), "must be named")
+				HousePack.parse(m, "res://hauses/_probe"), "must be named")
 	# The engine's dressing contract is the pack's way IN, not something to
 	# redeclare.
 	var m2 := SANE.duplicate(true)
 	m2["materials"] = {"pawnhelm_iron": "kit"}
-	check_error("ownership/contract-name", HousePack.parse(m2, "res://houses/_probe"),
+	check_error("ownership/contract-name", HousePack.parse(m2, "res://hauses/_probe"),
 			"engine")
 	# An id whose prefix would swallow an engine name is refused outright.
 	var m3 := SANE.duplicate(true)
 	m3["id"] = "crest"
-	check_error("ownership/reserved-id", HousePack.parse(m3, "res://houses/_probe"),
+	check_error("ownership/reserved-id", HousePack.parse(m3, "res://hauses/_probe"),
 			"reserved")
 	var m4 := SANE.duplicate(true)
-	m4["id"] = "House Probe!"
-	check_error("ownership/illegal-id", HousePack.parse(m4, "res://houses/_probe"),
+	m4["id"] = "Haus Probe!"
+	check_error("ownership/illegal-id", HousePack.parse(m4, "res://hauses/_probe"),
 			"not a legal id")
 
 
@@ -392,18 +397,18 @@ func _test_refuses_a_monochrome_army() -> void:
 	var m := SANE.duplicate(true)
 	m["army"] = {"pawn": "res://assets/kaykit-skeletons/Skeleton_Minion.glb"}
 	m["materials"] = {"probehouse_tabard": "kit", "probehouse_plume": "kit"}
-	check_error("army/all-kit", HousePack.parse(m, "res://houses/_probe"),
-			"painted\nentirely in the house colour".replace("\n", " "))
+	check_error("army/all-kit", HousePack.parse(m, "res://hauses/_probe"),
+			"painted\nentirely in the haus colour".replace("\n", " "))
 	# One honest natural surface and the same pack is fine.
 	m["materials"]["probehouse_mail"] = "natural:steel"
-	var rep := HousePack.parse(m, "res://houses/_probe")
+	var rep := HousePack.parse(m, "res://hauses/_probe")
 	check("army/with-naturals: accepted", true, rep["ok"])
 	check("army/with-naturals: pawn override kept", 1,
 			(rep["house"]["army"] as Dictionary).size())
 	# A piece type that does not exist says which ones do.
 	var m2 := SANE.duplicate(true)
 	m2["army"] = {"jester": "res://assets/kaykit-skeletons/Skeleton_Minion.glb"}
-	check_error("army/unknown-type", HousePack.parse(m2, "res://houses/_probe"),
+	check_error("army/unknown-type", HousePack.parse(m2, "res://hauses/_probe"),
 			"is not a piece type")
 
 
@@ -414,10 +419,10 @@ func _test_refuses_a_monochrome_army() -> void:
 ## with no default is the id.
 func _test_degrades_without_crashing() -> void:
 	var bare := {"id": "barehouse"}
-	var rep := HousePack.parse(bare, "res://houses/_probe")
+	var rep := HousePack.parse(bare, "res://hauses/_probe")
 	check("bare: still a house", true, rep["ok"])
 	var h: Dictionary = rep["house"]
-	check("bare: name defaulted", "House Barehouse", str(h["name"]))
+	check("bare: name defaulted", "Haus Barehouse", str(h["name"]))
 	check("bare: coat defaulted to the documented one", HousePack.coat_default(),
 			str(h["coat"]))
 	check("bare: no crest", "", str(h["crest"]))
@@ -432,19 +437,19 @@ func _test_degrades_without_crashing() -> void:
 	check("bare: warnings are plural, not a crash", true, rep["warnings"].size() >= 6)
 
 	# No id at all is the one refusal — nothing can refer to that house.
-	check_error("no-id", HousePack.parse({}, "res://houses/_probe"), "no \"id\"")
+	check_error("no-id", HousePack.parse({}, "res://hauses/_probe"), "no \"id\"")
 
 	# A pack from the future says so instead of half-loading.
 	var future := SANE.duplicate(true)
 	future["format"] = HousePack.FORMAT + 5
-	check_error("future-format", HousePack.parse(future, "res://houses/_probe"),
+	check_error("future-format", HousePack.parse(future, "res://hauses/_probe"),
 			"newer than this build")
 
 	# A pointer at art that is not there loses the art, not the house.
 	var missing := SANE.duplicate(true)
 	missing["sigil"] = "not_here.png"
 	missing["crest"] = "also_not_here.glb"
-	var rep2 := HousePack.parse(missing, "res://houses/_probe")
+	var rep2 := HousePack.parse(missing, "res://hauses/_probe")
 	check("missing-art: still a house", true, rep2["ok"])
 	check("missing-art: sigil dropped", "", str(rep2["house"]["sigil"]))
 	check("missing-art: says what will happen instead", true,
@@ -453,7 +458,7 @@ func _test_degrades_without_crashing() -> void:
 	# A typo is a warning with the key quoted, never a silent no-op.
 	var typo := SANE.duplicate(true)
 	typo["colours"] = {"primary": "#ffffff"}
-	var rep3 := HousePack.parse(typo, "res://houses/_probe")
+	var rep3 := HousePack.parse(typo, "res://hauses/_probe")
 	check("typo: loaded", true, rep3["ok"])
 	check("typo: names the unknown key", true,
 			"\n".join(rep3["warnings"]).contains("colours"))
@@ -461,7 +466,7 @@ func _test_degrades_without_crashing() -> void:
 	# A jersey nobody can see is a warning, not a refusal — it is a choice.
 	var grey := SANE.duplicate(true)
 	grey["tints"] = {"kit": "#8a8a8a"}
-	var rep4 := HousePack.parse(grey, "res://houses/_probe")
+	var rep4 := HousePack.parse(grey, "res://hauses/_probe")
 	check("pale-jersey: allowed", true, rep4["ok"])
 	check("pale-jersey: warned", true,
 			"\n".join(rep4["warnings"]).containsn("nearly colourless"))
@@ -474,7 +479,7 @@ func _test_one_bad_pack_does_not_take_the_others() -> void:
 	DirAccess.make_dir_recursive_absolute(abs_root)
 	# (a) a manifest that is not JSON at all
 	DirAccess.make_dir_recursive_absolute(abs_root.path_join("broken"))
-	var f := FileAccess.open(tmp_dir.path_join("broken/house.json"), FileAccess.WRITE)
+	var f := FileAccess.open(tmp_dir.path_join("broken/haus.json"), FileAccess.WRITE)
 	f.store_string("{ \"id\": \"broken\", oops")
 	f.close()
 	var rep := HousePack.load_from_dir(tmp_dir.path_join("broken"))
@@ -488,10 +493,10 @@ func _test_one_bad_pack_does_not_take_the_others() -> void:
 	var rep2 := HousePack.load_from_dir(tmp_dir.path_join("empty"))
 	check("bad-pack/no-manifest: refused", false, rep2["ok"])
 	check("bad-pack/no-manifest: says what a pack IS", true,
-			"\n".join(rep2["errors"]).containsn("house.json"))
+			"\n".join(rep2["errors"]).containsn("haus.json"))
 	# (c) a manifest that is a JSON ARRAY
 	DirAccess.make_dir_recursive_absolute(abs_root.path_join("array"))
-	var f2 := FileAccess.open(tmp_dir.path_join("array/house.json"), FileAccess.WRITE)
+	var f2 := FileAccess.open(tmp_dir.path_join("array/haus.json"), FileAccess.WRITE)
 	f2.store_string("[\"winterfang\"]")
 	f2.close()
 	var rep3 := HousePack.load_from_dir(tmp_dir.path_join("array"))
@@ -499,7 +504,7 @@ func _test_one_bad_pack_does_not_take_the_others() -> void:
 	check("bad-pack/array: says it wants an object", true,
 			"\n".join(rep3["errors"]).containsn("JSON object"))
 	# ...and the roster the game actually plays is untouched by all three.
-	check("bad-pack: the nine still stand", 9, HouseRegistry.house_ids().size())
+	check("bad-pack: the nine still stand", 9, HouseRegistry.builtin_house_ids().size())
 	_rm_rf(abs_root)
 
 

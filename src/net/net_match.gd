@@ -1,6 +1,6 @@
 class_name NetMatch
 extends Node
-## Great Houses — head-to-head transport. One player HOSTS (their instance is
+## Great Hauses — head-to-head transport. One player HOSTS (their instance is
 ## authoritative and owns the ChessState); the other JOINS by address. Godot 4
 ## high-level multiplayer over ENetMultiplayerPeer: no third-party server, no
 ## relay of ours, nothing to run but the game.

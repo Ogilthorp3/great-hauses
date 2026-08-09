@@ -1,6 +1,6 @@
 class_name NetProtocol
 extends RefCounted
-## Great Houses — head-to-head wire protocol (pure data + pure rules).
+## Great Hauses — head-to-head wire protocol (pure data + pure rules).
 ##
 ## Nothing in this file touches the scene tree, a socket, or a signal: it is
 ## the part of head-to-head play that can be proven headless in
@@ -542,7 +542,7 @@ static func match_not_running_text() -> String:
 
 
 static func protocol_mismatch_text(theirs: int) -> String:
-	return ("your friend is running a different version of Great Houses "
+	return ("your friend is running a different version of Great Hauses "
 		+ "(their protocol %d, yours %d) — you both need the same build.") % [
 			theirs, PROTOCOL_VERSION]
 

@@ -1,4 +1,4 @@
-# Building Great Houses
+# Building Great Hauses
 
 How to turn this repo into something a friend can double-click — on Windows or macOS.
 
@@ -38,7 +38,7 @@ Artifacts land in `../great-houses-dist/` (a sibling of the repo, deliberately *
 
 ### The staleness gate — why `freshness` exists
 
-**Scar, 2026-08-09.** A `GreatHouses.exe` sat in `great-houses-dist/` with **seven source
+**Scar, 2026-08-09.** A `GreatHauses.exe` sat in `great-houses-dist/` with **seven source
 files newer than it**, including the entire branding set. Every check we had was green:
 `file` said PE32+, the size was right, the pck index held all the expected paths. The
 artifact was simply a *photograph of an older tree*, and it was one step from being sent
@@ -46,13 +46,13 @@ to a friend — who would have run a build with no heraldry in it.
 
 An export is a photograph. `verify_freshness` asserts the shutter fired **after** the last
 edit to anything the photograph should contain, and it now runs automatically at the end
-of both exports. It compares `src/`, `scenes/`, `assets/`, `houses/`, `project.godot` and
+of both exports. It compares `src/`, `scenes/`, `assets/`, `hauses/`, `project.godot` and
 `export_presets.cfg` against the artifact's mtime, skipping `*.md`/`*.py`/`*.sh` and the
-`houses/_template/` + `houses/_examples/` subtrees because those mirror `exclude_filter`
+`hauses/_template/` + `hauses/_examples/` subtrees because those mirror `exclude_filter`
 and are never shipped.
 
-> **Second catch, same day.** `houses/` was **not** in that root list when a Great House
-> became a folder — so the entire nine-house roster, twenty files of shipped game content,
+> **Second catch, same day.** `hauses/` was **not** in that root list when a Great Haus
+> became a folder — so the entire nine-haus roster, twenty files of shipped game content,
 > could change without the gate noticing. A gate that watches four of the five directories
 > it ships is a gate that says GREEN over a stale artifact. Whenever a new *top-level*
 > directory starts shipping, it must be added to `verify_freshness` in the same commit.
@@ -70,16 +70,16 @@ To check an artifact you did **not** just build (e.g. one already zipped and abo
 sent):
 
 ```bash
-./tools/build/build.sh freshness --artifact ../great-houses-dist/windows/GreatHouses.exe
+./tools/build/build.sh freshness --artifact ../great-houses-dist/windows/GreatHauses.exe
 ```
 
 ### Packaging for the friend
 
 ```bash
 cd ../great-houses-dist/for-a-friend
-cp ../windows/GreatHouses.exe .
-zip -9 -X GreatHouses-windows-v0.1.0.zip GreatHouses.exe README.txt
-rm GreatHouses.exe          # keep only the zip under version-of-record
+cp ../windows/GreatHauses.exe .
+zip -9 -X GreatHauses-windows-v0.1.0.zip GreatHauses.exe README.txt
+rm GreatHauses.exe          # keep only the zip under version-of-record
 ```
 
 `README.txt` next to the zip is the friend-facing copy: how to run it, the two dialogs
@@ -129,10 +129,10 @@ looking in the wrong place. `build.sh` checks this for you and says so in one li
 
 ## 2. What the friend actually needs
 
-**One file: `GreatHouses.exe`.** Nothing else — no `.pck`, no runtime, no installer.
+**One file: `GreatHauses.exe`.** Nothing else — no `.pck`, no runtime, no installer.
 
 What actually gets *sent* is
-`../great-houses-dist/for-a-friend/GreatHouses-windows-v0.1.0.zip` (~78 MiB): that one
+`../great-houses-dist/for-a-friend/GreatHauses-windows-v0.1.0.zip` (~78 MiB): that one
 `.exe` plus a `README.txt`. The zip exists only because the `.exe` compresses ~47% and
 because a bare unsigned `.exe` arriving by itself is the most alarming thing you can put
 in someone's downloads folder.
@@ -169,12 +169,12 @@ echo "import rc=$?"
 
 # Windows
 "$GODOT" --headless --path . --export-release "Windows Desktop" \
-    ../great-houses-dist/windows/GreatHouses.exe
+    ../great-houses-dist/windows/GreatHauses.exe
 echo "export rc=$?"
 
 # macOS
 "$GODOT" --headless --path . --export-release "macOS" \
-    ../great-houses-dist/macos/GreatHouses.app
+    ../great-houses-dist/macos/GreatHauses.app
 ```
 
 `--export-release` returns **0** on success. It also returns 0 in some partial-failure
@@ -188,15 +188,15 @@ artifact that scar at the top of this file is about.
 ### Verifying a build
 
 ```bash
-file ../great-houses-dist/windows/GreatHouses.exe
+file ../great-houses-dist/windows/GreatHauses.exe
 # -> PE32+ executable (GUI) x86-64 ..., for MS Windows
 
-python3 tools/build/pck_list.py ../great-houses-dist/windows/GreatHouses.exe \
-    --count-only --assert-present houses/index.json \
-                 --assert-present houses/winterfang/house.json \
+python3 tools/build/pck_list.py ../great-houses-dist/windows/GreatHauses.exe \
+    --count-only --assert-present hauses/index.json \
+                 --assert-present hauses/winterfang/haus.json \
                  --assert-present src/houses/coats.json \
                  --assert-absent  test_e2e/artifacts \
-                 --assert-absent  houses/_examples/
+                 --assert-absent  hauses/_examples/
 ```
 
 `pck_list.py` parses the real Godot PCK index out of the shipped artifact (standalone
@@ -212,7 +212,7 @@ Both presets share these filters:
 ```ini
 export_filter="all_resources"
 include_filter="*.json,*.txt,*LICENSE*"
-exclude_filter="test_e2e/*,tests/*,tools/*,houses/_template/*,houses/_examples/*,*.md,*.py,*.sh,assets/branding/*.ico,assets/branding/*.icns"
+exclude_filter="test_e2e/*,tests/*,tools/*,hauses/_template/*,hauses/_examples/*,*.md,*.py,*.sh,assets/branding/*.ico,assets/branding/*.icns"
 ```
 
 > `test_e2e/*` (not just `test_e2e/artifacts/*`) since 2026-08-09: the E2E harness used to
@@ -226,16 +226,16 @@ Each clause is load-bearing. All four of these were found by building and inspec
 not by reading docs:
 
 **Trap 1 — the `.json` files are invisible to `all_resources`.**
-`houses/index.json`, each pack's `houses/<id>/house.json`, `src/houses/coats.json`,
+`hauses/index.json`, each pack's `hauses/<id>/haus.json`, `src/houses/coats.json`,
 `banter_lines.json` and `kill_lines.json` are read with
 `FileAccess.open()`, not `load()`, and have no `.import` sidecar, so Godot does not
 consider them resources. Without `*.json` in `include_filter` they are **silently
-omitted** and the shipped game has no houses at all. Verified by asserting them
+omitted** and the shipped game has no hauses at all. Verified by asserting them
 present in the pck on every build.
 
-> This trap got *wider* on 2026-08-09, when a Great House became a folder. The roster
+> This trap got *wider* on 2026-08-09, when a Great Haus became a folder. The roster
 > used to be one file (`src/houses/houses.json`, now deleted); it is now
-> `houses/index.json` plus one `house.json` per pack, discovered at runtime. Ten
+> `hauses/index.json` plus one `haus.json` per pack, discovered at runtime. Ten
 > FileAccess-read files where there was one — all riding on the same `*.json` clause.
 
 **Trap 2 — `test_e2e/` used to be un-excludable (FIXED 2026-08-09).**
@@ -289,14 +289,14 @@ that is actually on disk; while the branding assets were still in flight this sh
 Both are now wired to the branding agent's assets:
 
 ```ini
-[preset.0.options]  application/icon="res://assets/branding/GreatHouses.ico"    # Windows
-[preset.1.options]  application/icon="res://assets/branding/GreatHouses.icns"   # macOS
+[preset.0.options]  application/icon="res://assets/branding/GreatHauses.ico"    # Windows
+[preset.1.options]  application/icon="res://assets/branding/GreatHauses.icns"   # macOS
 ```
 
 Contrary to a lot of older advice, **rcedit is not required.** Godot 4.7 stamps the
 Windows icon and version metadata into the PE itself. Verified by diffing the exported
 `.exe` against the stock template: the `.ico`'s bytes and the UTF-16 string
-`Great Houses` are present in the exported PE image and absent from the template
+`Great Hauses` are present in the exported PE image and absent from the template
 (which carries `Godot Engine` instead). The macOS `.icns` is copied to
 `Contents/Resources/icon.icns` byte-for-byte — SHA-256 verified against the source.
 
@@ -326,7 +326,7 @@ The Maester mode shells out to a UCI engine. The lookup in `src/ai/uci_engine.gd
 platform-aware and tries, in order:
 
 1. `$GREAT_HOUSES_STOCKFISH` — explicit override (used by the degradation suite)
-2. **beside the executable** — `stockfish.exe` next to `GreatHouses.exe`, or in a
+2. **beside the executable** — `stockfish.exe` next to `GreatHauses.exe`, or in a
    `stockfish/` subfolder
 3. `PATH` — scanned directly (no `which` subprocess; `/usr/bin/which` doesn't exist on
    Windows)
@@ -335,12 +335,12 @@ platform-aware and tries, in order:
 
 **For the friend on Windows:** download a Stockfish Windows build from
 <https://stockfishchess.org/download/>, rename it `stockfish.exe`, and drop it in the
-same folder as `GreatHouses.exe`. That's the whole install.
+same folder as `GreatHauses.exe`. That's the whole install.
 
 **If it's absent,** nothing breaks: the Hall of Banners greys out the Grand Maester entry
 with *"the Grand Maester is abroad (stockfish not installed)"* and the other opponents
 play normally. `UciEngine.install_hint()` returns the per-platform one-liner
-("put stockfish.exe next to GreatHouses.exe") if you want to surface it in that message.
+("put stockfish.exe next to GreatHauses.exe") if you want to surface it in that message.
 
 ---
 
@@ -369,18 +369,18 @@ From `src/net/net_protocol.gd` (the netcode agent's choice):
 |---|---|
 | Transport | `ENetMultiplayerPeer` — **UDP** |
 | Default port | **7777** (`NetProtocol.DEFAULT_PORT`) |
-| Override | `GreatHouses.exe -- --net-port=7800` |
+| Override | `GreatHauses.exe -- --net-port=7800` |
 | Protocol version | 1 — mismatched builds refuse to play rather than desync |
 
 **Only the player who HOSTS needs a firewall rule.** The one who joins makes an outbound
 connection and needs nothing.
 
-On the first host attempt Windows pops *"Allow GreatHouses to communicate on these
+On the first host attempt Windows pops *"Allow GreatHauses to communicate on these
 networks"* — tick **Private networks** and accept. That is usually the entire setup. To
 pre-create the rule instead (elevated PowerShell):
 
 ```powershell
-New-NetFirewallRule -DisplayName "Great Houses (host)" -Direction Inbound `
+New-NetFirewallRule -DisplayName "Great Hauses (host)" -Direction Inbound `
   -Protocol UDP -LocalPort 7777 -Action Allow -Profile Private
 ```
 

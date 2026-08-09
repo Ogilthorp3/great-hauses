@@ -1,5 +1,5 @@
 {
-	"_readme": "Canned taunt pools for BanterEngine (src/banter/banter.gd). houses.<id>.<beat> -> array of line templates, keyed by the houses.json house id and the BanterEngine BEAT_* names. The speaker is always the RIVAL house: player_captured = the rival took the player's piece (gloat), rival_captured = the player took the rival's piece (wounded pride), check_given = the rival checks the player, check_received = the rival's king is checked. Token {piece} = lowercase piece name from the beat context; lines carrying it are only picked when the context supplies one. Every line is original, in-archetype homage only, and at most 90 characters AFTER substitution ({piece} is at longest 'knight'/'bishop', 6 chars). No line repeats within a game (engine dedupe).",
+	"_readme": "Canned taunt pools for BanterEngine (src/banter/banter.gd). houses.<id>.<beat> -> array of line templates, keyed by the haus id and the BanterEngine BEAT_* names. The speaker is always the RIVAL haus: player_captured = the rival took the player's piece (gloat), rival_captured = the player took the rival's piece (wounded pride), check_given = the rival checks the player, check_received = the rival's king is checked. Token {piece} = lowercase piece name from the beat context; lines carrying it are only picked when the context supplies one. Every line is original, in-archetype homage only, and at most 90 characters AFTER substitution ({piece} is at longest 'knight'/'bishop', 6 chars). No line repeats within a game (engine dedupe).",
 	"version": 1,
 	"houses": {
 		"winterfang": {
@@ -156,7 +156,7 @@
 				"Even my counting-men gasped."
 			],
 			"player_undo": [
-				"A take-back? That loan carries interest, little house.",
+				"A take-back? That loan carries interest, little haus.",
 				"The ledger does not erase. It only adds a fee.",
 				"Reclaim the move; the debt of it stays on your page.",
 				"Even your courage is borrowed, and now returned.",

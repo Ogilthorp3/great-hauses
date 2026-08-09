@@ -1,14 +1,14 @@
 extends SceneTree
-## tools/validate_house_pack.gd — check a house pack before the game does.
+## tools/validate_house_pack.gd — check a haus pack before the game does.
 ##
 ##   /Applications/Godot.app/Contents/MacOS/Godot --headless \
 ##       -s res://tools/validate_house_pack.gd -- <dir> [<dir> ...]
 ##   /Applications/Godot.app/Contents/MacOS/Godot --headless \
 ##       -s res://tools/validate_house_pack.gd -- --all
 ##
-## <dir> is a house-pack folder — the one holding house.json. It may be
-## anywhere: res://houses/ravenmark, user://houses/ravenmark, or a plain
-## ~/my-houses/ravenmark you have not installed yet. `--all` checks every pack
+## <dir> is a haus-pack folder — the one holding haus.json. It may be
+## anywhere: res://hauses/ravenmark, user://hauses/ravenmark, or a plain
+## ~/my-hauses/ravenmark you have not installed yet. `--all` checks every pack
 ## the game would actually load, shipped and installed.
 ##
 ## Exit code 0 = every pack checked is loadable, 1 = at least one is refused.
@@ -27,8 +27,8 @@ extends SceneTree
 ##      gate goes red, and it renders in whatever colour your modelling tool
 ##      left it. Better to hear it here.
 ##   3. THE JERSEY. What your kit colour will look like next to every other
-##      house already installed — because two houses that wear the same colour
-##      are one house, twice.
+##      haus already installed — because two hauses that wear the same colour
+##      are one haus, twice.
 ##
 ## It runs with NO autoloads (that is what `-s` means), so it shims the
 ## PieceAssets node the same way tests/test_costumes.gd does.
@@ -61,7 +61,7 @@ func _initialize() -> void:
 	if dirs.is_empty():
 		print("usage: Godot --headless -s res://tools/validate_house_pack.gd -- <pack dir> [...]")
 		print("       ...or --all to check every pack this game would load")
-		print("a pack dir is the folder holding house.json — see docs/HOUSE-PACK.md")
+		print("a pack dir is the folder holding haus.json — see docs/HAUS-PACK.md")
 		quit(1)
 		return
 
@@ -84,7 +84,7 @@ func _validate(dir_path: String) -> bool:
 	var rep: Dictionary = HousePack.load_from_dir(normalized, "installed")
 	var house: Dictionary = rep["house"]
 	if not str(rep["id"]).is_empty():
-		print("   house '%s' — %s of %s" % [str(rep["id"]),
+		print("   haus '%s' — %s of %s" % [str(rep["id"]),
 				str(house.get("name", "?")), str(house.get("seat", "?"))])
 
 	for e in rep["errors"]:
@@ -136,7 +136,7 @@ func _validate(dir_path: String) -> bool:
 
 
 ## Classify every surface of one model exactly as the game will.
-## `expect_natural` is true for army models: a soldier made entirely of house
+## `expect_natural` is true for army models: a soldier made entirely of haus
 ## colour is the monochrome army the role system exists to end.
 func _scan_model(path: String, label: String, expect_natural: bool) -> int:
 	if path.is_empty():
@@ -173,7 +173,7 @@ func _scan_model(path: String, label: String, expect_natural: bool) -> int:
 			and int(counts.get(assets.Role.KIT, 0)) > 0:
 		print("%s%s: every surface is KIT — nothing on this model is steel," % [WARN_MARK, label])
 		print("         leather, skin or bone, so the whole figure will be painted")
-		print("         in your house colour. That is the monochrome army the role")
+		print("         in your haus colour. That is the monochrome army the role")
 		print("         system exists to end; give the soldier some materials.")
 	return unnamed.size()
 
@@ -196,7 +196,7 @@ func _role_line(spec: Dictionary) -> String:
 	if role == "natural":
 		return "natural:%s — keeps its own colours" % str(spec["stuff"])
 	if role == "kit":
-		return "kit — wears the house jersey"
+		return "kit — wears the haus jersey"
 	if role == "regalia":
 		return "regalia — stays metal"
 	if role == "heraldry":
@@ -204,7 +204,7 @@ func _role_line(spec: Dictionary) -> String:
 	return role
 
 
-## Two houses that wear the same colour are one house, twice.
+## Two hauses that wear the same colour are one haus, twice.
 func _compare_jerseys(rep: Dictionary) -> void:
 	var kit := Color.html(str((rep["house"] as Dictionary)["tints"]["kit"]))
 	var id := str(rep["id"])
@@ -214,10 +214,10 @@ func _compare_jerseys(rep: Dictionary) -> void:
 		var theirs := HouseRegistry.get_house_tint(other, "kit")
 		var gap := Vector3(kit.r - theirs.r, kit.g - theirs.g, kit.b - theirs.b).length()
 		if gap < HousePack.KIT_DISTINCT:
-			print("%sjersey %s is %.2f from House %s's %s (under %.2f) — on the board"
+			print("%sjersey %s is %.2f from Haus %s's %s (under %.2f) — on the board"
 					% [WARN_MARK, kit.to_html(false), gap, other.capitalize(),
 					theirs.to_html(false), HousePack.KIT_DISTINCT])
-			print("         those two armies will look like the same house")
+			print("         those two armies will look like the same haus")
 
 
 ## Long sentences, wrapped so a terminal can read them.

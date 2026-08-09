@@ -280,8 +280,8 @@ static func _ensure_pools() -> void:
 		push_error("BanterEngine: %s is not a valid banter-lines file" % LINES_PATH)
 		return
 	_pools = parsed["houses"]
-	# ...and then whatever the installed HOUSE PACKS brought with them. A house
-	# is a folder now (docs/HOUSE-PACK.md), and a house that ships its own voice
+	# ...and then whatever the installed HAUS PACKS brought with them. A haus
+	# is a folder now (docs/HAUS-PACK.md), and a haus that ships its own voice
 	# should speak in it: a pack's "banter" block lands here beside the nine.
 	# A pack may also OVERRIDE a shipped house's pool by declaring the same id,
 	# which is how a translation or a re-write ships without touching this file.
@@ -323,10 +323,10 @@ static func build_system_prompt(hid: String) -> String:
 	var arch := str(h.get("archetype", ""))
 	var voice := str(ARCHETYPE_VOICE.get(arch, "proud, ancient, and dangerous"))
 	return (
-		"You are the voice of %s, a Great House on a battle-chess board.\n" % str(h.get("name", hid))
+		"You are the voice of %s, a Great Haus on a battle-chess board.\n" % str(h.get("name", hid))
 		+ "Archetype: the %s — %s.\n" % [arch, voice]
 		+ "Seat: %s. Motto: %s\n" % [str(h.get("seat", "an old keep")), str(h.get("motto", ""))]
-		+ "You taunt the enemy house at dramatic moments of the game.\n"
+		+ "You taunt the enemy haus at dramatic moments of the game.\n"
 		+ "Speak exactly one taunt, at most 90 characters, no quotes, "
 		+ "medieval diction, never modern slang, wit over cruelty. "
 		+ "Reply with the taunt alone — no preamble, no explanation."
@@ -338,10 +338,10 @@ static func build_beat_prompt(beat: String, ctx: Dictionary = {}) -> String:
 	var piece := str(ctx.get("piece", ""))
 	match beat:
 		BEAT_GAME_START:
-			return "The armies are set and the game begins. Issue your opening taunt to the enemy house."
+			return "The armies are set and the game begins. Issue your opening taunt to the enemy haus."
 		BEAT_PLAYER_CAPTURED:
 			var what := ("the enemy's %s" % piece) if not piece.is_empty() else "an enemy piece"
-			return "You have just captured %s. Gloat, coldly, in your house's voice." % what
+			return "You have just captured %s. Gloat, coldly, in your haus's voice." % what
 		BEAT_RIVAL_CAPTURED:
 			var what := ("your %s" % piece) if not piece.is_empty() else "one of your pieces"
 			return "The enemy has just captured %s. Answer with wounded pride — hurt, but unbowed." % what
@@ -422,7 +422,7 @@ func _llm_taunt(beat: String, ctx: Dictionary) -> String:
 	# A reply cut off by the token cap is never a usable taunt: reasoning
 	# models burn the budget on chain-of-thought and the "last line" is then
 	# truncated meta-text, not a line (seen live 2026-08-08: the caption
-	# read "1. The user wants me to act as House Goldclaw…"). Fall back.
+	# read "1. The user wants me to act as Haus Goldclaw…"). Fall back.
 	if str(choice.get("finish_reason", "")) == "length":
 		last_error = "reply truncated (finish_reason=length)"
 		return ""

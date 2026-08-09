@@ -1,6 +1,6 @@
 #!/usr/bin/env blender --python
 """
-make_throne.py — Great Houses battle-chess prop: Throne of Blades.
+make_throne.py — Great Hauses battle-chess prop: Throne of Blades.
 
 Run headless:
   /Applications/Blender.app/Contents/MacOS/Blender -b --python tools/make_throne.py -- <out_dir>

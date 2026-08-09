@@ -10,8 +10,8 @@ Usage:
                                    [--assert-absent P]...
 
 <artifact> may be:
-  * a standalone GreatHouses.pck
-  * a Windows GreatHouses.exe with binary_format/embed_pck=true
+  * a standalone GreatHauses.pck
+  * a Windows GreatHauses.exe with binary_format/embed_pck=true
   * a macOS .app bundle (the .pck inside Contents/Resources is found automatically)
 
 Exit codes: 0 all assertions held · 1 an assertion failed · 2 could not parse a pck.

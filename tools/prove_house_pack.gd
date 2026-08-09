@@ -1,16 +1,16 @@
 extends Node
-## tools/prove_house_pack.gd — play a house nobody built into the game.
+## tools/prove_house_pack.gd — play a haus nobody built into the game.
 ##
 ##   /Applications/Godot.app/Contents/MacOS/Godot --path <game> \
 ##       --resolution 1280x720 res://tools/prove_house_pack.tscn -- \
-##       --house=ravenmark --artifacts=<abs dir>
+##       --house=ravenmark --artifacts=<abs dir>   (flag keeps the code spelling)
 ##
-## Exit code 0 = that house is in the Hall of Banners and plays.
+## Exit code 0 = that haus is in the Hall of Banners and plays.
 ##
 ## WHY THIS EXISTS. "The loader parses the manifest" is not the claim worth
-## making; "a house someone else wrote actually plays" is. So this drives the
+## making; "a haus someone else wrote actually plays" is. So this drives the
 ## SHIPPED main scene — the real Hall, real synthesized clicks on the new
-## house's crest, the real match — and then measures the army that shows up:
+## haus's crest, the real match — and then measures the army that shows up:
 ##
 ##   * the roster: the pack is there, and it came from user://
 ##   * the Hall:   its crest hangs with the others (screenshot)
@@ -64,7 +64,7 @@ func _install() -> void:
 
 
 func _run() -> void:
-	print("=== PROVE HOUSE PACK: %s ===" % house_id)
+	print("=== PROVE HAUS PACK: %s ===" % house_id)
 	if not await _prove_roster():
 		return _finish()
 	if not await _prove_hall():
@@ -82,9 +82,9 @@ func _prove_roster() -> bool:
 	print("roster (%d): %s" % [ids.size(), ", ".join(ids)])
 	print("installed from user://: %s" % ", ".join(HouseRegistry.installed_house_ids()))
 	if not HouseRegistry.has_house(house_id):
-		_fail("roster", "'%s' is not in the roster — is the pack in user://houses/?" % house_id)
+		_fail("roster", "'%s' is not in the roster — is the pack in user://hauses/?" % house_id)
 		return false
-	_pass("roster: %s is one of %d houses" % [house_id, ids.size()])
+	_pass("roster: %s is one of %d hauses" % [house_id, ids.size()])
 	if not HouseRegistry.installed_house_ids().has(house_id):
 		_fail("roster", "'%s' loaded, but not from user:// — this proves nothing about DLC"
 				% house_id)
@@ -133,7 +133,7 @@ func _prove_hall() -> bool:
 			func() -> bool: return int(hall.get("phase")) == 1, "crest"):
 		_fail("hall", "clicking %s's crest never advanced the Hall" % house_id)
 		return false
-	_pass("hall: its crest is clickable and pledges the house")
+	_pass("hall: its crest is clickable and pledges the haus")
 	var opp := _find_button(hall, "Casual")
 	if opp == null or not await _click_until(opp,
 			func() -> bool: return int(hall.get("phase")) == 2, "opponent"):
@@ -224,12 +224,12 @@ func _prove_match() -> bool:
 
 ## THE POINT OF THE WHOLE FORMAT, measured on a rendered piece.
 ##
-## House Ravenmark's crest is one mesh with two surfaces: a plume (KIT, takes
+## Haus Ravenmark's crest is one mesh with two surfaces: a plume (KIT, takes
 ## the jersey) and a beak declared "natural:bone" in its manifest. If the
 ## declaration works, those two surfaces render in DIFFERENT colours and the
-## beak is nowhere near the house purple. If a pack could not do this, the
+## beak is nowhere near the haus purple. If a pack could not do this, the
 ## whole exercise would be "a stranger may pick a colour", not "a stranger may
-## build a house".
+## build a haus".
 func _prove_declared_natural(mine: Array[Node]) -> void:
 	var declared: Dictionary = HouseRegistry.material_roles(house_id)
 	if declared.is_empty():

@@ -3,7 +3,7 @@ class_name ChessMove
 
 # Ported from "Stop Waiting For Godot" chess (https://github.com/thearst3rd/stopwaitingforgodot)
 # Copyright (c) 2021 Terry Hearst, MIT License — see LICENSE-stopwaitingforgodot in this directory.
-# Portions of this file are additions for the Great Houses engine (presentation metadata, UCI helpers).
+# Portions of this file are additions for the Great Hauses engine (presentation metadata, UCI helpers).
 #
 # Everything needed to play out or undo a move, plus presentation-agnostic
 # metadata so a rendering layer (2D/3D) can animate directly from move data.

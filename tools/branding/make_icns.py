@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Build the two OS bundle icons from the icon generator: GreatHouses.icns
-(macOS) and GreatHouses.ico (Windows).
+Build the two OS bundle icons from the icon generator: GreatHauses.icns
+(macOS) and GreatHauses.ico (Windows).
 
     python3 tools/branding/make_icns.py
 
@@ -15,15 +15,15 @@ Members written (the ten Apple asks for):
     16 / 16@2x=32 / 32 / 32@2x=64 / 128 / 128@2x=256 / 256 / 256@2x=512
     512 / 512@2x=1024
 
-Output:  assets/branding/GreatHouses.icns   (macOS, via iconutil)
-         assets/branding/GreatHouses.ico    (Windows, 16..256 members)
+Output:  assets/branding/GreatHauses.icns   (macOS, via iconutil)
+         assets/branding/GreatHauses.ico    (Windows, 16..256 members)
 
 Where they go — these are EXPORT PRESET icons, not the Godot project icon.
 In export_presets.cfg, under [preset.<n>.options]:
 
-    macOS preset:    application/icon="res://assets/branding/GreatHouses.icns"
-    Windows preset:  application/icon="res://assets/branding/GreatHouses.ico"
-                     application/console_wrapper_icon="res://assets/branding/GreatHouses.ico"
+    macOS preset:    application/icon="res://assets/branding/GreatHauses.icns"
+    Windows preset:  application/icon="res://assets/branding/GreatHauses.ico"
+                     application/console_wrapper_icon="res://assets/branding/GreatHauses.ico"
 
 (project.godot's config/icon is a separate thing — it is the editor/project-
 manager icon and wants a res:// PNG.  It is already set to
@@ -59,7 +59,7 @@ MEMBERS = [
 def main():
     out_dir = os.path.join(PROJ, "assets", "branding")
     os.makedirs(out_dir, exist_ok=True)
-    iconset = os.path.join(out_dir, "GreatHouses.iconset")
+    iconset = os.path.join(out_dir, "GreatHauses.iconset")
     shutil.rmtree(iconset, ignore_errors=True)
     os.makedirs(iconset)
 
@@ -70,14 +70,14 @@ def main():
             print(f"  rendered {px}px at tier '{G.tier_of(px)}'")
         cache[px].save(os.path.join(iconset, name))
 
-    icns = os.path.join(out_dir, "GreatHouses.icns")
+    icns = os.path.join(out_dir, "GreatHauses.icns")
     subprocess.run(["iconutil", "-c", "icns", iconset, "-o", icns], check=True)
     shutil.rmtree(iconset)          # the .icns is the artifact; the dir is scratch
     print("wrote", icns, os.path.getsize(icns), "bytes")
 
     # Windows .ico — same natively-drawn tiers, capped at 256 (the format's max
     # uncompressed member and all the Windows shell asks for).
-    ico = os.path.join(out_dir, "GreatHouses.ico")
+    ico = os.path.join(out_dir, "GreatHauses.ico")
     ico_sizes = [16, 32, 48, 64, 128, 256]
     for px in ico_sizes:
         if px not in cache:
@@ -90,8 +90,8 @@ def main():
 
     print()
     print("export_presets.cfg — under [preset.<n>.options]:")
-    print('  macOS   application/icon="res://assets/branding/GreatHouses.icns"')
-    print('  Windows application/icon="res://assets/branding/GreatHouses.ico"')
+    print('  macOS   application/icon="res://assets/branding/GreatHauses.icns"')
+    print('  Windows application/icon="res://assets/branding/GreatHauses.ico"')
 
 
 if __name__ == "__main__":

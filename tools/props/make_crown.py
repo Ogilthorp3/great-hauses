@@ -1,6 +1,6 @@
 #!/usr/bin/env blender --python
 """
-make_crown.py — Great Houses battle-chess prop: battle-worn king's circlet.
+make_crown.py — Great Hauses battle-chess prop: battle-worn king's circlet.
 
 Run headless:
   /Applications/Blender.app/Contents/MacOS/Blender -b --python tools/make_crown.py -- <out_dir>
@@ -175,7 +175,7 @@ print(f"[crown] wrote {OUT_DIR}/crown.glb")
 
 # ---------------------------------------------------------------- frost variant
 # MID-DARK steel, not pale silver (critic defect #3, 2026-08-08). The cold
-# houses — Winterfang, Tidegrip, Swiftcrest, Silverbrook — dye their pieces
+# hauses — Winterfang, Tidegrip, Swiftcrest, Silverbrook — dye their pieces
 # pale blue, and a pale silver crown on a pale blue head is no crown at all
 # from the gameplay camera: king and queen both read as one smooth dome and
 # the player cannot find their own king.

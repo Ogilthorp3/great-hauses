@@ -77,7 +77,7 @@ FAR = {
     "pawn_h7":   (818, 222, 854, 262),
 }
 
-# The nine-house pawn parade (module-previews/costumes/pawn_helms.png, 1280x720,
+# The nine-haus pawn parade (module-previews/costumes/pawn_helms.png, 1280x720,
 # orthographic and staggered — 5 in front, 4 behind, registry order left to
 # right). Rects cover helm + torso, the two things a pawn is read by. This is
 # the "nine distinguishable pawn ranks" gate's ruler.
@@ -166,12 +166,12 @@ def parade(path):
     A pawn is read at board distance by ONE colour — the colour of the figure,
     whatever surface is carrying it. So the metric is the mean RGB of the
     rect's non-background pixels, and the gate is the smallest distance
-    between any two houses' means.
+    between any two hauses' means.
     """
     img = load(path)
     print(f"=== PAWN PARADE  {path} ===")
     means = {}
-    print(f"{'house':<12}{'px':>7}   {'mean rgb':<22}{'v':>6}{'sat':>7}")
+    print(f"{'haus':<12}{'px':>7}   {'mean rgb':<22}{'v':>6}{'sat':>7}")
     for name, box in PARADE.items():
         x0, y0, x1, y1 = box
         crop = img[y0:y1, x0:x1]

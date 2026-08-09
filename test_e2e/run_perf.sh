@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# run_perf.sh — Great Houses performance harness (the regression gate).
+# run_perf.sh — Great Hauses performance harness (the regression gate).
 #
 # THE INSTRUMENT LIES UNTIL PROVEN OTHERWISE.
 #

@@ -1,6 +1,6 @@
 # Head-to-Head — playing a friend
 
-Two copies of Great Houses, one match. One player **hosts** (their instance is
+Two copies of Great Hauses, one match. One player **hosts** (their instance is
 authoritative and owns the board); the other **joins** by address. Godot 4
 high-level multiplayer over `ENetMultiplayerPeer` — no third-party server, no
 relay, nothing to run but the game.
@@ -9,7 +9,7 @@ relay, nothing to run but the game.
 
 ## 1. How to play (the two-minute version)
 
-**Both of you:** launch Great Houses → the Hall of Banners → pick your banner →
+**Both of you:** launch Great Hauses → the Hall of Banners → pick your banner →
 **Play a Friend**.
 
 The panel says the prerequisite before you press anything: **you must both be
@@ -85,7 +85,7 @@ The friend needs to be *on* the tailnet, one of two ways:
 > the `acls` block:
 >
 > ```jsonc
-> // Great Houses head-to-head: a guest may reach the game port, nothing else.
+> // Great Hauses head-to-head: a guest may reach the game port, nothing else.
 > {
 >   "action": "accept",
 >   "src":    ["autogroup:shared"],        // or the invited user: ["friend@example.com"]

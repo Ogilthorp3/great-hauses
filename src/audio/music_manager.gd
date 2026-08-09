@@ -1,6 +1,6 @@
 class_name MusicManager
 extends Node
-## Layered music director for Great Houses — menu/gameplay playlists, duel
+## Layered music director for Great Hauses — menu/gameplay playlists, duel
 ## stings, victory/defeat/championship fanfares, ducking and persisted volume.
 ##
 ## Designed to run as an autoload named "Music" (NOT "MusicManager" — an

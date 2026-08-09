@@ -48,7 +48,7 @@ extends Node3D
 ##   then the dragon banks once more and takes the perch ABOVE THE THRONE
 ##   (THRONE_PERCH — kept equal to GreatHall.DRAGON_HOVER) with a slow
 ##   wing-settle at scale 1.6, gentle ember drift over the tableau, and
-##   the caption beat "ASHFALL." then "{house} takes the throne."
+##   the caption beat "ASHFALL." then "{haus} takes the throne."
 ##   (strictly sequential — the lines never overlap).
 ##
 ##   EMISSIVE MATERIALS ONLY throughout (the hall's 8-omni budget is FULL:
@@ -1472,5 +1472,5 @@ func _wall_sleep(sec: float) -> void:
 
 
 func _kill_line(winning_house: String) -> String:
-	var wh := winning_house if not winning_house.is_empty() else "The winning house"
+	var wh := winning_house if not winning_house.is_empty() else "The winning haus"
 	return DD.format_line(ASHFALL_LINES.pick_random(), {"wh": wh})

@@ -1,6 +1,6 @@
 class_name HallBanner
 extends Node3D
-## A wall-hung banner (KayKit banner_white) that flies ONE Great House: its
+## A wall-hung banner (KayKit banner_white) that flies ONE Great Haus: its
 ## dyed cloth AND its heraldic sigil.
 ##
 ## Neutral undyed cloth by default; the integrator dresses each of the hall's

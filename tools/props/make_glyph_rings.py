@@ -1,6 +1,6 @@
 #!/usr/bin/env blender --python
 """
-make_glyph_rings.py — Great Houses: TYPE-GLYPH RINGS (piece readability layer).
+make_glyph_rings.py — Great Hauses: TYPE-GLYPH RINGS (piece readability layer).
 
 Run headless:
   /Applications/Blender.app/Contents/MacOS/Blender -b --python \

@@ -1,4 +1,4 @@
-# Integrating the rival-house banter module (`src/banter/`)
+# Integrating the rival-haus banter module (`src/banter/`)
 
 Status: the module is **complete and headless-tested** (93/93 checks,
 `tests/test_banter.gd`) but **wired to nothing** — by design. This note is
@@ -11,7 +11,7 @@ Files:
 | File | Role |
 |---|---|
 | `src/banter/banter.gd` | `BanterEngine` (Node) — beats in, `banter_line` out |
-| `src/banter/banter_lines.json` | 576 canned lines: 9 houses x 8 beats x 8 |
+| `src/banter/banter_lines.json` | 576 canned lines: 9 hauses x 8 beats x 8 |
 | `tests/test_banter.gd` | headless suite (pools, personas, limiter, dedupe, LLM mock) |
 
 ## The 30-second version
@@ -262,11 +262,11 @@ line in a 1-deep queue until the director releases.
   canned line still arrives. For a snappier offline feel, or a user
   setting ("Rival banter: canned only"), set `llm_enabled = false` —
   canned lines then arrive instantly and synchronously. Optional polish:
-  reuse the Oracle's `ping()` result from house select — if the Oracle is
+  reuse the Oracle's `ping()` result from haus select — if the Oracle is
   offline, set `banter.llm_enabled = false` too.
 - Legacy Frost/Ember skin (`player_house_id == ""`): skip creating the
   engine entirely (the guard in the 30-second version does this). The
-  registry houses are the only voices.
+  registry hauses are the only voices.
 
 ### 7. Do / don't
 
@@ -278,9 +278,9 @@ line in a 1-deep queue until the director releases.
 - DON'T call `on_beat` for draws or stalemates; there are no draw pools.
 - DON'T add a second rate limiter in game.gd — skip logic lives in the
   module and `banter_skipped` tells you why a beat went silent.
-- DON'T edit `banter_lines.json` casually: every house x beat must keep
+- DON'T edit `banter_lines.json` casually: every haus x beat must keep
   >= 8 lines, <= 90 chars (after `{piece}` substitution), unique within
-  the house, `{piece}` the only token — `tests/test_banter.gd` enforces
+  the haus, `{piece}` the only token — `tests/test_banter.gd` enforces
   all of it.
 
 ## e2e suggestions (for whoever owns test_e2e/)

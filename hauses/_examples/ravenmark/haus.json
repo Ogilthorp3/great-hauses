@@ -1,16 +1,16 @@
 {
   "_readme": [
-    "House Ravenmark — a WORKED EXAMPLE of a third-party house pack.",
+    "Haus Ravenmark — a WORKED EXAMPLE of a third-party haus pack.",
     "It ships nothing of the game's: its own sigil, its own half-helm, its own",
-    "crest, its own taunts. Copy this folder into user://houses/ and it plays.",
+    "crest, its own taunts. Copy this folder into user://hauses/ and it plays.",
     "On macOS that is:",
-    "  ~/Library/Application Support/Godot/app_userdata/Great Houses/houses/",
+    "  ~/Library/Application Support/Godot/app_userdata/Great Hauses/hauses/",
     "Check it first:  Godot --headless -s res://tools/validate_house_pack.gd -- <dir>",
-    "The format, the rules and the reasons: docs/HOUSE-PACK.md"
+    "The format, the rules and the reasons: docs/HAUS-PACK.md"
   ],
   "format": 1,
   "id": "ravenmark",
-  "name": "House Ravenmark",
+  "name": "Haus Ravenmark",
   "archetype": "raven",
   "seat": "Corvenhold",
   "motto": "We are counted at dusk.",

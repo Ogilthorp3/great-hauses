@@ -1,6 +1,6 @@
 extends SceneTree
 
-# Headless test suite for the Great Houses chess engine port.
+# Headless test suite for the Great Hauses chess engine port.
 # Run: /Applications/Godot.app/Contents/MacOS/Godot --headless --path <project> -s res://tests/run_tests.gd
 # Exit code 0 = all green, 1 = failures.
 
@@ -19,7 +19,7 @@ func _initialize() -> void:
 
 
 func _main() -> void:
-	print("=== Great Houses Chess Engine — headless test suite ===")
+	print("=== Great Hauses Chess Engine — headless test suite ===")
 	_mark = Time.get_ticks_msec()
 	_test_fen()
 	_test_castling()
