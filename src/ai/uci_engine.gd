@@ -18,11 +18,18 @@ extends Node
 ## Shutdown is automatic on tree exit (quit -> grace -> OS.kill) — a
 ## UciEngine never orphans a stockfish process.
 
+## Unix install prefixes. These are NOT redundant with the PATH scan: a
+## double-clicked macOS .app inherits a minimal PATH with no Homebrew in it,
+## so a Mac player would otherwise lose the Maester the moment they stopped
+## launching from a shell.
 const DEFAULT_PATHS := [
 	"/opt/homebrew/bin/stockfish",
 	"/usr/local/bin/stockfish",
 	"/usr/bin/stockfish",
 ]
+## Explicit override, wins over every other lookup. Also how the degradation
+## suite points the engine at a path that cannot exist.
+const ENV_STOCKFISH := "GREAT_HOUSES_STOCKFISH"
 const SEARCH_TIMEOUT_S := 30.0   # outer guard per search; depth limits finish long before
 
 var _pipe: FileAccess = null
@@ -34,18 +41,83 @@ var _handshaken := false
 var _cur_multipv := 1
 
 
-## Autodetect the stockfish binary: `which stockfish`, then Homebrew/usr
-## fallbacks. "" when not installed (callers degrade / grey out).
-static func find_stockfish() -> String:
-	var out := []
-	if OS.execute("/usr/bin/which", ["stockfish"], out) == 0 and out.size() > 0:
-		var p := String(out[0]).strip_edges()
-		if not p.is_empty() and FileAccess.file_exists(p):
+## The platform's stockfish filename.
+static func binary_name() -> String:
+	return "stockfish.exe" if OS.has_feature("windows") else "stockfish"
+
+
+## Directories searched before PATH, in order. On Windows this is what makes
+## "drop stockfish.exe next to GreatHouses.exe" work — the friend never has
+## to touch their PATH. On macOS the executable lives inside the bundle, so
+## the folder CONTAINING the .app is searched too.
+static func sidecar_dirs() -> Array[String]:
+	var exe_dir := OS.get_executable_path().get_base_dir()
+	var dirs: Array[String] = [exe_dir, exe_dir.path_join("stockfish")]
+	if OS.has_feature("macos"):
+		# <dir>/Great Houses.app/Contents/MacOS/<bin> -> <dir>
+		var outside := exe_dir.get_base_dir().get_base_dir().get_base_dir()
+		if not outside.is_empty():
+			dirs.append(outside)
+			dirs.append(outside.path_join("stockfish"))
+	return dirs
+
+
+## Scan the PATH environment variable ourselves rather than shelling out to
+## `which` — /usr/bin/which does not exist on Windows, and this spawns no
+## process at all.
+static func search_path_env() -> String:
+	var raw := OS.get_environment("PATH")
+	if raw.is_empty():
+		return ""
+	var sep := ";" if OS.has_feature("windows") else ":"
+	var bin := binary_name()
+	for d in raw.split(sep, false):
+		var dir := String(d).strip_edges()
+		if dir.is_empty():
+			continue
+		var p := dir.path_join(bin)
+		if FileAccess.file_exists(p):
 			return p
-	for p in DEFAULT_PATHS:
-		if FileAccess.file_exists(String(p)):
-			return String(p)
 	return ""
+
+
+## Autodetect the stockfish binary, platform-aware and in cost order:
+##   1. $GREAT_HOUSES_STOCKFISH   explicit override (tests, power users)
+##   2. beside the executable     stockfish[.exe], or a stockfish/ subfolder
+##   3. PATH                      scanned directly, no subprocess
+##   4. Homebrew/usr prefixes     Unix only, for PATH-less GUI launches
+## "" when not installed — every caller treats that as "grey the mode out",
+## so a Windows box with no engine degrades instead of crashing.
+static func find_stockfish() -> String:
+	var override := OS.get_environment(ENV_STOCKFISH).strip_edges()
+	if not override.is_empty():
+		# An override that does not exist resolves to "" — a deliberately bogus
+		# path must degrade exactly like "no engine installed", not fall
+		# through to whatever happens to be on this machine's PATH.
+		return override if FileAccess.file_exists(override) else ""
+	var bin := binary_name()
+	for dir in sidecar_dirs():
+		var p := dir.path_join(bin)
+		if FileAccess.file_exists(p):
+			return p
+	var on_path := search_path_env()
+	if not on_path.is_empty():
+		return on_path
+	if not OS.has_feature("windows"):
+		for p in DEFAULT_PATHS:
+			if FileAccess.file_exists(String(p)):
+				return String(p)
+	return ""
+
+
+## One line of UI copy for the greyed-out Grand Maester, naming the place
+## THIS platform's player should put the binary.
+static func install_hint() -> String:
+	if OS.has_feature("windows"):
+		return "put stockfish.exe next to GreatHouses.exe"
+	if OS.has_feature("macos"):
+		return "brew install stockfish"
+	return "install stockfish from your package manager"
 
 
 func pid() -> int:
@@ -67,7 +139,16 @@ func start(path := "") -> bool:
 		return true
 	var exe := path if not path.is_empty() else find_stockfish()
 	if exe.is_empty():
-		push_warning("UciEngine: no stockfish binary found")
+		push_warning("UciEngine: no stockfish binary found (%s)" % install_hint())
+		return false
+	# An explicitly-passed path is NOT vetted by find_stockfish(), and
+	# OS.execute_with_pipe happily forks for a path that cannot be exec'd:
+	# it hands back a live pid and a pipe, the child dies immediately, and
+	# start() would report success for an engine that will never answer
+	# (init() then burns its full 5 s timeout before anything degrades).
+	# Check the file up front so a wrong path greys the Maester out at once.
+	if not FileAccess.file_exists(exe):
+		push_warning("UciEngine: no stockfish binary at %s (%s)" % [exe, install_hint()])
 		return false
 	var info := OS.execute_with_pipe(exe, [])
 	if info.is_empty():
