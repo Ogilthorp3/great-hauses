@@ -41,10 +41,12 @@ ASSERT_PRESENT=(
   "scenes/main.tscn"
   "src/board/piece_assets.gd"
   "src/audio/music_manager.gd"
-  "test_e2e/e2e_driver.gd"     # autoloaded by project.godot — see BUILDING.md
 )
-# Things that must NEVER reach a player.
-ASSERT_ABSENT=( "test_e2e/artifacts" "res://tests/" "res://tools/" ".md" )
+# Things that must NEVER reach a player. test_e2e/ is the whole E2E harness:
+# it was autoloaded from project.godot until 2026-08-09, so a 90 KB .gdc of
+# test code shipped inside the Windows pck. It is registered at runtime now
+# (src/main.gd::_install_e2e_harness) and excluded from every export.
+ASSERT_ABSENT=( "test_e2e/" "res://tests/" "res://tools/" ".md" )
 
 # macOS ships bash 3.2, which has no `mapfile` — build the argv in a global.
 PCK_ARGS=()

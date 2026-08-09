@@ -19,7 +19,14 @@ extends SceneTree
 #   * the cinematic gate: one ack never opens it, both acks open it once, a
 #     stale ack is dropped, and a peer that never acks can DELAY it but never
 #     wedge it,
-#   * take-backs are off online, and the addresses/ports a human types parse.
+#   * THE REQUEST DEADLINE (verifier defect P1): a request the host never
+#     answers stops being a frozen board — the clock says "late", then hands
+#     the board back, and a late answer still un-does the whole thing,
+#   * THE RPC GUARDS (verifier defects P2/P3): a second hello mid-match cannot
+#     reset the host's state, and only the seated peer can ack the cinematic
+#     gate or request a move,
+#   * take-backs are off online, and the addresses/ports a human types — or
+#     PASTES, commentary and all — parse.
 
 const START := "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 const EP_FEN := "4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 2"
@@ -46,8 +53,19 @@ func _initialize() -> void:
 	_test_addresses()
 	_test_undo_policy()
 	_test_ply_gate()
+	_test_request_clock()
 	_test_enet_transport()
+
+
+## The last two tests stand a REAL NetMatch up in the tree (they drive its own
+## `_rpc_*` methods and its own deadline), and the SceneTree root refuses
+## children while it is still being set up — so they run on the first frame
+## instead of inside `_initialize`.
+func _process(_delta: float) -> bool:
+	_test_dropped_request_recovers()
+	_test_rpc_guards()
 	_print_summary()
+	return true
 
 
 func check(test_name: String, expected, actual) -> void:
@@ -302,6 +320,92 @@ func _test_addresses() -> void:
 	check("addr: unreachable text names the address", true,
 			NetProtocol.unreachable_text("100.1.2.3", 7777).contains("100.1.2.3:7777"))
 
+	# -- THE PASTED LINE (verifier note, 2026-08-09). The host panel prints an
+	# address followed by the one line that says when to use it, and people
+	# select the whole line, because that is what a line is. Every one of these
+	# used to be handed to ENet verbatim and fail as "could not reach <line>".
+	for line in NetProtocol.share_lines(7777):
+		if not line.contains(":7777"):
+			continue                     # the "no network address found" line
+		var round_trip: Array = NetProtocol.parse_address(line)
+		check("addr: our OWN share line pastes back cleanly (%s)" % line, 7777,
+				int(round_trip[1]))
+		check("addr: ...and yields a bare address (%s)" % line, false,
+				str(round_trip[0]).contains(" "))
+	check("addr: a pasted LAN line loses its commentary", "10.0.0.10|7777",
+			"%s|%s" % NetProtocol.parse_address("10.0.0.10:7777   ·  same Wi-Fi — try this one first"))
+	check("addr: a pasted tailnet line loses its commentary", "100.107.112.118|7777",
+			"%s|%s" % NetProtocol.parse_address(
+				"100.107.112.118:7777   (tailnet — works from anywhere)"))
+	check("addr: the OLD share format still pastes", "192.168.1.24|7777",
+			"%s|%s" % NetProtocol.parse_address("192.168.1.24:7777   (same Wi-Fi / LAN)"))
+	check("addr: a sentence around the address is forgiven", "10.0.0.10|7777",
+			"%s|%s" % NetProtocol.parse_address("Send your friend: 10.0.0.10:7777"))
+	check("addr: a non-default port survives the paste", "10.0.0.10|9001",
+			"%s|%s" % NetProtocol.parse_address("10.0.0.10:9001  ·  same Wi-Fi"))
+	check("addr: a portless paste keeps the default", "10.0.0.10|7777",
+			"%s|%s" % NetProtocol.parse_address("10.0.0.10   ·  same Wi-Fi"))
+	check("addr: a trailing full stop is not part of the address", "10.0.0.10|7777",
+			"%s|%s" % NetProtocol.parse_address("10.0.0.10."))
+	check("addr: quotes around a pasted address are forgiven", "10.0.0.10|7777",
+			"%s|%s" % NetProtocol.parse_address("\"10.0.0.10\""))
+	check("addr: a non-breaking space from a clipboard is forgiven", "10.0.0.10|7777",
+			"%s|%s" % NetProtocol.parse_address(String.chr(0x00A0) + "10.0.0.10" + String.chr(0x00A0)))
+	check("addr: a pasted newline does not become a hostname", "10.0.0.10|7777",
+			"%s|%s" % NetProtocol.parse_address("10.0.0.10:7777\n"))
+	check("addr: a bare hostname typed by hand still works", "manoir|7777",
+			"%s|%s" % NetProtocol.parse_address("manoir"))
+	check("addr: prose with no address in it yields nothing to dial", "|7777",
+			"%s|%s" % NetProtocol.parse_address("same Wi-Fi"))
+
+	# -- THE ORDER (verifier note, 2026-08-09). Same-Wi-Fi first, because it is
+	# the case that needs nothing set up; the tailnet line has to SAY what it
+	# needs rather than lead the list by being the cleverest option.
+	var entries := NetProtocol.share_entries(7777)
+	check("share: every entry says WHEN to use it", true, entries.all(
+			func(e): return not str(e["when"]).is_empty()))
+	var kinds: Array[String] = []
+	for e in entries:
+		kinds.append(str(e["kind"]))
+	var first_tailnet := kinds.find("tailnet")
+	var last_lan := kinds.rfind("lan")
+	if first_tailnet >= 0 and last_lan >= 0:
+		check("share: no tailnet address is offered above a same-Wi-Fi one",
+				true, first_tailnet > last_lan)
+	if first_tailnet >= 0:
+		check("share: the tailnet line says what it needs", true,
+				str(entries[first_tailnet]["when"]).contains("tailnet"))
+	if last_lan >= 0:
+		check("share: the first line is the one to try first", true,
+				str(entries[0]["when"]).contains("first"))
+	check("share: the copy button copies the first line's address, exactly",
+			str(entries[0]["address"]), NetProtocol.primary_address(7777))
+	check("share: the copied address is dialable text, not a sentence", true,
+			NetProtocol.primary_address(7777).is_empty()
+			or str(NetProtocol.parse_address(NetProtocol.primary_address(7777))[0])
+				== NetProtocol.primary_address(7777).split(":")[0])
+	# The ranking rule that demoted a VM bridge below the real Wi-Fi.
+	check("share: a virtual interface name is recognised as virtual", false,
+			NetProtocol._iface_is_real("bridge100"))
+	check("share: a VM host interface is recognised as virtual", false,
+			NetProtocol._iface_is_real("vmenet0"))
+	check("share: the tailscale tunnel is recognised as virtual", false,
+			NetProtocol._iface_is_real("utun0"))
+	check("share: Windows' virtual switch is recognised as virtual", false,
+			NetProtocol._iface_is_real("vEthernet (Default Switch)"))
+	check("share: real Wi-Fi is not demoted", true, NetProtocol._iface_is_real("en1"))
+	check("share: a Windows 'Wi-Fi' adapter is not demoted", true,
+			NetProtocol._iface_is_real("Wi-Fi"))
+
+	# -- What a player must be told BEFORE they press anything.
+	check("words: the prerequisite names both routes", true,
+			NetProtocol.prerequisite_text().contains("Wi-Fi")
+			and NetProtocol.prerequisite_text().contains("tailnet"))
+	check("words: the firewall note tells them which button to click", true,
+			NetProtocol.firewall_text().contains("Allow"))
+	check("words: the stalled notice offers the way out", true,
+			NetProtocol.request_stalled_text().contains("Hall of Banners"))
+
 
 func _test_undo_policy() -> void:
 	check("undo: take-backs are off in a network match", false, NetProtocol.UNDO_ALLOWED)
@@ -352,6 +456,247 @@ func _test_ply_gate() -> void:
 			g.tick(2000 + int(NetProtocol.GATE_TIMEOUT_SEC * 1000.0) + 5000,
 				NetProtocol.GATE_TIMEOUT_SEC))
 	check("gate: forced gate still releases the turn", true, g.accepting())
+
+
+# ── P1: the request deadline (the freeze) ──────────────────────────────────
+
+
+func _test_request_clock() -> void:
+	## The pure clock first: nothing fires early, each hand fires exactly once.
+	var slow := NetProtocol.REQUEST_SLOW_SEC
+	var stall := NetProtocol.REQUEST_TIMEOUT_SEC
+	check("clock: the deadlines are ordered and armed", true, slow > 0.0 and stall > slow)
+
+	var c := NetRequestClock.new()
+	check("clock: idle until a request goes out", false, c.waiting())
+	check("clock: an idle clock never fires", NetRequestClock.NO_CHANGE,
+			c.tick(999_999, slow, stall))
+
+	c.arm(4, 1000)
+	check("clock: armed for the ply it was sent for", 4, c.seq)
+	check("clock: waiting for an answer", true, c.waiting())
+	check("clock: silent one second in", NetRequestClock.NO_CHANGE,
+			c.tick(2000, slow, stall))
+	check("clock: silent right up to the slow mark", NetRequestClock.NO_CHANGE,
+			c.tick(1000 + int(slow * 1000.0) - 1, slow, stall))
+	check("clock: says 'late' at the slow mark", NetRequestClock.PHASE_SLOW,
+			c.tick(1000 + int(slow * 1000.0), slow, stall))
+	check("clock: says it exactly once", NetRequestClock.NO_CHANGE,
+			c.tick(1000 + int(slow * 1000.0) + 500, slow, stall))
+	check("clock: still holding the board while merely late", false, c.stalled())
+	check("clock: gives the board back at the timeout", NetRequestClock.PHASE_STALLED,
+			c.tick(1000 + int(stall * 1000.0), slow, stall))
+	check("clock: stalled", true, c.stalled())
+	check("clock: gives it back exactly once", NetRequestClock.NO_CHANGE,
+			c.tick(1000 + int(stall * 1000.0) + 60_000, slow, stall))
+
+	# An answer disarms it, and a re-armed clock starts clean.
+	check("clock: an answer disarms a stalled clock", true, c.clear())
+	check("clock: nothing left waiting", false, c.waiting())
+	check("clock: clearing an idle clock reports nothing to announce", false, c.clear())
+	c.arm(5, 10_000)
+	check("clock: the new request gets its own full budget",
+			NetRequestClock.NO_CHANGE, c.tick(10_000 + int(slow * 1000.0) - 1, slow, stall))
+
+	# A process loop that stalled long enough to cross BOTH marks reports the
+	# state that matters, and never announces "late" after "gave up".
+	var j := NetRequestClock.new()
+	j.arm(1, 0)
+	check("clock: one very late tick reports STALLED, not SLOW",
+			NetRequestClock.PHASE_STALLED, j.tick(int(stall * 1000.0) + 5000, slow, stall))
+	check("clock: and nothing follows it", NetRequestClock.NO_CHANGE,
+			j.tick(int(stall * 1000.0) + 9000, slow, stall))
+
+	# An answer that beats the deadline says nothing at all.
+	var q := NetRequestClock.new()
+	q.arm(2, 0)
+	check("clock: a prompt answer never fires the slow hand", NetRequestClock.NO_CHANGE,
+			q.tick(int(slow * 1000.0) - 10, slow, stall))
+	check("clock: a prompt answer disarms it quietly", true, q.clear())
+
+
+## THE TEST THE BRIEF ASKED FOR: drop a joiner's request on the floor — the
+## host never answers it — and prove the client RECOVERS instead of freezing.
+## `busy` here stands in for game.gd's own flag, wired the way game.gd wires it:
+## raised when the request leaves, and lowered only by something the transport
+## says. Before the deadline existed, nothing ever lowered it again.
+func _test_dropped_request_recovers() -> void:
+	var net := NetMatch.new()
+	net.name = "NetMatchDroppedRequest"
+	root.add_child(net)
+	if not net.is_inside_tree():
+		check("P1: a NetMatch can be stood up for the test", true, false)
+		return
+	net.is_host = false                       # the joiner is the side that waits
+	net.state = NetMatch.State.IN_MATCH
+
+	var busy := [true]                        # game.gd::_play_turn just set this
+	var said: Array[String] = []
+	var panel := [""]                         # what the player would be reading
+	net.request_slow.connect(func(_s: int) -> void:
+		said.append("slow")
+		panel[0] = NetProtocol.request_slow_text())
+	net.request_stalled.connect(func(_s: int) -> void:
+		said.append("stalled")
+		busy[0] = false                       # game.gd hands the board back
+		panel[0] = NetProtocol.request_stalled_text())
+	net.request_recovered.connect(func(_s: int) -> void:
+		said.append("recovered")
+		panel[0] = "")
+
+	var slow_ms := int(NetProtocol.REQUEST_SLOW_SEC * 1000.0)
+	var stall_ms := int(NetProtocol.REQUEST_TIMEOUT_SEC * 1000.0)
+	net.begin_request_deadline(3, 0)          # ...and the packet is never delivered
+	net.tick_requests(slow_ms - 1)
+	check("P1: nothing is said before the request is even late", 0, said.size())
+	check("P1: the board is still held while the answer may yet come", true, busy[0])
+
+	net.tick_requests(slow_ms + 1)
+	check("P1: the player is told the answer is late", "slow", "|".join(said))
+	check("P1: the late notice is a sentence, not a code", true,
+			panel[0].contains("hasn't answered"))
+	check("P1: being late does not yet hand the board back", true, busy[0])
+	check("P1: it is said once, not once per frame", 1, net.request_slow_count)
+	net.tick_requests(slow_ms + 2000)
+	check("P1: still once", 1, net.request_slow_count)
+
+	net.tick_requests(stall_ms + 1)
+	check("P1: THE FREEZE IS OVER — the board is handed back", false, busy[0])
+	check("P1: the transitions in order", "slow|stalled", "|".join(said))
+	check("P1: and a way forward is named", true,
+			panel[0].contains("Hall of Banners"))
+	check("P1: the stall was counted once", 1, net.request_stalled_count)
+	net.tick_requests(stall_ms + 60_000)
+	check("P1: a stalled request is not re-announced forever", 1, net.request_stalled_count)
+
+	# The host wakes up late: the notice comes down by itself.
+	net._rpc_move_rejected(3, "that move was for an earlier position")
+	check("P1: a late answer is not lost", "slow|stalled|recovered", "|".join(said))
+	check("P1: the notice comes down when the host answers", "", panel[0])
+	check("P1: nothing is left waiting", false, net.request_is_stalled())
+	net.tick_requests(stall_ms + 120_000)
+	check("P1: a disarmed clock stays quiet", "slow|stalled|recovered", "|".join(said))
+
+	# A request the host answers promptly is completely silent.
+	var quiet := [0]
+	net.request_slow.connect(func(_s: int) -> void: quiet[0] += 1)
+	net.request_stalled.connect(func(_s: int) -> void: quiet[0] += 1)
+	net.begin_request_deadline(4, 500_000)
+	net.tick_requests(500_000 + slow_ms - 10)
+	net._rpc_move_rejected(4, "not your turn")
+	net.tick_requests(500_000 + stall_ms + 10_000)
+	check("P1: a prompt answer produces no warnings at all", 0, quiet[0])
+
+	# The HOST never arms this clock: it answers its own click synchronously.
+	var h := NetMatch.new()
+	h.name = "NetMatchHostClock"
+	root.add_child(h)
+	h.is_host = true
+	h.state = NetMatch.State.IN_MATCH
+	h.begin_request_deadline(0, 0)
+	h.tick_requests(stall_ms + 10_000)
+	check("P1: the host never stalls on its own request", 0, h.request_stalled_count)
+	h.free()
+	net.free()
+
+	# A signal nobody listens to is a fix nobody ships. A headless suite cannot
+	# stand up the 3D match scene, so assert the wiring where it is written —
+	# the two-instance e2e proves it runs.
+	var src := FileAccess.get_file_as_string("res://src/game.gd")
+	check("P1: game.gd listens for a late request", true,
+			src.contains("net.request_slow.connect"))
+	check("P1: game.gd listens for a stalled request", true,
+			src.contains("net.request_stalled.connect"))
+	check("P1: game.gd listens for the late answer that undoes it", true,
+			src.contains("net.request_recovered.connect"))
+	check("P1: and the stall handler hands the board back", true,
+			src.contains("_on_net_request_stalled") and src.contains("_net_stalled = true"))
+	check("P1: Esc is a way out of a host that stopped answering", true,
+			src.contains("or _net_stalled:"))
+
+
+# ── P2 / P3: who may say what, and when ────────────────────────────────────
+
+
+func _test_rpc_guards() -> void:
+	## The rules, every branch (pure — no socket needed).
+	check("admit: a first hello from the connected peer seats it",
+			NetProtocol.ADMIT_OK, NetProtocol.hello_admission(true, 0, 2, 2))
+	check("admit: a hello once the match has started is refused (P2)",
+			"the match has already started",
+			NetProtocol.hello_admission(false, 0, 2, 2))
+	check("admit: a hello from a peer when someone is already seated is refused (P2)",
+			"a peer already holds that seat",
+			NetProtocol.hello_admission(true, 2, 2, 2))
+	check("admit: a hello that claims to be the host itself is refused",
+			"the sender is not a remote peer",
+			NetProtocol.hello_admission(true, 0, 2, 1))
+	check("admit: a hello with no sender at all is refused",
+			"the sender is not a remote peer",
+			NetProtocol.hello_admission(true, 0, 2, 0))
+	check("admit: a hello from a peer that never connected is refused",
+			"that peer is not the one that connected",
+			NetProtocol.hello_admission(true, 0, 2, 9))
+	check("admit: the seated peer may speak for its seat",
+			NetProtocol.ADMIT_OK, NetProtocol.seat_admission(2, 2))
+	check("admit: another peer may not speak for that seat (P3)",
+			"that peer holds no seat", NetProtocol.seat_admission(2, 9))
+	check("admit: nobody may speak for an empty seat (P3)",
+			"nobody holds that seat yet", NetProtocol.seat_admission(0, 2))
+
+	## ...and the real host, refusing the real packets. Calling an @rpc method
+	## directly is exactly a packet whose sender the host cannot vouch for
+	## (get_remote_sender_id() is 0), which is the shape of a forged one.
+	var host := NetMatch.new()
+	host.name = "NetMatchGuards"
+	root.add_child(host)
+	if not host.is_inside_tree():
+		check("P2/P3: a host NetMatch can be stood up for the test", true, false)
+		return
+	host.is_host = true
+	host.state = NetMatch.State.IN_MATCH
+	host._client_id = 2
+	host._seated_peer = 2
+	host.seq = 7
+	host.their_house = "ashwyrm"
+	host.my_house = "winterfang"
+	# A match in progress: ply 6 played, both sides finished watching it.
+	host._gate.begin(6, 0)
+	host._gate.ack(6, NetPlyGate.ROLE_HOST, 1)
+	host._gate.ack(6, NetPlyGate.ROLE_JOIN, 2)
+	check("P2: the match is genuinely in progress before the hostile hello",
+			true, host.gate_is_open(6))
+
+	# THE VERIFIER'S PACKET: a second hello, mid-match, from a live client.
+	host._rpc_hello(NetProtocol.PROTOCOL_VERSION, "goldclaw")
+	check("P2: the ply counter was NOT reset", 7, host.seq)
+	check("P2: the seats were NOT re-dealt", "ashwyrm", host.their_house)
+	check("P2: the cinematic gate was NOT re-armed", true, host.gate_is_open(6))
+	check("P2: the match is still running", NetMatch.State.IN_MATCH, host.state)
+	check("P2: the packet was dropped, and recorded", 1, host.refused_packet_count)
+	check("P2: recorded with the reason", true,
+			host.last_refused_packet.contains("already started"))
+
+	# P3: a forged ack must not open the gate under the other player's duel.
+	host._gate.begin(8, 0)
+	host._gate.ack(8, NetPlyGate.ROLE_HOST, 10)   # we finished; the joiner has not
+	check("P3: the gate is closed with only the host's ack", false, host.gate_is_open(8))
+	host._rpc_ack_ply(8)
+	check("P3: a forged ack does NOT open the gate early", false, host.gate_is_open(8))
+	check("P3: the joiner's ack slot is still empty", false,
+			host._gate.has_ack(NetPlyGate.ROLE_JOIN))
+	check("P3: the forged ack was dropped, and recorded", 2, host.refused_packet_count)
+	check("P3: the host still refuses the next request until the duel is watched",
+			false, host._gate.accepting())
+
+	# ...and the same rule guards the move request, whose sender decides which
+	# ARMY the packet is allowed to move.
+	host._rpc_request_move(8, ChessState.square_index_from_name("e2"),
+			ChessState.square_index_from_name("e4"), "")
+	check("P3: a move request from an unseated peer is dropped",
+			3, host.refused_packet_count)
+	check("P3: it never reached the validator", 0, host.applied_count)
+	host.free()
 
 
 # ── The transport actually binds ───────────────────────────────────────────

@@ -80,6 +80,12 @@ var _rival_display := "House Ember"
 var player_color := false            # false = White, true = Black
 var net: NetMatch = null             # non-null only in a head-to-head match
 var _net_disconnected := false
+## The host owes us an answer and is past its deadline (verifier defect P1).
+## NOT the same as _net_disconnected: the socket may be perfectly alive and the
+## answer may still arrive, so this state is RECOVERABLE — the panel closes
+## again by itself if the host wakes up.
+var _net_stalled := false
+var net_stalled_count := 0           # e2e evidence: the deadline actually fired
 var _net_status: Label
 var _net_panel: PanelContainer
 var _net_panel_label: Label
@@ -231,6 +237,11 @@ func _setup_network() -> void:
 	net.move_rejected.connect(_on_net_move_rejected)
 	net.opponent_left.connect(_on_net_opponent_left)
 	net.desync.connect(_on_net_desync)
+	# THE REQUEST DEADLINE (verifier defect P1). Without these three the board
+	# sits on `busy = true` forever when the host never answers.
+	net.request_slow.connect(_on_net_request_slow)
+	net.request_stalled.connect(_on_net_request_stalled)
+	net.request_recovered.connect(_on_net_request_recovered)
 	# The camera sits behind the player's OWN army. yaw = PI is behind White
 	# (the rig's default); a Black player looks down the board from the far end.
 	if player_color:
@@ -523,6 +534,8 @@ func _play_turn(move) -> void:
 		# validated broadcast comes back through _on_net_move_applied. One code
 		# path, one order of events, no "the host sees it first" class of bug.
 		busy = true
+		_net_stalled = false      # a fresh request gets a fresh deadline (P1)
+		_hide_net_panel()
 		_clear_selection()
 		_update_turn_label()
 		net.request_move(move)
@@ -553,6 +566,8 @@ func _on_net_move_applied(payload: Dictionary) -> void:
 	if move == null:
 		push_error("network: malformed move payload for ply %d" % seq)
 		return
+	_net_stalled = false      # an applied ply is the loudest possible answer
+	_hide_net_panel()
 	busy = true
 	_clear_selection()
 	var gen := _turn_gen
@@ -603,9 +618,47 @@ func _await_net_gate(seq: int, gen: int) -> void:
 		await tree.process_frame
 
 
+func _on_net_request_slow(_seq: int) -> void:
+	## The answer is late. The board stays held — the move may still land — but
+	## the player is told, instead of watching a screen that looks dead.
+	if _net_disconnected or game_over:
+		return
+	_flash_oracle(NetProtocol.request_slow_text(), NetProtocol.REQUEST_TIMEOUT_SEC)
+	_update_turn_label()
+
+
+func _on_net_request_stalled(seq: int) -> void:
+	## THE FIX FOR THE FREEZE (verifier defect P1). The host never answered, so
+	## the board comes back to the player and the way out is on screen: keep
+	## waiting (the panel closes itself if the answer arrives), or go home. The
+	## request is NOT re-sent — the host may still apply it, and NetMatch's seq
+	## guard drops it if the position has moved on.
+	if _net_disconnected or game_over:
+		return
+	_net_stalled = true
+	net_stalled_count += 1
+	busy = false                 # the one line the whole defect was about
+	_clear_selection()
+	print("NET STALLED seq=%d" % seq)
+	_show_net_panel(NetProtocol.request_stalled_text())
+	_update_turn_label()
+	_update_undo_button()
+
+
+func _on_net_request_recovered(_seq: int) -> void:
+	## It answered after all. Take the notice down; the applied ply (or the
+	## rejection) that follows drives the board from here.
+	_net_stalled = false
+	_hide_net_panel()
+	_flash_oracle(NetProtocol.request_recovered_text(), 3.0)
+	_update_turn_label()
+
+
 func _on_net_move_rejected(reason: String) -> void:
 	## The host refused our move. Say why, in the words it gave us, and hand
 	## the board back — never leave the player staring at a frozen screen.
+	_net_stalled = false
+	_hide_net_panel()
 	net_rejections.append(reason)
 	print("NET REJECTED %s" % reason)
 	_clear_selection()
@@ -1189,7 +1242,11 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			if _victory_shown:
 				_continue_pressed()
 		KEY_ESCAPE:
-			if game_over or _net_disconnected:
+			# _net_stalled (P1) is the recoverable one: Esc is a WAY OUT of a
+			# host that stopped answering, not the only way out — the panel's
+			# own button does the same, and staying put still works if the
+			# answer turns up.
+			if game_over or _net_disconnected or _net_stalled:
 				_return_to_hall()
 
 
@@ -1690,6 +1747,14 @@ func _show_net_panel(text: String) -> void:
 	_net_panel.visible = true
 
 
+func _hide_net_panel() -> void:
+	## Only the RECOVERABLE notice (the stalled request, P1) ever takes this
+	## door back out — a lost opponent and a desync are terminal and leave the
+	## card up until the player goes home.
+	if _net_panel != null and _net_panel.visible and not _net_disconnected:
+		_net_panel.visible = false
+
+
 func _update_turn_label(ai_thinking := false) -> void:
 	if _turn_label == null:
 		return
@@ -1698,6 +1763,9 @@ func _update_turn_label(ai_thinking := false) -> void:
 		_turn_label.text = "the connection is gone"
 	elif game_over:
 		_turn_label.text = "the field falls silent"
+	elif _net_stalled:
+		# P1: the state that used to be an unlabelled frozen board.
+		_turn_label.text = "your friend's game stopped answering"
 	elif ai_thinking or state.turn != player_color:
 		if net != null:
 			_turn_label.text = "%s is deciding..." % _rival_display
@@ -1706,7 +1774,9 @@ func _update_turn_label(ai_thinking := false) -> void:
 		else:
 			_turn_label.text = "%s is thinking..." % _rival_display
 	elif busy and net != null:
-		_turn_label.text = "sending your move..."
+		_turn_label.text = NetProtocol.request_slow_text() \
+			if (is_instance_valid(net) and net.is_active() and net.request_is_slow()) \
+			else "sending your move..."
 	else:
 		_turn_label.text = "%s to move" % _player_display
 

@@ -110,7 +110,16 @@ var _net_side_index := 0
 var _net_address: LineEdit
 var _net_status_label: Label
 var _net_share_label: Label
+var _net_prereq_label: Label       # what you need BEFORE you press anything
+var _net_firewall_label: Label     # the "click Allow" dialog, named in advance
+var _net_copy_btn: Button
+var _net_copy_note: Label          # the visible confirmation a copy really happened
+var _net_cancel_btn: Button        # a VISIBLE way out of "waiting for your friend…"
+var _net_primary := ""             # the address the copy button puts on the clipboard
 var _net_busy := false             # a socket is open — buttons stop re-firing
+## e2e evidence: the clipboard action fired, and with what.
+var net_copied_count := 0
+var net_last_copied := ""
 
 
 func _ready() -> void:
@@ -632,6 +641,20 @@ func _build_net_panel() -> void:
 	head.add_theme_color_override("font_color", TEXT_WARM)
 	root.add_child(head)
 
+	# -- THE PREREQUISITE, before either button (verifier note, 2026-08-09).
+	# "you both need the same Wi-Fi or the same tailnet" used to appear only
+	# inside the "could not reach…" failure — which is the one moment it is too
+	# late to be useful. It is the first thing on the panel now.
+	_net_prereq_label = Label.new()
+	_net_prereq_label.name = "NetPrereq"
+	_net_prereq_label.text = NetProtocol.prerequisite_text()
+	_net_prereq_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_net_prereq_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_net_prereq_label.custom_minimum_size = Vector2(420, 0)
+	_net_prereq_label.add_theme_font_size_override("font_size", 14)
+	_net_prereq_label.add_theme_color_override("font_color", GOLD)
+	root.add_child(_net_prereq_label)
+
 	# -- choice: host or join
 	_net_choice = VBoxContainer.new()
 	_net_choice.name = "NetChoice"
@@ -651,6 +674,18 @@ func _build_net_panel() -> void:
 		_net_side_buttons.append(b)
 		_net_host_box.add_child(b)
 	_net_host_box.add_child(_net_button("⚔  Open the Gates", _on_net_host_pressed))
+	# The firewall dialog, named BEFORE it appears. macOS asks on the first
+	# host and Windows Defender asks too, and an unanswered prompt fails in a
+	# way that looks exactly like a wrong address (verifier note, 2026-08-09).
+	_net_firewall_label = Label.new()
+	_net_firewall_label.name = "NetFirewallNote"
+	_net_firewall_label.text = NetProtocol.firewall_text()
+	_net_firewall_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_net_firewall_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_net_firewall_label.custom_minimum_size = Vector2(420, 0)
+	_net_firewall_label.add_theme_font_size_override("font_size", 13)
+	_net_firewall_label.add_theme_color_override("font_color", TEXT_DIM)
+	_net_host_box.add_child(_net_firewall_label)
 
 	# -- join: where is your friend
 	_net_join_box = VBoxContainer.new()
@@ -659,8 +694,13 @@ func _build_net_panel() -> void:
 	_net_join_box.add_theme_constant_override("separation", 8)
 	root.add_child(_net_join_box)
 	var hint := Label.new()
-	hint.text = "Your friend's address (they can read it off their screen)"
+	hint.name = "NetJoinHint"
+	# Paste the WHOLE line if you like: parse_address strips the commentary the
+	# host panel prints after the address (verifier note, 2026-08-09).
+	hint.text = "Your friend's address — paste the whole line they sent, or type it"
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	hint.custom_minimum_size = Vector2(400, 0)
 	hint.add_theme_font_size_override("font_size", 13)
 	hint.add_theme_color_override("font_color", TEXT_DIM)
 	_net_join_box.add_child(hint)
@@ -684,6 +724,25 @@ func _build_net_panel() -> void:
 	_net_share_label.add_theme_color_override("font_color", GOLD)
 	root.add_child(_net_share_label)
 
+	# THE COPY BUTTON (verifier note, 2026-08-09). Before this, hosting meant
+	# ip-allow: the address the verifier actually read aloud — quoted evidence
+	# reading "100.107.112.118:7777" down a phone line to a non-technical friend
+	# one digit at a time. One click, one clipboard, one visible confirmation.
+	_net_copy_btn = _net_button("⧉  Copy the address", _on_net_copy_pressed)
+	_net_copy_btn.name = "NetCopyButton"
+	_net_copy_btn.visible = false
+	root.add_child(_net_copy_btn)
+
+	_net_copy_note = Label.new()
+	_net_copy_note.name = "NetCopied"
+	_net_copy_note.visible = false
+	_net_copy_note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_net_copy_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_net_copy_note.custom_minimum_size = Vector2(420, 0)
+	_net_copy_note.add_theme_font_size_override("font_size", 14)
+	_net_copy_note.add_theme_color_override("font_color", TEXT_WARM)
+	root.add_child(_net_copy_note)
+
 	_net_status_label = Label.new()
 	_net_status_label.name = "NetStatus"
 	_net_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -692,6 +751,14 @@ func _build_net_panel() -> void:
 	_net_status_label.add_theme_font_size_override("font_size", 14)
 	_net_status_label.add_theme_color_override("font_color", TEXT_DIM)
 	root.add_child(_net_status_label)
+
+	# A VISIBLE way out (verifier note, 2026-08-09). "waiting for your friend to
+	# join…" had no control on screen at all — Esc worked, but only as a line of
+	# footer text, and a player who has just opened a listening socket should
+	# not have to trust a hint to close it.
+	_net_cancel_btn = _net_button("✕  Cancel — back to the banners", _step_back)
+	_net_cancel_btn.name = "NetCancelButton"
+	root.add_child(_net_cancel_btn)
 
 	add_child(_net_panel)
 
@@ -714,6 +781,9 @@ func _net_show_choice() -> void:
 	_net_host_box.visible = false
 	_net_join_box.visible = false
 	_net_share_label.visible = false
+	_net_copy_btn.visible = false
+	_net_copy_note.visible = false
+	_net_primary = ""
 	_net_status_label.text = "Two copies of Great Houses, one match. " \
 		+ "One of you hosts; the other joins by address."
 	_set_net_side_index(_net_side_index)
@@ -753,10 +823,16 @@ func _on_net_host_pressed() -> void:
 func _on_net_join_pressed() -> void:
 	if _net_busy:
 		return
-	var addr := _net_address.text.strip_edges()
-	if addr.is_empty():
-		_net_status_label.text = "Type the address your friend gave you first."
+	# Whatever the player pasted, understand it here and SHOW what we understood
+	# — a host panel line pastes with its commentary attached, and the old code
+	# handed that to ENet verbatim (verifier note, 2026-08-09).
+	var parsed := NetProtocol.parse_address(_net_address.text)
+	var host := str(parsed[0])
+	if host.is_empty():
+		_net_status_label.text = "Type (or paste) the address your friend gave you first."
 		return
+	var addr := "%s:%d" % [host, int(parsed[1])]
+	_net_address.text = addr
 	_net_busy = true
 	net_join_requested.emit(addr)
 
@@ -770,15 +846,37 @@ func net_status(text: String) -> void:
 		_net_status_label.text = text
 
 
-## The addresses a host should read out to their friend (best first).
-func net_share_lines(lines: Array) -> void:
+## The addresses a host should send their friend, best first, each with the one
+## line that says WHEN it works. `primary` is the bare "addr:port" the copy
+## button puts on the clipboard — "" hides the button.
+func net_share_lines(lines: Array, primary: String = "") -> void:
 	if _net_share_label == null:
 		return
 	if lines.is_empty():
 		_net_share_label.visible = false
+		_net_copy_btn.visible = false
 		return
-	_net_share_label.text = "Send your friend:\n" + "\n".join(lines)
+	_net_share_label.text = "Send your friend ONE of these:\n" + "\n".join(lines)
 	_net_share_label.visible = true
+	_net_primary = primary
+	_net_copy_btn.visible = not primary.is_empty()
+	_net_copy_btn.text = "⧉  Copy %s" % primary if not primary.is_empty() \
+		else "⧉  Copy the address"
+	_net_copy_note.visible = false
+
+
+func _on_net_copy_pressed() -> void:
+	if _net_primary.is_empty():
+		return
+	DisplayServer.clipboard_set(_net_primary)
+	net_copied_count += 1
+	net_last_copied = _net_primary
+	# VISIBLE confirmation: a clipboard write is invisible by nature, and a
+	# button that looks identical before and after leaves a host wondering
+	# whether to press it again.
+	_net_copy_note.text = "Copied  %s  — paste it to your friend." % _net_primary
+	_net_copy_note.visible = true
+	print("NET COPIED %s" % _net_primary)
 
 
 ## Pre-fill the join box with the address this machine used last time.

@@ -14,7 +14,9 @@ config/icon="res://assets/branding/app-icon-1024.png"
 
 PieceAssets="*res://src/board/piece_assets.gd"
 Music="*res://src/audio/music_manager.gd"
-E2EDriver="*res://test_e2e/e2e_driver.gd"
+; E2EDriver is NOT an autoload: the harness must not ship (see
+; src/main.gd::_install_e2e_harness). It is registered at runtime, only for a
+; --e2e launch, and release exports exclude test_e2e/** entirely.
 
 [display]
 

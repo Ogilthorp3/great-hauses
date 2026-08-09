@@ -32,11 +32,17 @@ const PROBE_FLAGS := ["--smoke", "--dump-tree", "--env-fps", "--env-banner-test"
 const NET_PREFS_PATH := "user://net_prefs.cfg"
 const DEFAULT_NET_HOUSE := "winterfang"
 
+## The in-engine E2E harness. NOT an autoload any more — see
+## `_install_e2e_harness` for why, and for the one rule that keeps it honest.
+const E2E_DRIVER_PATH := "res://test_e2e/e2e_driver.gd"
+
 var _select: HouseSelect
 var _net: NetMatch = null
+var _e2e_harness: Node = null
 
 
 func _ready() -> void:
+	_install_e2e_harness()   # FIRST: everything below may be under test
 	var args := OS.get_cmdline_user_args()
 	if _wants_network_cmdline(args):
 		# DEFERRED on purpose: the SceneTree root will not accept a child while
@@ -61,7 +67,71 @@ func _ready() -> void:
 	_probe_maester()
 
 
+# ── The test harness does not ship ────────────────────────────────────────
+
+
+## THE HARNESS IS NOT PART OF THE GAME (verifier defect P4, 2026-08-09).
+##
+## `test_e2e/e2e_driver.gd` used to be a project.godot autoload, so a 90 KB .gdc
+## of test code was compiled into the shipped Windows pck — dormant without
+## `--e2e` flags, but present, and "dormant" is not a reason to hand a player
+## your test rig. Release exports now EXCLUDE `test_e2e/**`
+## (export_presets.cfg), which means the autoload's target simply would not
+## exist in a release build — an autoload that cannot be instantiated is a boot
+## error on the player's first launch.
+##
+## So the driver registers itself HERE instead, under two conditions that a
+## release build can never both satisfy: a `--e2e…` flag on the command line,
+## AND the file actually being in this build. A player has neither.
+##
+## ORDERING, which is load-bearing. As an autoload the driver's `_ready` ran
+## BEFORE this scene, and two scenarios depend on that: the oracle mocks
+## (`oracle-mock`, `oracle-modes`, `undo`) start an HTTP server and point
+## `DS4_CHESS_URL` at it, and the offline scenarios point it at a dead port —
+## all before anything here builds a Ds4Opponent. The SceneTree root refuses
+## children while the main scene is still being set up, so the node can only
+## arrive on the next deferred flush; `_wait_for_e2e_harness` is what keeps the
+## oracle preflight behind it.
+func _install_e2e_harness() -> void:
+	var wanted := false
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--e2e"):
+			wanted = true
+			break
+	if not wanted:
+		return
+	if not ResourceLoader.exists(E2E_DRIVER_PATH):
+		push_warning("an --e2e flag was passed, but this build ships no test "
+			+ "harness (test_e2e/** is excluded from release exports)")
+		return
+	var script: Script = load(E2E_DRIVER_PATH)
+	if script == null:
+		push_error("could not load the e2e harness at %s" % E2E_DRIVER_PATH)
+		return
+	var node: Node = script.new()
+	node.name = "E2EDriver"
+	_e2e_harness = node
+	# /root, not this scene: the driver outlives every change_scene it drives.
+	get_tree().root.add_child.call_deferred(node)
+
+
+## Block until the deferred harness above is actually in the tree (its `_ready`
+## has run, its mock server is listening, its env vars are set). A no-op — and
+## not even one frame — in a normal launch, because `_e2e_harness` is null.
+func _wait_for_e2e_harness() -> void:
+	if _e2e_harness == null:
+		return
+	var guard := 0
+	while is_instance_valid(_e2e_harness) and not _e2e_harness.is_inside_tree() \
+			and guard < 120:
+		guard += 1
+		await get_tree().process_frame
+
+
 func _probe_oracle() -> void:
+	await _wait_for_e2e_harness()   # the mock oracle must own DS4_CHESS_URL first
+	if not is_instance_valid(_select) or not _select.is_inside_tree():
+		return
 	var probe := Ds4Opponent.new()
 	probe.name = "OracleProbe"
 	add_child(probe)
@@ -104,7 +174,10 @@ func _on_net_host_requested(side: String) -> void:
 	_net.match_ready.connect(_on_match_ready.bind(house))
 	if not _net.host_match(house, side, port, _cmdline_fen(OS.get_cmdline_user_args())):
 		return   # state_changed already carried the reason to the panel
-	_select.net_share_lines(NetProtocol.share_lines(port))
+	# The lines are for READING OUT; the primary address is what the copy
+	# button puts on the clipboard, so a host never spells an IP down a phone
+	# digit by digit again (verifier note, 2026-08-09).
+	_select.net_share_lines(NetProtocol.share_lines(port), NetProtocol.primary_address(port))
 
 
 func _on_net_join_requested(addr: String) -> void:

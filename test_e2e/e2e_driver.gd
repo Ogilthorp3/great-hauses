@@ -2357,14 +2357,34 @@ func _scenario_net(host_role: bool) -> void:
 				str(undo_btn.disabled) if undo_btn != null else "?"])
 		return
 	# ...and the key press is inert too, not merely the button.
+	#
+	# THE PROBE ITSELF WAS THE FLAKE (verifier defect P5, 2026-08-09). It used
+	# to snapshot the FEN, press Cmd/Z, sleep 0.4 s and assert the FEN was
+	# UNCHANGED — but the FEN is not ours to hold still: the opponent's own
+	# legitimate ply lands whenever it lands, and roughly one run in three it
+	# landed inside that window. A CORRECT game failed the gate, this instance
+	# exited, and the other one then failed its own step waiting for a partner
+	# that had gone. Undo itself was never broken; the assertion was.
+	#
+	# So assert what only a take-back can do: bump the counter, or REWIND. A
+	# legitimate ply only ever grows the move stack and the applied-ply log; an
+	# undo is the one thing that shortens them.
 	var state: Object = game.get("state")
-	var fen_before_undo := str(state.get_fen())
+	var stack_before: int = (state.move_stack as Array).size()
+	var plies_before: int = (game.get("net_plies") as Array).size()
 	await _press_cmd_z()
 	await _sleep(0.4)
-	if int(game.get("undo_count")) != 0 or str(state.get_fen()) != fen_before_undo:
-		await _fail("net-%s-undo-off" % tag, "Cmd/Ctrl+Z moved the board in a network match")
+	var undos: int = int(game.get("undo_count"))
+	var stack_after: int = (state.move_stack as Array).size()
+	var plies_after: int = (game.get("net_plies") as Array).size()
+	if undos != 0 or stack_after < stack_before or plies_after < plies_before:
+		await _fail("net-%s-undo-off" % tag,
+			("Cmd/Ctrl+Z rewound the board in a network match "
+			+ "(undo_count=%d, move_stack %d->%d, applied plies %d->%d)")
+				% [undos, stack_before, stack_after, plies_before, plies_after])
 		return
-	_pass("net-%s-undo-off" % tag)
+	_pass("net-%s-undo-off (undo_count=0, nothing rewound: stack %d->%d, plies %d->%d)"
+		% [tag, stack_before, stack_after, plies_before, plies_after])
 
 	# Every settled ply, printed on BOTH instances — the runner diffs these.
 	game.connect("net_ply_settled", func(s: int, fen: String) -> void:
@@ -2435,6 +2455,29 @@ func _scenario_net(host_role: bool) -> void:
 		return
 	_pass("net-%s-verdict (%s)" % [tag, cont.text])
 	await _shot("checkmate")
+
+	# THE NEW GUARDS MUST BE INERT IN AN HONEST MATCH (verifier defects P1/P2/P3,
+	# 2026-08-09). The host now drops a hello once the match has started, and
+	# drops any ack or move request from a peer that does not hold the joiner's
+	# seat; the joiner now puts every request on a deadline. A whole real game —
+	# five plies, a duel and a mate — must trip NONE of them. A guard that
+	# refuses honest traffic is a worse bug than the one it was added for.
+	var refused: int = int(netm.get("refused_packet_count"))
+	if refused != 0:
+		await _fail("net-%s-guards-inert" % tag,
+			"%d legitimate packet(s) were dropped by the host guards (last: '%s')"
+				% [refused, str(netm.get("last_refused_packet"))])
+		return
+	_pass("net-%s-guards-inert" % tag)
+	var late: int = int(netm.get("request_slow_count"))
+	var stalled: int = int(netm.get("request_stalled_count")) \
+		+ int(game.get("net_stalled_count"))
+	if stalled != 0 or late != 0:
+		await _fail("net-%s-no-false-stall" % tag,
+			"the move-request deadline fired in a healthy match (late=%d stalled=%d)"
+				% [late, stalled])
+		return
+	_pass("net-%s-no-false-stall" % tag)
 
 	# The final board, printed last so the runner can pin the end state too.
 	print("E2E NETFINAL %s" % str(state.get_fen()))
@@ -2594,15 +2637,90 @@ func _scenario_net_hall() -> void:
 	_pass("hall-hosting (%s)" % share.text.replace("\n", " | "))
 	await _shot("hosting_addresses")
 
-	# Back out: the panel must HANG UP, not just hide — otherwise the next
-	# Host attempt would collide with its own listening socket.
-	await _press_key(KEY_ESCAPE)
+	# WHAT THE HOST IS TOLD BEFORE ANYTHING GOES WRONG (verifier notes,
+	# 2026-08-09). Both of these used to live only inside a failure message.
+	var prereq: Label = sel.find_child("NetPrereq", true, false)
+	if prereq == null or not prereq.is_visible_in_tree() \
+			or not prereq.text.contains("Wi-Fi") or not prereq.text.contains("tailnet"):
+		await _fail("hall-prerequisite",
+			"the panel never states what you both need BEFORE you host: '%s'"
+				% (prereq.text if prereq != null else "<absent>"))
+		return
+	_pass("hall-prerequisite (%s)" % prereq.text)
+	var firewall: Label = sel.find_child("NetFirewallNote", true, false)
+	if firewall == null or not firewall.is_visible_in_tree() \
+			or not firewall.text.contains("Allow"):
+		await _fail("hall-firewall-note",
+			"nothing warns the host about the 'allow incoming connections' prompt: '%s'"
+				% (firewall.text if firewall != null else "<absent>"))
+		return
+	_pass("hall-firewall-note")
+
+	# THE ORDER OF THE SHARE LIST: the line to try first must BE first, and say so.
+	var share_lines: PackedStringArray = share.text.split("\n", false)
+	var first_addr_line := ""
+	for l in share_lines:
+		if str(l).contains(":%d" % NetProtocol.DEFAULT_PORT):
+			first_addr_line = str(l)
+			break
+	if first_addr_line.is_empty() or not first_addr_line.contains("first"):
+		await _fail("hall-share-order",
+			"the first address offered does not say it is the one to try: '%s'"
+				% first_addr_line)
+		return
+	_pass("hall-share-order (%s)" % first_addr_line.strip_edges())
+
+	# THE COPY BUTTON: a host must not have to read an IP out digit by digit.
+	var copy_btn := _find_button(sel, "Copy")
+	if copy_btn == null or not copy_btn.is_visible_in_tree():
+		await _fail("hall-copy-button", "the host panel offers no way to copy the address")
+		return
+	DisplayServer.clipboard_set("")     # so a stale clipboard cannot pass this
+	await _click_control(copy_btn)
+	await _sleep(0.3)
+	var copied := str(sel.get("net_last_copied"))
+	var on_clipboard := DisplayServer.clipboard_get()
+	if int(sel.get("net_copied_count")) != 1 or copied.is_empty():
+		await _fail("hall-copy-button", "the copy button did not fire (count=%s, '%s')"
+			% [str(sel.get("net_copied_count")), copied])
+		return
+	if on_clipboard != copied:
+		await _fail("hall-copy-button",
+			"the clipboard holds '%s' but the panel claims it copied '%s'"
+				% [on_clipboard, copied])
+		return
+	if not first_addr_line.contains(copied):
+		await _fail("hall-copy-button",
+			"it copied '%s', which is not the address it offered first ('%s')"
+				% [copied, first_addr_line])
+		return
+	# ...and SAYS so, visibly — a clipboard write is invisible by nature.
+	var copied_note: Label = sel.find_child("NetCopied", true, false)
+	if copied_note == null or not copied_note.is_visible_in_tree() \
+			or not copied_note.text.contains(copied):
+		await _fail("hall-copy-confirmed",
+			"nothing on screen confirms the copy happened: '%s'"
+				% (copied_note.text if copied_note != null else "<absent>"))
+		return
+	_pass("hall-copy-button (clipboard = %s)" % on_clipboard)
+	await _shot("copied_address")
+
+	# Back out THROUGH THE VISIBLE CONTROL (verifier note): "waiting for your
+	# friend to join…" used to offer no button at all — Esc worked, but only as
+	# a line of footer text. The panel must HANG UP, not just hide, or the next
+	# Host attempt collides with its own listening socket.
+	var cancel_btn := _find_button(sel, "Cancel")
+	if cancel_btn == null or not cancel_btn.is_visible_in_tree():
+		await _fail("hall-cancel-button",
+			"there is no visible way out while the room is open")
+		return
+	await _click_control(cancel_btn)
 	if not await _wait_until(func():
 		return int(sel.get("phase")) == 1 and NetMatch.get_active(get_tree()) == null, 8.0):
-		await _fail("hall-cancel", "Esc did not close the room (phase=%d, net=%s)"
+		await _fail("hall-cancel", "the Cancel button did not close the room (phase=%d, net=%s)"
 			% [int(sel.get("phase")), str(NetMatch.get_active(get_tree()))])
 		return
-	_pass("hall-cancel-hangs-up")
+	_pass("hall-cancel-hangs-up (visible button)")
 
 	# The error a human actually gets: dial a port nobody is listening on.
 	friend_btn = _find_button(sel, "Play a Friend")
@@ -2617,14 +2735,32 @@ func _scenario_net_hall() -> void:
 	if field == null:
 		await _fail("hall-join-field", "no address field in the join panel")
 		return
+	# THE WHOLE PASTED LINE (verifier note, 2026-08-09). The host panel prints
+	# an address followed by the line that says when to use it, and people
+	# select the whole line — because that is what a line is. This pastes one
+	# through the real clipboard with the real Cmd/Ctrl+V, and the field must
+	# understand it: before, the commentary went to ENet verbatim and came back
+	# as "could not reach 127.0.0.1:7899   ·  same Wi-Fi…", which reads like a
+	# wrong address rather than like a parsing problem.
+	var pasted := "127.0.0.1:7899   ·  same Wi-Fi — try this one first"
+	DisplayServer.clipboard_set(pasted)
+	field.clear()
 	field.grab_focus()
-	await _type_text("127.0.0.1:7899")
-	if field.text != "127.0.0.1:7899":
-		await _fail("hall-join-field", "typing did not land in the field: '%s'" % field.text)
+	await _press_paste()
+	await _sleep(0.3)
+	if field.text != pasted:
+		await _fail("hall-join-field", "the pasted line did not land in the field: '%s'"
+			% field.text)
 		return
-	_pass("hall-join-field-typed")
+	_pass("hall-join-field-pasted (%s)" % field.text)
 	var ride := _find_button(sel, "Ride Out")
 	await _click_control(ride)
+	if not await _wait_until(func(): return field.text == "127.0.0.1:7899", 5.0):
+		await _fail("hall-join-paste-understood",
+			"the field kept the commentary instead of showing what it understood: '%s'"
+				% field.text)
+		return
+	_pass("hall-join-paste-understood (%s)" % field.text)
 	var status: Label = sel.find_child("NetStatus", true, false)
 	if status == null:
 		await _fail("hall-join-error", "the join panel has no status line")
@@ -2634,13 +2770,40 @@ func _scenario_net_hall() -> void:
 		await _fail("hall-join-error",
 			"an unreachable host produced no actionable message: '%s'" % status.text)
 		return
-	if not status.text.contains("127.0.0.1:7899"):
+	# It must name the ADDRESS, not echo back the line that was pasted. (The
+	# error's own prose legitimately says "the same Wi-Fi or the same tailnet",
+	# so the tell is the commentary marker the host panel prints, never those
+	# words.)
+	if not status.text.contains("127.0.0.1:7899") or status.text.contains("·") \
+			or status.text.contains("try this one first"):
 		await _fail("hall-join-error",
-			"the error does not name the address that failed: '%s'" % status.text)
+			"the error does not name the ADDRESS that failed (it kept the pasted "
+			+ "commentary): '%s'" % status.text)
 		return
 	_pass("hall-join-error (%s)" % status.text)
 	await _shot("join_error")
 	_finish(0)
+
+
+## Paste through the REAL shortcut, the way a player pastes an address a
+## friend sent them. Cmd+V on macOS, Ctrl+V elsewhere — exactly one modifier,
+## because the InputMap's ui_paste action matches modifiers exactly.
+func _press_paste() -> void:
+	var down := InputEventKey.new()
+	down.keycode = KEY_V
+	down.physical_keycode = KEY_V
+	down.unicode = "v".unicode_at(0)
+	down.pressed = true
+	if OS.get_name() == "macOS":
+		down.meta_pressed = true
+	else:
+		down.ctrl_pressed = true
+	Input.parse_input_event(down)
+	await get_tree().process_frame
+	var up: InputEventKey = down.duplicate()
+	up.pressed = false
+	Input.parse_input_event(up)
+	await get_tree().process_frame
 
 
 ## Type a string through the REAL input pipeline (unicode-carrying key events),

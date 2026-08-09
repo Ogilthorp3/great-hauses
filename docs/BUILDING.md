@@ -135,28 +135,32 @@ consider them resources. Without `*.json` in `include_filter` they are **silentl
 omitted** and the shipped game has no houses at all. Verified by asserting them
 present in the pck on every build.
 
-**Trap 2 — you cannot exclude `test_e2e/` wholesale.**
-`project.godot` autoloads the E2E driver:
+**Trap 2 — `test_e2e/` used to be un-excludable (FIXED 2026-08-09).**
+`project.godot` autoloaded the E2E driver:
 
 ```ini
 [autoload]
 E2EDriver="*res://test_e2e/e2e_driver.gd"
 ```
 
-Excluding `test_e2e/*` exports and *appears* to work — the game still exits 0 — but the
-shipped build prints at boot:
+so excluding `test_e2e/*` exported and *appeared* to work — the game still exited 0 —
+but the shipped build printed at boot:
 
 ```
 ERROR: Attempt to open script 'res://test_e2e/e2e_driver.gd' ... 'File not found'.
 ERROR: Failed to instantiate an autoload, can't load from path: ...
 ```
 
-So the filter excludes only `test_e2e/artifacts/*` (1.9 GB of test screenshots, which
-would otherwise be swept in as textures). The driver script itself (~124 KB) ships.
-**The real fix is to drop the autoload from `project.godot` for release builds, or move
-the driver out of `test_e2e/`** — both belong to whoever owns the test harness, so this
-build only documents the wart and guards it: `build.sh` boots the exported macOS app and
-fails on `Failed to instantiate an autoload`.
+The filter therefore excluded only `test_e2e/artifacts/*`, and the driver script itself
+(~90 KB compiled) shipped inside the player's pck.
+
+**Resolved:** the autoload is gone. `src/main.gd::_install_e2e_harness` registers the
+driver at runtime instead, under two conditions a release build can never both meet — a
+`--e2e…` flag on the command line, AND the file existing in this build — so
+`exclude_filter` now drops `test_e2e/*` wholesale and a release boot has no autoload to
+fail on. `build.sh` still boots the exported macOS app and fails on `Failed to
+instantiate an autoload`, and the pck assertions now require `test_e2e/` to be **absent**
+rather than present.
 
 **Trap 3 — the macOS build forces a project setting.**
 The official template archive ships **only** a universal macOS binary (no x86_64-only or

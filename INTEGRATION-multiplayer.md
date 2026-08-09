@@ -12,17 +12,28 @@ relay, nothing to run but the game.
 **Both of you:** launch Great Houses → the Hall of Banners → pick your banner →
 **Play a Friend**.
 
+The panel says the prerequisite before you press anything: **you must both be
+on the same Wi-Fi — or both on the same tailnet.**
+
 **Host (one of you):**
 
 1. `Host a Match`
 2. Pick a side — *You ride for White* / *Black* / *Let the gods decide*
-3. `⚔ Open the Gates`
-4. The panel prints the addresses to send. Read your friend **the top one**.
+3. `⚔ Open the Gates` — **macOS (or Windows Defender) will ask whether to allow
+   incoming network connections. Click Allow.** The panel warns you before you
+   press it; without it your friend cannot reach you, and it fails in a way that
+   looks exactly like a wrong address.
+4. The panel prints the addresses to send, **best first**, each with the one line
+   that says when it works. Press `⧉ Copy <address>` and send it — no reading
+   IPs down a phone digit by digit. The copy is confirmed on screen.
+5. `✕ Cancel — back to the banners` closes the room (Esc does the same).
 
 **Joiner (the other one):**
 
 1. `Join a Match`
-2. Type the address your friend read out (it is remembered for next time)
+2. **Paste the whole line** your friend sent — commentary and all — or type just
+   the address. The field strips the rest and shows you what it understood. The
+   address is remembered for next time.
 3. `⚔ Ride Out`
 
 Both halls dress to the real matchup — your banner, their banner — and the
@@ -37,7 +48,13 @@ and are you both on the same Wi-Fi or the same tailnet?"*
 
 ## 2. Reachability — which address to send
 
-The Host panel lists addresses **best option first**.
+The Host panel lists addresses **best option first**, and only ever offers
+addresses on a *real* interface: a dev machine answers with six dialable-looking
+v4 addresses and five of them are VM/Thunderbolt bridges nobody can reach, so
+they are filtered out rather than read aloud to a confused friend.
+
+Same-Wi-Fi leads the list, because it is the case that needs nothing set up. The
+tailnet line comes second and says what it needs.
 
 ### (a) Same Wi-Fi — just works
 
@@ -49,8 +66,10 @@ people on the same couch.
 
 Bert's machines are on the tailnet `tail7c6d11.ts.net` (see
 `~/Projects/Claude_Code/tailnet/`). The Host panel shows the tailnet address as
-`100.x.y.z:7777   (tailnet — works from anywhere)` — that CGNAT-range address
-is the one to send. No port forwarding, no router change, no relay of ours.
+`100.x.y.z:7777   ·  from anywhere, if you are both on the tailnet` — that
+CGNAT-range address is the one to send **once your friend is on the tailnet**;
+until then it is an address that cannot work, which is why it no longer leads
+the list. No port forwarding, no router change, no relay of ours.
 
 The friend needs to be *on* the tailnet, one of two ways:
 
@@ -149,6 +168,7 @@ machines can play. That is what `run_net_e2e.sh` is for.
 |---|---|
 | `src/net/net_protocol.gd` | Pure data + pure rules: wire shapes, move encode/decode, **the validator**, seating, addresses, the words every failure is reported in. No sockets, no scene tree — all of it headless-testable. |
 | `src/net/net_ply_gate.gd` | The cinematic barrier: both sides ack a ply before the turn advances; stale acks dropped, a hung peer times out. |
+| `src/net/net_request_clock.gd` | The move-request deadline. A joiner's click is a request the HOST answers; if the answer never comes the clock says so, then hands the board back with the way out named. Without it, one lost datagram froze the joiner's board forever. |
 | `src/net/net_match.gd` | The transport. Lives at `/root/NetMatch` so it survives the scene swap out of the Hall. ENet peer, RPCs, host authority, disconnect detection. |
 | `src/main.gd` | Integrator: wires the Hall's panel to the socket, and the command-line path. |
 | `src/ui/house_select.gd` | The *Play a Friend* panel (`Phase.NET`, appended last in the enum so the existing phase ids are untouched). |
