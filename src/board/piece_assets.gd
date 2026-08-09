@@ -160,6 +160,28 @@ const GLYPH_RINGS := {
 const GLYPH_MATERIAL_NAME := "glyphring_glyph"
 const GLYPH_ENERGY_REST := 1.1
 const GLYPH_ENERGY_SELECTED := 3.4
+## The ring's OTHER three materials, which used to ship as authored (critic
+## P7, 2026-08-09): stone #0b0a08, inlay #060504 and the medallion plate
+## #1a1712 are all near-black, and the medallion is the one the eye lands on
+## because hover and selection happen together — "the darkest object on the
+## selection tile, a near-black disc sitting on the bright amber squircle
+## directly under the selected piece". A glyph is a UI ICON drawn in world
+## space; it has to read on dark stone AND on the amber highlight, and a plate
+## that is darker than either ground can only read on one of them.
+##
+## So the ring is dressed like everything else the piece wears: the plate takes
+## the house body color at MEDAL_WEIGHT (mid value — lighter than the dark
+## stone, darker than the amber wash, so it separates from both), the disc and
+## inlay take it darker so the plate still reads as an inset coin, and the
+## glyph keeps its emissive house accent on top. All four are exempted from
+## receiving shadows, because a marker lying inside its own piece's contact
+## shadow is the defect this ring already had once (#17).
+const RING_STONE_MATERIAL := "glyphring_stone"
+const RING_INLAY_MATERIAL := "glyphring_inlay"
+const RING_MEDAL_MATERIAL := "glyphring_medal"
+const RING_MEDAL_WEIGHT := 0.62
+const RING_STONE_WEIGHT := 0.34
+const RING_INLAY_WEIGHT := 0.24
 
 ## HOUSE layer — helmet crests (tools/props/make_crests.py), worn by
 ## knight/queen/king only. Pawns wear the humbler half-helm below — never a
@@ -295,12 +317,24 @@ func pawn_helm_scene(house_id: String) -> PackedScene:
 	return PAWN_HELM_SCENES.get(house_id)
 
 
-## Crown-variant mapping (kings only, custom-props INTEGRATION.md): a house
-## whose piece tint leans blue — cold houses (Winterfang, Tidegrip,
-## Swiftcrest, Silverbrook, legacy FROST) — crowns its king in frost silver;
-## warm tints wear the battle-worn gold.
+## Crown-variant mapping (kings and their queens' tiaras).
+##
+## THE MAPPING IS INVERTED (critic P3, 2026-08-09). It used to match the crown
+## to its wearer — cold houses in frost steel, warm houses in worn gold — and
+## matching temperature is the one thing a crown must never do. A regalia
+## piece exists to be found on a body, and it is exempt from the house dye
+## (costume_preview.PALETTE_EXEMPT) precisely so it can contrast; handing a
+## steel-blue army a steel-blue crown throws that exemption away and leaves the
+## king's silhouette to be carried by geometry alone — which failed exactly
+## where geometry is weakest, from the player's own side, where the camera
+## looks down the crown's axis and the head occludes the band.
+##
+## So a crown now takes the OPPOSITE temperature to its army: the four cold
+## houses (Winterfang, Tidegrip, Swiftcrest, Silverbrook, and legacy FROST)
+## crown in warm gold, the five warm ones in cold steel. Hue contrast survives
+## every camera angle, unlike a highlight.
 func crown_scene(tint: Color) -> PackedScene:
-	return CROWN_FROST if tint.b > tint.r else CROWN_GOLD
+	return CROWN_GOLD if tint.b > tint.r else CROWN_FROST
 
 
 ## Shield-decal material: the house sigil PNG as an alpha-scissor plate,
@@ -355,20 +389,32 @@ func banner_texture(house_id: String) -> Texture2D:
 
 ## THE PALETTE ENVELOPE (critic pass 2026-08-08, defects #6/#7).
 ##
-## The dye is a MULTIPLY over a partly-desaturated pack texture, so whatever
-## chroma survives `saturation` survives into the frame. At the shipped 0.25
-## the survivors were loud enough to break the house read in all nine armies:
-## the mage's grimoire stayed fluorescent MAGENTA, his staff orb LIME, the
-## queen's hood FOREST GREEN over Goldclaw's gold. A stock pack color has no
-## business being the brightest thing in a house's frame.
+## The dye is a MULTIPLY over a desaturated pack texture, so whatever chroma
+## survives `saturation` survives into the frame. At the shipped 0.25 the
+## survivors were loud enough to break the house read in all nine armies: the
+## mage's grimoire stayed fluorescent MAGENTA, his staff orb LIME, the queen's
+## hood FOREST GREEN over Goldclaw's gold. A stock pack color has no business
+## being the brightest thing in a house's frame.
 ##
-## So saturation is ceilinged here, at the one place every dyed material
-## passes through. Above the ceiling the multiply cannot pull a saturated
-## texel into the house hue; at or below it, every texel lands within a
-## narrow chroma band around the tint and the piece reads house-first,
-## material-second. `tests/test_costumes.gd::_test_palette_envelope` is the
-## gate that fails if a rendered surface ever escapes this band again.
-const PALETTE_SATURATION_CEILING := 0.10
+## THE CEILING IS NOW ZERO (third-pass critic regression, 2026-08-09). A
+## 0.10 residual looked like a harmless "narrow chroma band" and was not: the
+## Rogue_Hooded atlas paints the queen's hood in a SATURATED TEAL (#228993,
+## HSV sat 0.77 — measured, and the single most chromatic large patch on any
+## body in the pack). Ten percent of that is still enough to drag the surface
+## off the house hue, and how far depends on how much chroma the house tint
+## itself brings: Goldclaw's queen measured OLIVE (hood hue ~52 against an
+## army at ~40) and Hartcrown's — whose tint was then a near-achromatic mud —
+## measured TEAL, because once the albedo is that grey the hall's cool fill
+## light owns the hue outright. Residual chroma is not material identity, it
+## is a hue leak that scales with how weak the house colour is.
+##
+## So the texture is now driven to pure LUMINANCE and the house tint supplies
+## the ONLY hue on the piece — the flat dye the gear (GEAR_SATURATION) and the
+## knight's mount already use, applied to the bodies too. Material identity
+## survives where it always actually lived: in the texture's luminance.
+## `tests/test_costumes.gd::_test_palette_envelope` is the gate that fails if
+## a rendered surface ever escapes the house's hue again.
+const PALETTE_SATURATION_CEILING := 0.0
 ## Signature gear (sword, shield, staff, grimoire, bow, quiver) is dyed FLAT:
 ## the pack props are single-texture atlases whose stock colors are pure
 ## fantasy-loot candy, and they are the pieces a player's eye lands on. Full
@@ -432,6 +478,12 @@ const MOUNT_DYE_GAIN := 1.05    # ...and the lightest reads near full tint
 ## mane, darker hooves — so the destrier keeps internal contrast and its mane,
 ## tail and legs stay separately readable while the whole animal still reads
 ## house-colored. Unknown materials fall back to the luminance formula.
+## The BARDING (crinet + chanfron, critic P6 — tools/props/convert_horse.py)
+## is deliberately the BRIGHTEST thing on the mount. Its whole job is to carry
+## the neck and the head at values the near-side top-down camera can find, so
+## the ensemble reads as a rider ON something rather than as a rider with
+## debris around him. Anything dimmer than the hide would simply join the blob
+## the barding exists to break up.
 const MOUNT_DYE_WEIGHTS := {
 	"Main": 1.00,          # the hide
 	"Main_Light": 1.32,    # blaze / socks — the bright accent
@@ -440,6 +492,8 @@ const MOUNT_DYE_WEIGHTS := {
 	"Hair": 0.54,          # mane + tail: darker than the hide, not black
 	"Hooves": 0.32,
 	"saddle_leather": 0.44,
+	"crinet_cloth": 1.06,  # neck barding — the plan-view band
+	"chanfron_steel": 1.24,  # face plate — the brightest mark, ON the head
 }
 
 
@@ -470,32 +524,100 @@ func dyed_material(src: StandardMaterial3D, tint: Color,
 	return dyed
 
 
-## THE HOUSE CHARGE (critic defects #9/#10/#11). The color a house paints its
-## small marks in — helm rim and motif — chosen as whichever of its three
-## heraldic colors sits FURTHEST from the color the body is dyed in.
+## PAINT: a flat house color with the pack texture DROPPED entirely.
+##
+## For surfaces whose atlas patch carries no information worth keeping and
+## whose luminance is actively in the way — the mage's mitre is one dark navy
+## patch, so the ordinary multiply-tint can only make it darker, and the
+## bishop shipped as the dimmest piece on the near back rank (measured mean
+## value 0.34 against a king at 0.55, critic P9). A painted surface takes the
+## color it is given, so a mitre can be lifted clear of the robe instead of
+## inheriting the robe's gloom. Texture-free also means the palette gate's
+## texel-loudness term is trivially satisfied — there is no texel.
+func painted_material(src: StandardMaterial3D, color: Color) -> StandardMaterial3D:
+	var key := "paint|%d|%s" % [src.get_instance_id(), color.to_html()]
+	if _tint_cache.has(key):
+		return _tint_cache[key]
+	var painted: StandardMaterial3D = src.duplicate()
+	painted.albedo_texture = null
+	painted.albedo_color = Color(color.r, color.g, color.b, src.albedo_color.a)
+	painted.roughness = maxf(painted.roughness, 0.85)
+	painted.metallic = minf(painted.metallic, 0.05)
+	_tint_cache[key] = painted
+	return painted
+
+
+## THE HOUSE CHARGE (critic defects #9/#10/#11, value law added 2026-08-09).
+## The color a house paints its small marks in — helm rim and motif, the
+## bishop's mitre band — chosen as whichever of its three heraldic colors sits
+## FURTHEST from the color the surface it sits on is dyed in.
 ##
 ## Picking `accent` unconditionally is what made Thornvale's rose invisible: a
 ## #8fbf6a rose on a #79a04a helm is the same green twice, and the critic
 ## could not find it at 5x zoom. Contrast is a relationship, so it has to be
-## computed against the body, not declared in the palette. If the winner still
-## lands on the body's own brightness, it is pushed away from it — a charge
-## that a player cannot see is not heraldry.
+## computed against the body, not declared in the palette.
+##
+## ...and then "furthest" alone shipped the OPPOSITE failure (third-pass
+## critic, P8). Furthest-from-a-mid-dome is reliably the house's palest
+## heraldic color — Winterfang's #eef2f5 — so every near piece wore a
+## near-WHITE plate at the TOP of its silhouette, measured on the boot frame
+## at value 0.78 (peak 0.93) against a dome at 0.59, and less saturated than
+## the dome besides. A small, pale, low-chroma shape on the skyline does not
+## read as heraldry; it flares and eats the head shape.
+##
+## So a charge now obeys a VALUE LAW as well as a distance one. It is CUT INTO
+## a helm bright enough to carry it (darker than the dome, like real blackened
+## iron on a painted shell) and LAID ON one that is not — the Drowned Legion's
+## charred dome renders at 0.22 and would swallow anything darker. Where the
+## heraldic colors cannot separate on their own the winner is brought under the
+## ceiling and pays for the lost distance in CHROMA first, value second, so a
+## charge is never dimmed into the dome it is supposed to mark.
+##
+## `tests/test_costumes.gd::_test_pawn_helms` asserts both halves: separation
+## from the dome (> 0.20) and the value relationship this law creates.
+const CHARGE_DARK_DOME := 0.34    # below this a dome cannot carry a darker mark
+const CHARGE_UNDER := 0.95        # bright dome: the charge sits just under it
+const CHARGE_OVER := 0.24         # dark dome: ...and just over it instead
+const CHARGE_MIN_SEPARATION := 0.24
+
+
 func house_charge_color(house_id: String, body: Color) -> Color:
 	if not HouseRegistry.has_house(house_id):
 		return Color.WHITE
 	var cols: Dictionary = HouseRegistry.get_colors(house_id)
-	var best: Color = cols["accent"]
+	var ceiling := body.v * CHARGE_UNDER if body.v >= CHARGE_DARK_DOME \
+			else body.v + CHARGE_OVER
+	# 1. the furthest heraldic color that ALREADY obeys the ceiling, if it
+	#    also separates on its own — no adjustment beats no adjustment.
+	var best := Color.WHITE
 	var best_d := -1.0
+	var far := Color.WHITE
+	var far_d := -1.0
 	for key in ["primary", "secondary", "accent"]:
 		var c: Color = cols[key]
-		var d := Vector3(c.r - body.r, c.g - body.g, c.b - body.b).length()
-		if d > best_d:
+		var d := _charge_distance(c, body)
+		if d > far_d:
+			far_d = d
+			far = c
+		if c.v <= ceiling and d > best_d:
 			best_d = d
 			best = c
-	var body_lum := body.get_luminance()
-	if absf(best.get_luminance() - body_lum) < 0.20:
-		best = best.lightened(0.5) if body_lum < 0.35 else best.darkened(0.42)
-	return best
+	if best_d >= CHARGE_MIN_SEPARATION:
+		return best
+	# 2. nothing qualified: take the furthest, bring it under the ceiling, and
+	#    buy the separation back with saturation before value.
+	var out := Color.from_hsv(far.h, far.s, minf(far.v, ceiling), far.a)
+	for _i in 10:
+		if _charge_distance(out, body) >= CHARGE_MIN_SEPARATION:
+			break
+		out = Color.from_hsv(out.h, minf(1.0, out.s + 0.09),
+				out.v * 0.93 if body.v >= CHARGE_DARK_DOME \
+						else minf(1.0, out.v * 1.07), out.a)
+	return out
+
+
+func _charge_distance(a: Color, b: Color) -> float:
+	return Vector3(a.r - b.r, a.g - b.g, a.b - b.b).length()
 
 
 # -- the bishop's hat (critic defect #2) -----------------------------------
@@ -514,14 +636,26 @@ func house_charge_color(house_id: String, body: Color) -> Color:
 # keeps the hat real, keeps it skinned, and keeps the height law honest.
 ##  Outer brim radius is kept at CORE + (r - CORE) * BRIM_KEEP: a brim at the
 ##  full radius comes in ~38%, the crown and its taper are untouched.
+##
+## THE MITRE IS ALSO SPLIT IN TWO (critic P9, 2026-08-09). Narrower was not
+## enough: from the high rear gameplay camera the near bishop measured the
+## LOWEST value on its own back rank (mean 0.34 / 0.38 against 0.44-0.55 for
+## every other piece) and the narrowed cone silhouetted as one dark thimble.
+## So the rebuild now emits the CROWN and the BRIM as separate surfaces —
+## classified per triangle by the vertex radius the narrowing already
+## computes — and PieceView paints them apart (bright house cone, house-charge
+## band). One dark oval becomes a lit cone inside a contrasting ring, which is
+## a shape a player can name from directly above.
 const HAT_BRIM_CORE := 0.42     # fraction of max radius that is "crown"
 const HAT_BRIM_KEEP := 0.34     # how much of the overhang survives
 const HAT_CROWN_LIFT := 0.22    # ...and the cone grows back what the brim lost
 
 var _hat_cache: Dictionary = {}   # source mesh instance id -> ArrayMesh
+var _hat_brim_cache: Dictionary = {}  # source mesh instance id -> {surface: true}
 
 
-## The narrowed-brim variant of a wizard-hat mesh. Cached per source mesh.
+## The narrowed-brim variant of a wizard-hat mesh, crown and brim on separate
+## surfaces. Cached per source mesh; pair it with `hat_brim_surfaces()`.
 func narrowed_hat_mesh(src: Mesh) -> ArrayMesh:
 	var key := src.get_instance_id()
 	if _hat_cache.has(key):
@@ -534,14 +668,18 @@ func narrowed_hat_mesh(src: Mesh) -> ArrayMesh:
 	var max_r := maxf(maxf(box.size.x, box.size.z) * 0.5, 0.0001)
 	var core := max_r * HAT_BRIM_CORE
 	var out := ArrayMesh.new()
+	var brim_surfaces := {}
 	for s in src.get_surface_count():
 		var arrays := src.surface_get_arrays(s)
 		var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+		var overhang := PackedFloat32Array()
+		overhang.resize(verts.size())
 		for i in verts.size():
 			var v := verts[i]
 			var dx := v.x - cx
 			var dz := v.z - cz
 			var r := sqrt(dx * dx + dz * dz)
+			overhang[i] = r / max_r
 			if r > core:
 				var f := (core + (r - core) * HAT_BRIM_KEEP) / r
 				v.x = cx + dx * f
@@ -552,11 +690,49 @@ func narrowed_hat_mesh(src: Mesh) -> ArrayMesh:
 		arrays[Mesh.ARRAY_VERTEX] = verts
 		# Drop the compression flag: surface_get_arrays hands back plain data.
 		var fmt: int = src.surface_get_format(s) & ~Mesh.ARRAY_FLAG_COMPRESS_ATTRIBUTES
-		out.add_surface_from_arrays(src.surface_get_primitive_type(s), arrays,
-				[], {}, fmt)
-		out.surface_set_material(s, src.surface_get_material(s))
+		var idx: PackedInt32Array = arrays[Mesh.ARRAY_INDEX] \
+				if arrays[Mesh.ARRAY_INDEX] != null else PackedInt32Array()
+		var groups := _split_hat_indices(idx, overhang)
+		for g in groups.size():   # [crown indices, brim indices] — crown first
+			var part: PackedInt32Array = groups[g]
+			if part.is_empty():
+				continue
+			arrays[Mesh.ARRAY_INDEX] = part
+			out.add_surface_from_arrays(src.surface_get_primitive_type(s),
+					arrays, [], {}, fmt)
+			var new_s := out.get_surface_count() - 1
+			out.surface_set_material(new_s, src.surface_get_material(s))
+			if g == 1:
+				brim_surfaces[new_s] = true
 	_hat_cache[key] = out
+	_hat_brim_cache[key] = brim_surfaces
 	return out
+
+
+## Which surfaces of `narrowed_hat_mesh(src)` are the BRIM (the rest are the
+## cone). Keyed on the SOURCE mesh, so callers ask before or after the swap.
+func hat_brim_surfaces(src: Mesh) -> Dictionary:
+	return _hat_brim_cache.get(src.get_instance_id(), {})
+
+
+## Triangles whose vertices sit mostly beyond the brim core are the BRIM.
+## Returns [crown indices, brim indices]; an unindexed surface stays whole.
+func _split_hat_indices(idx: PackedInt32Array,
+		overhang: PackedFloat32Array) -> Array:
+	if idx.size() < 3 or idx.size() % 3 != 0:
+		return [idx, PackedInt32Array()]
+	var crown := PackedInt32Array()
+	var brim := PackedInt32Array()
+	for t in idx.size() / 3:
+		var a := idx[t * 3]
+		var b := idx[t * 3 + 1]
+		var c := idx[t * 3 + 2]
+		var mean := (overhang[a] + overhang[b] + overhang[c]) / 3.0
+		var into: PackedInt32Array = brim if mean > HAT_BRIM_CORE else crown
+		into.append(a)
+		into.append(b)
+		into.append(c)
+	return [crown, brim]
 
 
 func _desaturated(tex: Texture2D, saturation: float) -> Texture2D:

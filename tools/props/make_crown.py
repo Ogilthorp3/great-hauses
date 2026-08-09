@@ -30,8 +30,18 @@ RADIUS = 0.090         # 18 cm diameter
 BAND_H = 0.045         # band height
 BAND_T = 0.006         # band thickness (solidify)
 N_POINTS = 7           # spikes (odd -> alternation wraps unevenly, on purpose)
-TALL = (0.062, 0.078)  # tall spike length range
-SHORT = (0.036, 0.048) # short spike length range
+# POINTS THICKENED + LENGTHENED 2026-08-09 (critic P3). At 0.026-0.032
+# tangential width and BAND_T+0.002 radial depth, a point is well under one
+# rendered pixel of shading on a ~70 px king seen from the player's own side:
+# on the boot frame the near king's crown survived only as a few near-black
+# slivers around a pale dome, which reads as noise, not as a crown. Girth is
+# the dimension that survives downsampling (the same lesson the Hartcrown pawn
+# antlers already paid for in defect #10), so the points gain it in all three.
+TALL = (0.068, 0.086)  # tall spike length range
+SHORT = (0.042, 0.054) # short spike length range
+POINT_W = (0.036, 0.044)  # tangential base width
+POINT_D = 0.007        # radial depth PROUD of the band (was 0.002)
+POINT_TIP = 0.22       # tip taper (was 0.14 — a razor tip is a razor pixel)
 BENT_INDEX = 2         # which spike is battle-bent
 BEVEL_W = 0.0012
 
@@ -71,8 +81,8 @@ for i in range(N_POINTS):
     ang = i * 2.0 * math.pi / N_POINTS
     tall = (i % 2 == 0)
     length = random.uniform(*(TALL if tall else SHORT))
-    w = random.uniform(0.026, 0.032)   # tangential base width
-    d = BAND_T + 0.002                 # radial depth, proud of the band
+    w = random.uniform(*POINT_W)        # tangential base width
+    d = BAND_T + POINT_D                # radial depth, proud of the band
 
     bpy.ops.mesh.primitive_cube_add(size=1)
     sp = bpy.context.active_object
@@ -85,8 +95,8 @@ for i in range(N_POINTS):
         v.co.y *= d
         v.co.z = (v.co.z + 0.5) * length
         if top:
-            v.co.x *= 0.14   # taper to a worn point
-            v.co.y *= 0.40
+            v.co.x *= POINT_TIP   # taper to a worn point
+            v.co.y *= 0.46
     if i == BENT_INDEX:
         # battle-bent: lean the upper half sideways
         for v in me.vertices:
@@ -118,7 +128,24 @@ bev.segments = 1
 bev.limit_method = 'ANGLE'
 bev.angle_limit = math.radians(40.0)
 
-gold = make_material("crown_gold_worn", (0.42, 0.28, 0.09), 0.90, 0.45)
+# METALLIC IS THE BUG, NOT THE COLOUR (critic P3, 2026-08-09).
+#
+# "#3 works perfectly on the ENEMY army ... and fails on YOUR army in every
+# frame." Both kings wear the same crown, so the difference cannot be the
+# geometry — it is the lighting. A metal has NO diffuse response: at metallic
+# 0.90 the albedo stops being a colour and becomes the specular F0, so the
+# crown is a mirror that shows only what it reflects. The far king faces the
+# hall's Sun and catches a highlight on every point; the near king is lit from
+# behind, catches nothing, and his crown renders near-black — the "spiked ring"
+# collapses into a few dark slivers on a dark board and the player cannot find
+# his own king. (Probed in-engine: the frost crown's sRGB albedo is #656f7e,
+# a perfectly readable mid steel — none of which ever reached the frame.)
+#
+# So both variants drop to a barely-metallic finish with real diffuse
+# response. They lose a little glint on the lit side and gain a crown that is
+# THERE from every angle, which is the whole job of a king's silhouette.
+CROWN_METALLIC = 0.28
+gold = make_material("crown_gold_worn", (0.42, 0.28, 0.09), CROWN_METALLIC, 0.42)
 crown.data.materials.append(gold)
 
 # flat shading = low-poly gritty
@@ -147,16 +174,22 @@ export(f"{OUT_DIR}/crown.glb")
 print(f"[crown] wrote {OUT_DIR}/crown.glb")
 
 # ---------------------------------------------------------------- frost variant
-# DARK steel, not pale silver (critic defect #3, 2026-08-08). The cold houses
-# — Winterfang, Tidegrip, Swiftcrest, Silverbrook — dye their pieces pale
-# blue, and a pale silver crown on a pale blue head is no crown at all from
-# the gameplay camera: king and queen both read as one smooth dome and the
-# player cannot find their own king. The frost crown is now near-black steel
-# with a cold sheen, so it reads as a dark spiked ring against its wearer.
+# MID-DARK steel, not pale silver (critic defect #3, 2026-08-08). The cold
+# houses — Winterfang, Tidegrip, Swiftcrest, Silverbrook — dye their pieces
+# pale blue, and a pale silver crown on a pale blue head is no crown at all
+# from the gameplay camera: king and queen both read as one smooth dome and
+# the player cannot find their own king.
+#
+# The VALUE is now chosen against BOTH grounds it has to survive (P3, above):
+# the wearer's pale head renders around 0.78 and the dark board stone around
+# 0.15, so a crown pinned to either extreme disappears against the other. This
+# linear base lands near sRGB #5c6570 — mid steel, roughly 0.38 below the head
+# and 0.25 above the stone — and, with the metallic drop, it actually renders
+# that way instead of going black the moment the Sun is behind it.
 bsdf = gold.node_tree.nodes["Principled BSDF"]
 gold.name = "crown_frost"
-bsdf.inputs["Base Color"].default_value = (0.13, 0.16, 0.21, 1.0)  # dark steel
-bsdf.inputs["Metallic"].default_value = 0.85
-bsdf.inputs["Roughness"].default_value = 0.34
+bsdf.inputs["Base Color"].default_value = (0.105, 0.125, 0.165, 1.0)  # mid steel
+bsdf.inputs["Metallic"].default_value = CROWN_METALLIC
+bsdf.inputs["Roughness"].default_value = 0.46
 export(f"{OUT_DIR}/crown_frost.glb")
 print(f"[crown] wrote {OUT_DIR}/crown_frost.glb")

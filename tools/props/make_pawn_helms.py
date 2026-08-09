@@ -519,25 +519,47 @@ def helm_tidegrip(shell, iron, accent):
     Hartcrown's ROYAL crests. It reads as a king, not a foot soldier." A pawn
     outranking other houses' kings is a rank-legibility bug, so the tails now
     barely lift off the shell and the limbs are thinner: the kraken still
-    grips the helm, it no longer wears it as a diadem."""
+    grips the helm, it no longer wears it as a diadem.
+
+    HUMBLED AGAIN 2026-08-09 (third-pass critic, P10): "the board-distance
+    half is fixed; close up it still reads royal/undead-king." Correct, and
+    the remaining cause is not the tails' HEIGHT but their DESTINATION. They
+    climbed to z -0.01 — the crown of the cap — and splayed to +/-65 degrees
+    on the way, so at duel range three limbs terminated in upright tips evenly
+    spaced around the skull's summit. That is the definition of a diadem, at
+    any scale. Two changes end it for good:
+
+      * the limbs now STOP on the upper front slope (z -0.11, a clear tenth
+        below the crown) with only a third of the old splay, and their tips
+        hook DOWN and back along the shell instead of lifting off it — a
+        kraken gripping a helmet, seen from outside the grip;
+      * a NASAL BAR (Winterfang's pattern, in plain iron) closes the face.
+        Half the "undead king" read was never the tentacles at all: it was a
+        BARE glowing-eyed skull framed by a band, which is a portrait of a
+        lich. A footman's face bar makes it a portrait of a soldier."""
     objs = []
-    for i, az_deg in enumerate((-42.0, 0.0, 42.0)):
+    for i, az_deg in enumerate((-46.0, 0.0, 46.0)):
         pts, radii = [], []
         n_pt = 4
         for k in range(n_pt):
             t = k / float(n_pt - 1)
-            z = shell.brow + 0.05 + (abs(shell.brow) + 0.06) * t * 0.95
-            z = min(z, -0.01)
-            az = math.radians(az_deg) * (1.0 + 0.55 * t)
+            # up the front slope only — never onto the crown
+            z = shell.brow + 0.04 + (abs(shell.brow) - 0.15) * t
+            az = math.radians(az_deg) * (1.0 + 0.35 * t)
             p = shell.point(az, z)
             n = shell.normal(az, z)
-            pts.append(p + n * (0.026 + 0.030 * t * t))
-            radii.append(0.055 - 0.014 * t)
-        # the tail curls back and only just off the cap — a grip, not a spike
+            pts.append(p + n * (0.020 + 0.014 * t * t))
+            radii.append(0.046 - 0.016 * t)
+        # the tail hooks DOWN the cap behind it — a grip, never a point
         tail = pts[-1]
-        pts.append(tail + Vector((0.0, 0.062, 0.052)))
+        pts.append(tail + Vector((0.0, 0.055, -0.045)))
         radii.append(0.0)
         objs += tube_chain(pts, radii, accent, "Tentacle_%d" % i)
+    front_y = shell.cy(shell.brow) - shell.ry(shell.brow)
+    nasal = add_box((0.105, 0.070, 0.205),
+                    loc=(0.0, front_y - 0.042, shell.brow + 0.032), taper=0.46)
+    orient(nasal, Vector((0.0, -0.14, -1.0)), Vector((1.0, 0.0, 0.0)))
+    objs.append(assign(nasal, iron))
     return objs
 
 
@@ -747,6 +769,14 @@ def finalize(objs, name, shell, out_path):
     # The same pass snaps sub-micron values to exact zero: without it the
     # midline vertices land on denormals (~1e-38) that flip run to run, and
     # the GLBs stop being byte-reproducible for no geometric reason.
+    #
+    # KNOWN GAP (measured 2026-08-09, not yet closed): eight of the nine helms
+    # are byte-identical across runs; pawn_helm_thornvale.glb is NOT — same
+    # file size, same tri count, same silhouette, different last bits. Its
+    # builder is the only one that mixes a swept ribbon with a non-uniformly
+    # scaled UV sphere, so the snap above is not catching whatever survives the
+    # join. Harmless visually, but it means a regeneration of the whole set
+    # dirties one file for nothing; check `cmp` before committing a rebuild.
     for v in helm.data.vertices:
         v.co.z += shell.mount_dz
         for i in range(3):

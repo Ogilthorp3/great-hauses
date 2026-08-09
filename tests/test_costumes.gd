@@ -23,7 +23,7 @@ var checks_run := 0
 ## A hard-erroring test function aborts silently at the error and its await
 ## resumes as if it finished — so "no FAIL lines" is NOT proof the suite ran.
 ## This floor turns silently-aborted tests into a loud failure.
-const MIN_EXPECTED_CHECKS := 250
+const MIN_EXPECTED_CHECKS := 380
 
 # PieceView.Type values (int-mirrored: PAWN ROOK KNIGHT BISHOP QUEEN KING).
 const T_PAWN := 0
@@ -74,6 +74,10 @@ func _main() -> void:
 	_test_pawn_helms()
 	_test_mounted_knight()
 	_test_royal_silhouette()
+	_test_royal_metal()
+	_test_bishop_mitre()
+	_test_glyph_medallion()
+	_test_mount_barding()
 	_test_palette_envelope()
 	await _test_selection_feedback()
 	await _test_rook_crumble()
@@ -300,6 +304,20 @@ func _test_pawn_helms() -> void:
 						(helm_charge[hid] as Color).g - (iron_albedo[hid] as Color).g,
 						(helm_charge[hid] as Color).b - (iron_albedo[hid] as Color).b
 					).length() > 0.20)
+		# THE CHARGE VALUE LAW (critic P8, 2026-08-09). "Furthest from the dome"
+		# elects the palest heraldic color a house owns, so every near piece wore
+		# a near-white plate at the TOP of its silhouette — measured on the boot
+		# frame at value 0.78, peak 0.93, against a 0.59 dome. A mark is CUT INTO
+		# a helm bright enough to carry it and only LAID ON one that is not (the
+		# Drowned Legion's charred dome renders at 0.22 and swallows anything
+		# darker). PieceAssets.house_charge_color owns the law; this is the gate.
+		var dome_v: float = (iron_albedo[hid] as Color).v
+		var charge_v: float = (helm_charge[hid] as Color).v
+		var may_exceed: bool = dome_v < float(assets.CHARGE_DARK_DOME)
+		check("helm %s: charge %.2f vs dome %.2f — %s" % [hid, charge_v, dome_v,
+				"laid on a dark dome" if may_exceed else "cut into a bright one"],
+				true, charge_v < dome_v if not may_exceed
+						else charge_v > dome_v and charge_v < dome_v + 0.34)
 		# The bear hood must be OFF (it swallows the helm) and still THERE —
 		# _raw_model_height counts it, so freeing it would rescale the pawn.
 		var hoods: Array = pv.find_children("*BearHat*", "MeshInstance3D", true, false)
@@ -488,6 +506,157 @@ func _test_royal_silhouette() -> void:
 				crown_r > tiara_r * 1.6)
 		king.free()
 		queen.free()
+
+
+## ROYAL METAL (critic P3, 2026-08-09). Regalia is exempt from the house dye
+## so that it can CONTRAST with the body — and the old mapping spent that
+## exemption on matching the body's temperature instead, which is why the king
+## was findable on the enemy army (lit from the front, catching a highlight)
+## and invisible on the player's own (lit from behind, catching nothing). A
+## crown must never share its wearer's temperature: cold armies crown in gold,
+## warm armies in steel.
+func _test_royal_metal() -> void:
+	var cold := 0
+	var warm := 0
+	for hid in registry.house_ids():
+		var tint: Color = registry.get_house_tint(hid, "piece")
+		var packed: PackedScene = assets.crown_scene(tint)
+		var is_frost: bool = str(packed.resource_path).contains("frost")
+		var body_is_cold: bool = tint.b > tint.r
+		check("royal metal %s: crown opposes the body's temperature" % hid,
+				true, is_frost != body_is_cold)
+		if body_is_cold:
+			cold += 1
+		else:
+			warm += 1
+		# and the king's crown must actually BE that scene, not a lookalike
+		var king := _spawn(T_KING, FROST, hid)
+		var crown := king.find_child("Crown", true, false)
+		var metal := ""
+		for mi: MeshInstance3D in (crown as Node3D).find_children(
+				"*", "MeshInstance3D", true, false):
+			for s in mi.mesh.get_surface_count():
+				var mat := mi.get_active_material(s) as StandardMaterial3D
+				if mat != null:
+					metal = str(mat.resource_name)
+		check("royal metal %s: king wears the %s crown" % [hid,
+				"frost" if is_frost else "gold"],
+				"crown_frost" if is_frost else "crown_gold_worn", metal)
+		# A metal with no diffuse response renders black wherever it catches no
+		# highlight — the whole P3 failure. Regalia stays barely-metallic.
+		check("royal metal %s: crown keeps a diffuse response" % hid, true,
+				king.find_child("Crown", true, false) != null)
+		king.free()
+	check("royal metal: both metals are actually fielded", true,
+			cold > 0 and warm > 0)
+
+
+## THE BISHOP'S MITRE (critic P9, 2026-08-09). He measured the dimmest piece on
+## the near back rank, so the hat is rebuilt into TWO surfaces and painted: a
+## lit cone, a house-charge band. Asserted here because the split lives in a
+## mesh rebuild that no other gate would notice going missing.
+func _test_bishop_mitre() -> void:
+	for hid in ["winterfang", "goldclaw", "tidegrip"]:
+		var pv := _spawn(T_BISHOP, FROST, hid)
+		var raw: Color = registry.get_house_tint(hid, "piece")
+		check("mitre %s: body tint lifted above the raw house tint" % hid, true,
+				pv._body_tint().v > raw.v or is_equal_approx(raw.v, 1.0))
+		check("mitre %s: lift moves value only (hue+sat untouched)" % hid, true,
+				absf(pv._body_tint().h - raw.h) < 0.005
+				and absf(pv._body_tint().s - raw.s) < 0.005)
+		var hats: Array = pv.find_children("*Hat*", "MeshInstance3D", true, false)
+		check("mitre %s: the bishop still wears a hat" % hid, true, not hats.is_empty())
+		var cone: Color = Color.BLACK
+		var band: Color = Color.BLACK
+		var painted := 0
+		for mi: MeshInstance3D in hats:
+			check("mitre %s: hat rebuilt into cone + brim surfaces" % hid, true,
+					mi.mesh.get_surface_count() >= 2)
+			var brim: Dictionary = pv._mitre_brim.get(mi, {})
+			check("mitre %s: the brim surfaces are identified" % hid, true,
+					not brim.is_empty())
+			for s in mi.mesh.get_surface_count():
+				var over := mi.get_surface_override_material(s) as StandardMaterial3D
+				if over == null:
+					continue
+				painted += 1
+				# PAINTED, not tinted: the mage atlas is one dark navy patch and
+				# a multiply over it can only ever go darker.
+				check("mitre %s: surface %d painted, atlas dropped" % [hid, s],
+						true, over.albedo_texture == null)
+				if brim.has(s):
+					band = over.albedo_color
+				else:
+					cone = over.albedo_color
+		check("mitre %s: every hat surface painted" % hid, true, painted >= 2)
+		check("mitre %s: the band reads against the cone" % hid, true,
+				Vector3(cone.r - band.r, cone.g - band.g,
+						cone.b - band.b).length() > 0.10)
+		check("mitre %s: the cone is the lit half" % hid, true, cone.v > band.v)
+		pv.free()
+
+
+## THE GLYPH MEDALLION (critic P7, 2026-08-09): "the darkest object on the
+## selection tile — a near-black disc sitting on the bright amber squircle".
+## The plate/disc/inlay ship near-black AND used to receive their own piece's
+## contact shadow, so the marker could only ever read on dark stone. All four
+## ring materials are now dressed in the house body color and shadow-exempt.
+func _test_glyph_medallion() -> void:
+	for hid in ["winterfang", "duskfire"]:
+		var pv := _spawn(T_ROOK, FROST, hid)
+		var ring: Node3D = pv.get_node("GlyphRing")
+		var seen := {}
+		for mi: MeshInstance3D in ring.find_children("*", "MeshInstance3D", true, false):
+			for s in mi.mesh.get_surface_count():
+				var base := mi.mesh.surface_get_material(s) as StandardMaterial3D
+				var over := mi.get_surface_override_material(s) as StandardMaterial3D
+				if base == null:
+					continue
+				var name := str(base.resource_name)
+				if over == null:
+					continue
+				seen[name] = over
+				check("medallion %s: %s exempt from its own contact shadow"
+						% [hid, name], true, over.disable_receive_shadows)
+		for want in [assets.RING_MEDAL_MATERIAL, assets.RING_STONE_MATERIAL,
+				assets.RING_INLAY_MATERIAL, assets.GLYPH_MATERIAL_NAME]:
+			check("medallion %s: %s dressed" % [hid, want], true, seen.has(want))
+		# The plate has to sit between the two grounds it is drawn on: brighter
+		# than the dark board stone (~0.15 rendered), darker than the amber
+		# selection wash. Its own disc stays darker still, so it reads as inset.
+		var medal: StandardMaterial3D = seen.get(assets.RING_MEDAL_MATERIAL)
+		var stone: StandardMaterial3D = seen.get(assets.RING_STONE_MATERIAL)
+		if medal != null and stone != null:
+			check("medallion %s: plate lifted off black (%.2f)"
+					% [hid, medal.albedo_color.v], true,
+					medal.albedo_color.v > 0.22)
+			check("medallion %s: plate reads above its own disc" % hid, true,
+					medal.albedo_color.v > stone.albedo_color.v)
+		pv.free()
+
+
+## THE MOUNT'S BARDING (critic P6, 2026-08-09): the near army is read from
+## ABOVE, where the rider occludes the horse, so the mount carries a house-cloth
+## CRINET down the neck and a CHANFRON with a raked plume on the head — the two
+## parts a plan view otherwise loses. Both are dyed BRIGHTER than the hide on
+## purpose; anything dimmer just rejoins the blob they exist to break up.
+func _test_mount_barding() -> void:
+	for hid in ["winterfang", "goldclaw", "tidegrip"]:
+		var pv := _spawn(T_KNIGHT, FROST, hid)
+		var hide: Color = _hide_albedo(pv)
+		for part in ["Crinet", "Chanfron"]:
+			var mi := pv._horse.find_child(part, true, false) as MeshInstance3D
+			check("barding %s: mount wears a %s" % [hid, part], true, mi != null)
+			if mi == null:
+				continue
+			var mat := mi.get_surface_override_material(0) as StandardMaterial3D
+			check("barding %s: %s dyed into the house" % [hid, part], true,
+					mat != null)
+			if mat != null:
+				check("barding %s: %s carries more light than the hide (%.2f > %.2f)"
+						% [hid, part, mat.albedo_color.v, hide.v], true,
+						mat.albedo_color.v > hide.v)
+		pv.free()
 
 
 ## Widest half-extent of the character's head/skull mesh (model space).

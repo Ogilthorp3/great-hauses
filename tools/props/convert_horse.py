@@ -273,6 +273,12 @@ def make_material(name, base, rough=0.9):
 
 MAT_LEATHER = make_material("saddle_leather", (0.16, 0.10, 0.06), 0.8)
 MAT_CLOTH = make_material("caparison_cloth", (0.85, 0.82, 0.78), 0.92)
+# CRINET + CHANFRON (critic P6, 2026-08-09) — see the block that builds them.
+# Both are dyed at runtime by material NAME (PieceAssets.MOUNT_DYE_WEIGHTS),
+# deliberately at weights ABOVE the hide's, because their whole job is to
+# carry the horse's neck and head at values the near-side camera can find.
+MAT_CRINET = make_material("crinet_cloth", (0.82, 0.80, 0.76), 0.92)
+MAT_CHANFRON = make_material("chanfron_steel", (0.72, 0.70, 0.66), 0.55)
 
 
 def add_box(size, loc, mat, taper=1.0):
@@ -380,6 +386,146 @@ bpy.ops.object.join()
 caparison = bpy.context.active_object
 caparison.name = "Caparison"
 bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+
+# ======================================================================
+# CRINET + CHANFRON — the NEAR-SIDE cavalry read (critic P6, 2026-08-09)
+# ======================================================================
+# "On the far army it is a triumph... from directly behind, the rider occludes
+# the mount." Both armies stand the same 74-degree broadside, so the stance was
+# never the difference — the CAMERA ANGLE is. The near rank sits close under a
+# high camera, so it is read from ABOVE, where a horse is its own plan view:
+# the rider's chibi head owns the middle of the frame and the only mount left
+# is a low, dark, foreshortened neck reaching out from under him. The far rank
+# sits far away under a shallow angle, i.e. in profile, which is exactly the
+# view a horse is designed to be recognised from.
+#
+# You cannot yaw your way out of that (both sides are already broadside), and
+# reshaping the mount again would put the far side's triumph at risk. So the
+# answer is added ARMOUR that has plan-view area, on the two parts that a
+# top-down view otherwise loses:
+#
+#   CRINET   house cloth over the whole NECK, withers to poll. From above it
+#            paints the neck as a long house-coloured band reaching forward
+#            out of the rider — the shape that says "there is an animal under
+#            this man" before any detail is legible.
+#   CHANFRON a face plate with a brow spike at the end of that band. Small,
+#            but it is the brightest thing on the mount and it sits exactly
+#            where the horse's head is, so the band terminates in a HEAD
+#            instead of trailing off into the board.
+#
+# Both are measured off the reshaped standing pose, like every other landmark
+# here, and both are additive: the far-side silhouette gains barding and loses
+# nothing.
+hme = horse_mesh.data
+NOSE_Y = min(v.co.y for v in hme.vertices)
+HEAD_BACK_Y = NOSE_Y + 0.95          # the skull, forward of the poll
+head_co = [v.co for v in hme.vertices if v.co.y <= HEAD_BACK_Y]
+POLL_Z = max(c.z for c in head_co)
+NECK_BACK_Y = CAP_Y0 + 0.05          # meets the caparison's fore edge
+
+
+def spine_at(y, half=0.16, x_lim=0.75):
+    """Top-of-body z and half-width at a station along the spine."""
+    near = [v.co for v in hme.vertices
+            if abs(v.co.y - y) <= half and abs(v.co.x) <= x_lim]
+    if not near:
+        return None
+    return max(c.z for c in near), max(abs(c.x) for c in near)
+
+
+def ribbon(name, rows, mat):
+    """Quad strip through rows of same-length vertex lists."""
+    verts, faces = [], []
+    n = len(rows[0])
+    for row in rows:
+        verts.extend(row)
+    for r in range(len(rows) - 1):
+        for c in range(n - 1):
+            a = r * n + c
+            faces.append((a, a + 1, a + n + 1, a + n))
+    me_r = bpy.data.meshes.new(name)
+    me_r.from_pydata(verts, [], faces)
+    me_r.update()
+    ob = bpy.data.objects.new(name, me_r)
+    bpy.context.collection.objects.link(ob)
+    me_r.materials.append(mat)
+    for p in me_r.polygons:
+        p.use_smooth = False
+    return ob
+
+
+# --- crinet: 5 columns (hem, side, ridge, side, hem) x 9 stations
+CRINET_STATIONS = 9
+CRINET_LIFT = 0.045      # standoff so the cloth never z-fights the hide
+CRINET_FLARE = 1.16      # the hem sits proud of the neck
+CRINET_DROP = 0.30       # ...and hangs this far below the top line
+crinet_rows = []
+for i in range(CRINET_STATIONS):
+    t = i / (CRINET_STATIONS - 1)
+    y = NECK_BACK_Y + (HEAD_BACK_Y - NECK_BACK_Y) * t
+    probe = spine_at(y)
+    if probe is None:
+        continue
+    top, hw = probe
+    hw = max(hw, 0.22)
+    # taper the cloth toward the poll so it reads as barding, not a sack
+    w = hw * CRINET_FLARE * (1.0 - 0.28 * t)
+    drop = CRINET_DROP * (1.0 - 0.45 * t)
+    z = top + CRINET_LIFT
+    crinet_rows.append([
+        (-w, y, z - drop), (-w * 0.72, y, z - drop * 0.30), (0.0, y, z),
+        (w * 0.72, y, z - drop * 0.30), (w, y, z - drop),
+    ])
+crinet = ribbon("Crinet", crinet_rows, MAT_CRINET)
+
+# --- chanfron: a face plate down the skull + a brow spike
+CHANFRON_STATIONS = 5
+CHANFRON_LIFT = 0.035
+chanfron_rows = []
+for i in range(CHANFRON_STATIONS):
+    t = i / (CHANFRON_STATIONS - 1)
+    y = HEAD_BACK_Y + (NOSE_Y + 0.06 - HEAD_BACK_Y) * t
+    near = [c for c in head_co if abs(c.y - y) <= 0.16]
+    if not near:
+        continue
+    top = max(c.z for c in near)
+    hw = max(max(abs(c.x) for c in near), 0.10) * (1.0 - 0.30 * t)
+    z = top + CHANFRON_LIFT
+    chanfron_rows.append([
+        (-hw, y, z - 0.14), (0.0, y, z), (hw, y, z - 0.14),
+    ])
+chanfron = ribbon("Chanfron", chanfron_rows, MAT_CHANFRON)
+# PLUME: a swept crest off the poll — the head's skyline mark, and the one
+# part of the mount that survives being looked at from directly above. Sized
+# in WORLD terms, not by eye: the ensemble normalizes to 1.22 world units on a
+# ~0.29 scale factor, so a 0.30-tall spike here renders 0.06 world (about
+# three pixels on a board-distance knight) and might as well not exist.
+#
+# It also LEANS FORWARD, and that is the near-side half of the fix. A vertical
+# spike is the worst possible shape for a camera looking down at it: at the
+# near rank's ~50-degree elevation it foreshortens to cos(50) of its length
+# and lands as a stub on the end of the neck band. Raked 42 degrees over the
+# brow it projects nearly its FULL length in screen space, forward of the
+# muzzle — so from above the band no longer just stops, it comes to a point,
+# and the eye reads a head where the point is. In profile (the far army) the
+# same rake is simply a swept war crest.
+PLUME_LEN = 0.95
+PLUME_RAKE_DEG = 42.0
+spike = add_box((0.115, 0.115, PLUME_LEN),
+                (0.0, HEAD_BACK_Y - 0.04, POLL_Z + 0.02), MAT_CHANFRON,
+                taper=0.16)
+spike.rotation_euler = (math.radians(PLUME_RAKE_DEG), 0.0, 0.0)
+bpy.ops.object.select_all(action='DESELECT')
+for ob in (chanfron, spike):
+    ob.select_set(True)
+bpy.context.view_layer.objects.active = chanfron
+bpy.ops.object.join()
+chanfron = bpy.context.active_object
+chanfron.name = "Chanfron"
+bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+print(f"[horse] barding: crinet {NECK_BACK_Y:.2f}..{HEAD_BACK_Y:.2f} "
+      f"({len(crinet_rows)} stations) · chanfron {HEAD_BACK_Y:.2f}..{NOSE_Y:.2f} "
+      f"poll {POLL_Z:.2f}")
 
 # ---------------------------------------------------------------- stats
 deps = bpy.context.evaluated_depsgraph_get()

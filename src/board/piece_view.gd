@@ -132,7 +132,15 @@ const CAPE_MOUNT_POS := Vector3(0.0, 0.04, -0.08)
 ## the skull line, a slim band on a bare head. Same prop, opposite reads;
 ## tests/test_costumes.gd::_test_royal_silhouette measures both against the
 ## head and fails if they ever converge again.
-const CROWN_SCALE := 6.8
+## ...and the ring is widened again (critic P3, 2026-08-09): "#3 works
+## perfectly on the ENEMY army and fails on YOUR army in every frame." From
+## the near side the camera looks nearly DOWN the crown's axis, where the
+## wearer's own skull dome eats the band and only the points clear it — so the
+## points have to clear it by a margin, not by a pixel. Widened here, thickened
+## in tools/props/make_crown.py, and given a contrasting metal in
+## PieceAssets.crown_scene: three independent fixes, because the near-side read
+## had failed once already with only one of them.
+const CROWN_SCALE := 7.2
 const TIARA_SCALE := Vector3(3.3, 1.9, 3.3)
 
 var piece_type: Type = Type.PAWN
@@ -154,6 +162,7 @@ var _glyph_tween: Tween
 var _ring_meshes: Array[MeshInstance3D] = []  # faded via GeometryInstance3D.transparency
 var _ring_fade_tween: Tween
 var _ring_shown := false    # target state (true while fading in)
+var _mitre_brim: Dictionary = {}   # bishop only: hat MeshInstance3D -> brim surfaces
 var _hovered := false
 var _is_selected := false
 
@@ -172,6 +181,7 @@ func setup(new_type: Type, new_side: House, new_house_id: String = "") -> void:
 		_sway_tween = null
 	_glyph_ring = null
 	_glyph_mat = null
+	_mitre_brim = {}
 	_ring_meshes = []
 	_ring_shown = false
 	_hovered = false
@@ -560,7 +570,9 @@ func _build_character() -> void:
 	_anim.name = "Anim"
 	_model.add_child(_anim)  # root_node ".." = the character scene root
 	_anim.add_animation_library("", PieceAssets.shared_anims())
-	_tint_meshes(_model, _tint_for("piece"), _saturation_for())
+	_tint_meshes(_model, _body_tint(), _saturation_for())
+	if piece_type == Type.BISHOP:
+		_dress_mitre()   # AFTER the body tint — it repaints the hat's surfaces
 	# Gear/crest/crown attach AFTER _tint_meshes so they keep their own colors.
 	_attach_gear()
 	if PieceAssets.wants_crest(piece_type):
@@ -698,10 +710,51 @@ func _dress_caparison() -> void:
 ## face, staff and body. Narrow the brim and lift the crown so the hat reads
 ## as a hat and the bishop underneath reads as a bishop. Both casts have one
 ## (`*Hat*`); the reshape is axis-symmetric so it needs no per-cast branch.
+##
+## The rebuild also SPLITS the hat into cone and brim surfaces (see
+## PieceAssets.narrowed_hat_mesh) — remember which is which per mesh, because
+## the swap replaces the mesh the split was keyed on.
 func _narrow_wizard_brim() -> void:
 	for mi: MeshInstance3D in _model.find_children("*Hat*", "MeshInstance3D",
 			true, false):
-		mi.mesh = PieceAssets.narrowed_hat_mesh(mi.mesh)
+		var narrowed := PieceAssets.narrowed_hat_mesh(mi.mesh)
+		_mitre_brim[mi] = PieceAssets.hat_brim_surfaces(mi.mesh)
+		mi.mesh = narrowed
+
+
+## TYPE readability (critic P9, 2026-08-09): the near bishop measured the
+## LOWEST value on its own back rank — mean 0.34/0.38 against 0.44-0.55 for
+## every other piece — because the mage atlas paints its whole robe and mitre
+## one dark navy, and a multiply-tint over a dark texture can only go darker.
+## From the high rear camera that is a dark thimble with no internal shape.
+##
+## The mitre is therefore PAINTED rather than tinted (PieceAssets.painted_material
+## drops the atlas entirely): the cone takes the house body color at
+## MITRE_CROWN_WEIGHT — lifted clear of the robe but deliberately UNDER the
+## royals, a bishop does not out-shine his king — and the brim takes the house
+## CHARGE against that cone, which by the charge value law lands darker. One
+## dark oval becomes a lit cone inside a contrasting band: a shape with a
+## readable break, from directly above as well as from the side.
+const MITRE_CROWN_WEIGHT := 0.72
+
+
+func _dress_mitre() -> void:
+	var body: Color = _body_tint()
+	var cone := Color(body.r * MITRE_CROWN_WEIGHT, body.g * MITRE_CROWN_WEIGHT,
+			body.b * MITRE_CROWN_WEIGHT)
+	var band := cone.darkened(0.45)
+	if HouseRegistry.has_house(house_id):
+		band = PieceAssets.house_charge_color(house_id, cone)
+	for mi: MeshInstance3D in _mitre_brim:
+		if not is_instance_valid(mi):
+			continue
+		var brim: Dictionary = _mitre_brim[mi]
+		for s in mi.mesh.get_surface_count():
+			var src := mi.mesh.surface_get_material(s) as StandardMaterial3D
+			if src == null:
+				continue
+			mi.set_surface_override_material(s, PieceAssets.painted_material(
+					src, band if brim.has(s) else cone))
 
 
 ## Raw (unscaled) model height: top of the skinned meshes parented directly
@@ -760,7 +813,7 @@ func _attach_gear() -> void:
 		prop.rotation_degrees = spec["rot_deg"]
 		prop.scale = Vector3.ONE * float(spec["scl"])
 		att.add_child(prop)
-		_tint_meshes(prop, _tint_for("piece"), PieceAssets.GEAR_SATURATION)
+		_tint_meshes(prop, _body_tint(), PieceAssets.GEAR_SATURATION)
 		if bool(spec["decal"]) and HouseRegistry.has_house(house_id):
 			_attach_sigil_decal(prop, spec)
 
@@ -845,6 +898,14 @@ func _doff_bear_hood() -> void:
 ## Drowned Legion's dome is dyed darker still: charred, but charred in
 ## Tidegrip's own green rather than in nobody's black (defect #8).
 ##
+## THE RIM IS NO LONGER THE BRIGHTEST THING ON THE PIECE (critic P8,
+## 2026-08-09). "Furthest from the dome" kept electing the house's palest
+## heraldic color, so every near piece wore a near-white plate on the very top
+## of its silhouette — 0.78 value (peak 0.93) against a 0.59 dome, measured on
+## the boot frame. The charge value law now lives in house_charge_color and
+## puts the mark UNDER the dome on any helm bright enough to carry it; nothing
+## here changed except that the color it hands back is a cut, not a flare.
+##
 ## Materials are found BY NAME, never by surface index.
 const HELM_SHELL_WEIGHT := 0.62
 const HELM_SHELL_WEIGHT_DROWNED := 0.40
@@ -855,7 +916,7 @@ func _dress_helm(helm: Node3D) -> void:
 	var weight := HELM_SHELL_WEIGHT_DROWNED \
 			if house_id == PieceAssets.SKELETON_HOUSE else HELM_SHELL_WEIGHT
 	var shell := Color(body.r * weight, body.g * weight, body.b * weight)
-	var charge := shell.lightened(0.55)
+	var charge := shell.darkened(0.45)   # legacy sides wear no helm; see _attach_helm
 	if HouseRegistry.has_house(house_id):
 		charge = PieceAssets.house_charge_color(house_id, shell)
 	for mi: MeshInstance3D in helm.find_children("*", "MeshInstance3D", true, false):
@@ -940,14 +1001,24 @@ func _build_glyph_ring() -> void:
 	_glyph_ring.position = Vector3(0.0, 0.004, 0.0)
 	add_child(_glyph_ring)
 	# Per-piece duplicate of the emissive glyph material so selection can
-	# brighten THIS ring only.
+	# brighten THIS ring only; the plate/disc/inlay under it are dressed in
+	# the house body color (critic P7 — they shipped near-black and the
+	# medallion read as a hole punched in the amber selection tile).
+	var body: Color = _body_tint()
+	var plate := {
+		PieceAssets.RING_MEDAL_MATERIAL: PieceAssets.RING_MEDAL_WEIGHT,
+		PieceAssets.RING_STONE_MATERIAL: PieceAssets.RING_STONE_WEIGHT,
+		PieceAssets.RING_INLAY_MATERIAL: PieceAssets.RING_INLAY_WEIGHT,
+	}
 	for mi: MeshInstance3D in _glyph_ring.find_children("*", "MeshInstance3D", true, false):
 		_ring_meshes.append(mi)
 		mi.transparency = 1.0   # hidden at rest (ISSUES.md #2)
 		for s in mi.mesh.get_surface_count():
 			var src := mi.get_active_material(s)
-			if src is StandardMaterial3D \
-					and src.resource_name == PieceAssets.GLYPH_MATERIAL_NAME:
+			if not src is StandardMaterial3D:
+				continue
+			var mat_name := str((src as StandardMaterial3D).resource_name)
+			if mat_name == PieceAssets.GLYPH_MATERIAL_NAME:
 				_glyph_mat = (src as StandardMaterial3D).duplicate()
 				_glyph_mat.emission_energy_multiplier = PieceAssets.GLYPH_ENERGY_REST
 				# Critic defect #17: engraved WHITE, sitting on the floor
@@ -957,13 +1028,18 @@ func _build_glyph_ring() -> void:
 				# color (now the house CHARGE, so it reads as this army's
 				# mark), and it was lying inside its own piece's contact
 				# shadow (now exempt from receiving one).
-				var glyph: Color = _tint_for("piece")
+				var glyph: Color = body
 				if HouseRegistry.has_house(house_id):
 					glyph = HouseRegistry.get_colors(house_id)["accent"]
 				_glyph_mat.albedo_color = glyph
 				_glyph_mat.emission = glyph
 				_glyph_mat.disable_receive_shadows = true
 				mi.set_surface_override_material(s, _glyph_mat)
+			elif plate.has(mat_name):
+				var dressed := PieceAssets.dyed_material(
+						src as StandardMaterial3D, body, plate[mat_name])
+				dressed.disable_receive_shadows = true
+				mi.set_surface_override_material(s, dressed)
 	_glyph_ring.visible = false
 
 
@@ -1031,6 +1107,33 @@ func _drop_banner() -> void:
 	if mat != null:
 		tw.tween_property(mat, "albedo_color:a", 0.0, 0.7)
 	tw.chain().tween_callback(banner.queue_free)
+
+
+## THE BISHOP'S VALUE LIFT (critic P9, 2026-08-09). Every other rank rides a
+## pack texture with mid-to-light passages somewhere on it; the mage cast is
+## painted one dark navy from hem to hat, so the house multiply can only ever
+## make a bishop darker than his own army. Measured on the boot frame he was
+## the dimmest piece on the near back rank in both files (mean value 0.34 and
+## 0.38 against 0.42-0.55 for everyone else) — a dark thimble, exactly as
+## charged.
+##
+## The lift is applied in HSV with hue and SATURATION untouched, so it moves
+## the bishop's brightness and nothing else: the palette envelope measures hue,
+## and this must not be a way to smuggle a piece out of its house. It is a TYPE
+## correction like the height grading — the same reasoning, one axis over.
+const BISHOP_VALUE_LIFT := 1.18
+
+
+## The piece's body tint: the house multiply, plus the bishop's type-level
+## value lift (above). Everything a body wears goes through this — meshes,
+## signature gear, the mitre paint, the glyph ring — so a bishop's staff never
+## ends up a stop darker than the bishop holding it.
+func _body_tint() -> Color:
+	var tint: Color = _tint_for("piece")
+	if piece_type != Type.BISHOP:
+		return tint
+	return Color.from_hsv(tint.h, tint.s, minf(1.0, tint.v * BISHOP_VALUE_LIFT),
+			tint.a)
 
 
 ## The multiply tint for this piece: HouseRegistry colors when a house id was

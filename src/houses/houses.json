@@ -28,7 +28,7 @@
 			"seat": "Stormrest",
 			"motto": "The storm answers to us.",
 			"colors": { "primary": "#1d1a17", "secondary": "#cfa63b", "accent": "#e8c866" },
-			"tints": { "piece": "#7d6a4a", "tower": "#665741", "saturation": 0.25 },
+			"tints": { "piece": "#8f5218", "tower": "#784514", "saturation": 0.25 },
 			"sigil": "res://assets/sigils/hartcrown.png"
 		},
 		{

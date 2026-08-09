@@ -214,9 +214,14 @@ static func _validate_helm(pv: PieceView, piece_type: int, house_id: String,
 #      every palette contains — iron, bone, leather, shadow).
 
 ## Loudest texel any dyed surface may still carry (HSV saturation x value).
-## A raw KayKit atlas scores 0.6+; the same atlas desaturated to the palette
-## ceiling scores ~0.10.
-const PALETTE_TEXEL_LOUDNESS := 0.22
+## A raw KayKit atlas scores 0.6+; the same atlas driven to the palette ceiling
+## now scores 0.00, because PALETTE_SATURATION_CEILING is zero — the queen's
+## hood taught us that a "narrow chroma band" is still a hue leak, and one that
+## widens exactly where the house colour is weakest (2026-08-09 regression).
+## So the tolerance follows the ceiling down: at 0.08 the gate still catches an
+## undyed atlas by an order of magnitude, and it now also catches a surface
+## that goes through a WEAKER dye than the pipeline promises.
+const PALETTE_TEXEL_LOUDNESS := 0.08
 ## How far a flat albedo may sit from the nearest house hue, in degrees.
 const PALETTE_HUE_TOL := 46.0
 ## Chroma weight (HSV saturation x value) below which a color carries no house
