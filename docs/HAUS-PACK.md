@@ -160,9 +160,35 @@ So the pipeline stopped asking *what colour is this haus* and started asking
 |---|---|---|
 | **KIT** | tabard, cloak, hood, shield face, caparison, helm, crest, plume, sash | wears the haus jersey, confidently saturated |
 | **NATURAL** | steel, leather, wood, stone, skin, bone, the horse's coat | keeps its own colours; at most a whisper of haus in the shadows |
-| **REGALIA** | the crown, the tiara | stays metal — the contrast against the body *is* the royal read |
+| **REGALIA** | the crown, the tiara | stays metal, and stays the **same** metal on every haus — see below |
 | **HERALDRY** | the sigil plate, banner cloth, the type-glyph ring | carries its own artwork; dyeing it would dye the sigil |
 | **EFFECT** | transient VFX | owns its own light |
+
+### Your king wears the same crown as everyone else's
+
+**REGALIA takes no haus input at all**, and that is not an oversight you can
+work around — it is the fix for a defect this project shipped.
+
+The crown used to be chosen from the wearer's jersey: cold armies in a steel
+crown, warm armies in a gold one (and before that, the other way round). Both
+versions have the same hole in them. `crown_frost`'s albedo is `#5b6371` — a
+**navy** steel — so Hartcrown, Ashwyrm, Goldclaw, Duskfire and Thornvale all
+crowned their kings in the darkest, coolest object in their own army, and in the
+same navy Haus Silverbrook wears as its identity. In a Goldclaw–Winterfang match
+the gold king wore blue and the blue king wore gold. Each king was legible; each
+was legible as somebody else.
+
+A crown is a **rank** marker, not a haus marker. Both kings on the board wear
+one, so it cannot say whose king this is — and the moment it varies by haus, it
+starts saying it wrongly. So there is now ONE crown, on all nine and on yours: a
+dark tarnished band (`crown_gold_band`) under polished points
+(`crown_gold_points`), 73 dE apart, so that whatever value your army is, one of
+the two tones cuts against it. Measured worst case across the nine: 33 dE.
+
+You do not declare it, override it, or receive a hook for it. What you *do*
+control is that your jersey stays clear of both tones — the role gate fails a
+REGALIA surface that lands within 0.14 RGB of the haus kit, which is how it
+would tell you that your army had swallowed its own king's crown.
 
 **A pack inherits that discipline by construction.** Three layers, and you
 cannot get around any of them:
@@ -206,6 +232,60 @@ Stuffs: `steel` `leather` `wood` `stone` `skin` `bone` `coat` `glow` `atlas` `no
 marketplace casts need, because one 1024² texture paints their cloth, steel and
 skin onto a single mesh. Your own model can simply have one material per
 material.
+
+---
+
+## Picking a colour nobody else is wearing
+
+Two tools measure it, and they measure the colours the **hall** produces, not
+the hex you typed — eight orange torches, a cool Sun and a filmic tonemap move
+every jersey before a player sees it.
+
+```
+python3 tools/haus_palette_check.py          # the cheap half: the manifests
+Godot --path . --resolution 1920x1080 res://tools/haus_field.tscn   # the true half
+python3 tools/haus_delta_e.py gate <samples.txt>
+```
+
+`haus_field` stands all nine (and yours) on the board under the real lights and
+reads **every rank's** identity surface off the rendered frame — pawn dome,
+bishop mitre, knight caparison, rook banner, the king's cape, the queen's hood,
+and the regalia on both their heads. It reads them through a surface **mask**,
+so a number can only ever come from pixels that surface actually shows. It used
+to sample two of those six, which is exactly how five kings shipped in a navy
+crown that nothing was looking at.
+
+The bar is **12 dE2000** between any two hauses on any identity rank.
+
+### What this palette does NOT claim
+
+**It is not colourblind-safe, and the report says so on every run.** Two colours
+need roughly 10 dE before a viewer separates them without effort, and nine
+categorical hues cannot all clear that under all three dichromacies — a
+dichromat has one colour axis plus lightness, and nine buckets do not fit on it.
+The measured improvement from the previous pass was the dome minimum going from
+2.4 to 4.3 dE under deuteranopia and the mitre from 1.3 to 5.1: real moves, from
+*identical* to *barely separable*, and nothing more than that.
+
+What the palette actually holds, and what the gate enforces:
+
+* no pair collapses below **4 dE on every rank at once** — judged across the
+  ranks, because an army is six ranks and a player only needs one of them;
+* the surviving weak pairs are **named on every run**, never summarised away.
+  Today: `thornvale/duskfire` (8.4 dE protanopic at best, on the pawn dome),
+  `hartcrown/ashwyrm` (2.9 dE deuteranopic on the queen's hood, 10.9 on the
+  dome), `goldclaw/duskfire` (0.7 dE protanopic on that same hood, 22.5 on the
+  dome). Gold and orange are one colour to a red-blind eye; that is physics,
+  and no palette move fixes it;
+* four hauses fly a **sable or near-sable field**, so their banners and
+  caparisons are the same cloth to the eye by design — 2.1 dE between Hartcrown
+  and Ashwyrm. The **device** separates them, which is why `gen_sigils` draws
+  marks that differ in silhouette and why they are audited at 26 px;
+* the ladder is spread on **lightness**, and shape carries what colour cannot.
+
+If your haus lands on someone, the fix is usually **value or chroma**, not hue:
+nine hues at one brightness is the other way to be confusing, and it is the way
+that also looks like plastic.
 
 ---
 

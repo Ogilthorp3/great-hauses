@@ -40,8 +40,11 @@ const ANIM_MOVEMENT := preload("res://assets/kaykit-adventurers/Rig_Medium_Movem
 ## and the death collapse procedurally — the banner-rook's proven pattern.
 const HORSE := preload("res://assets/quaternius-animals/horse.glb")
 
-const CROWN_GOLD := preload("res://assets/custom-props/crown.glb")
-const CROWN_FROST := preload("res://assets/custom-props/crown_frost.glb")
+## ONE crown, for all nine. The cold-silver twin (assets/custom-props/
+## crown_frost.glb) is still on disk and make_crown.py still emits it, but
+## nothing instantiates it any more — see crown_scene() for why a per-haus
+## crown was a defect, not a feature.
+const CROWN := preload("res://assets/custom-props/crown.glb")
 const CAPE := preload("res://assets/custom-props/cape.glb")
 const WATCHTOWER := preload("res://assets/custom-props/watchtower.glb")
 const PENNANT_SHADER := preload("res://src/board/pennant_flutter.gdshader")
@@ -353,24 +356,163 @@ func _pack_scene(path: String) -> PackedScene:
 	return packed
 
 
-## Crown-variant mapping (kings and their queens' tiaras).
+## THE KING WORE THE ENEMY'S COLOUR (art critic, 2026-08-09) — and the whole
+## per-haus crown idea is what put him in it.
 ##
-## THE MAPPING IS INVERTED (critic P3, 2026-08-09). It used to match the crown
-## to its wearer — cold houses in frost steel, warm houses in worn gold — and
-## matching temperature is the one thing a crown must never do. A regalia
-## piece exists to be found on a body, and it is exempt from the house dye
-## (costume_preview.PALETTE_EXEMPT) precisely so it can contrast; handing a
-## steel-blue army a steel-blue crown throws that exemption away and leaves the
-## king's silhouette to be carried by geometry alone — which failed exactly
-## where geometry is weakest, from the player's own side, where the camera
-## looks down the crown's axis and the head occludes the band.
+## Two passes tied the crown's metal to its wearer's jersey. The first matched
+## temperature (cold armies in steel, warm in gold); P3 inverted it (cold in
+## gold, warm in steel) because a steel-blue crown on a steel-blue army has no
+## contrast left to spend. Both passes share one unexamined premise: that a
+## crown is allowed to depend on the haus at all.
 ##
-## So a crown now takes the OPPOSITE temperature to its army: the four cold
-## houses (Winterfang, Tidegrip, Swiftcrest, Silverbrook, and legacy FROST)
-## crown in warm gold, the five warm ones in cold steel. Hue contrast survives
-## every camera angle, unlike a highlight.
-func crown_scene(tint: Color) -> PackedScene:
-	return CROWN_GOLD if tint.b > tint.r else CROWN_FROST
+## It is not, and the inverted mapping is where that finally showed. Five of
+## nine kings — Hartcrown, Ashwyrm, Goldclaw, Duskfire, Thornvale — came out
+## wearing crown_frost, whose albedo is #5b6371: a NAVY steel, the darkest and
+## coolest object anywhere in their own armies, and the same navy Silverbrook
+## wears as its identity. In Goldclaw vs Winterfang the gold king wore blue and
+## the blue king wore gold. Each king was legible; each was legible as somebody
+## else. A signal that varies by haus IS a haus signal, and a haus signal on
+## regalia can only ever point at the wrong haus.
+##
+## So the crown stops carrying the haus. It is REGALIA: ONE metal, the same on
+## all nine, which makes it a RANK signal — worn by both kings in every match,
+## therefore incapable of saying whose king this is. That is what actually
+## kills the collision; contrast alone never could.
+##
+## ...and a single flat metal cannot contrast with nine different armies —
+## worn gold sits 6.5 dE from Goldclaw's own pawn dome, bright silver 5.0 dE
+## from Winterfang's and 3.5 from Silverbrook's. So the crown carries its
+## contrast INSIDE itself, the way this project has twice solved the same
+## problem before (the bishop's lit cone inside a charge band, the pawn's dome
+## inside a charge rim): a DARK tarnished band with POLISHED points above it,
+## 65 dE apart. Whatever value the army is, one of the two tones cuts against
+## it — measured worst case 28.4 dE (Duskfire), against 6.5 for the flat gold
+## it replaces — and the bright points sit above EVERY haus's dome in L*, which
+## is the half of "the king is the brightest man on his army" that colour owns.
+##
+## tests/test_costumes.gd::_test_royal_metal holds all three: uniform across
+## the nine, two tones with a real value step, and clear of every haus's kit.
+const CROWN_BAND_MATERIAL := "crown_gold_band"
+const CROWN_POINT_MATERIAL := "crown_gold_points"
+## Tarnish in the recesses and polish on the points. Both are GOLD — one metal,
+## two states of it — and both clear every haus's jersey by more than the role
+## gate's 0.14 (the tightest is the band against Hartcrown's sable-brown at
+## 0.16, which is why the band is this desaturated rather than a richer bronze).
+const CROWN_BAND_COLOR := Color("#26231d")
+const CROWN_POINT_COLOR := Color("#f0cf8a")
+## Barely-metallic, both of them — P3's finding, unchanged: a real metal has no
+## diffuse response, so at metallic 0.9 the far king catches the hall's Sun and
+## the near king renders near-black. Regalia keeps a diffuse response.
+const CROWN_METALLIC := 0.28
+const CROWN_BAND_ROUGHNESS := 0.55
+const CROWN_POINT_ROUGHNESS := 0.34
+## How much of the prop's own height is band. The mesh is a ring with seven
+## spikes standing on it (tools/props/make_crown.py: BAND_H 0.045 against
+## spikes reaching 0.086), so a third from the bottom lands the split at the
+## spike roots — which is where a smith's tarnish line falls too.
+const CROWN_BAND_TOP := 0.34
+
+var _crown_scene: PackedScene
+
+
+## The crown and the tiara, both — the same prop at two scales (PieceView
+## CROWN_SCALE vs TIARA_SCALE), which is what keeps the tiara visibly slimmer.
+## `_tint` is ignored and kept only so callers read as "dress this piece": a
+## regalia surface takes no haus input at all, which is the entire fix above.
+func crown_scene(_tint := Color.WHITE) -> PackedScene:
+	if _crown_scene != null:
+		return _crown_scene
+	var root: Node3D = CROWN.instantiate()
+	for mi: MeshInstance3D in root.find_children("*", "MeshInstance3D", true, false):
+		mi.mesh = regalia_crown_mesh(mi.mesh)
+	_own_all(root, root)
+	var packed := PackedScene.new()
+	packed.pack(root)
+	root.free()
+	_crown_scene = packed
+	return _crown_scene
+
+
+func _own_all(node: Node, owner_node: Node) -> void:
+	for child in node.get_children():
+		child.owner = owner_node
+		_own_all(child, owner_node)
+
+
+var _crown_mesh_cache: Dictionary = {}   # source mesh id -> ArrayMesh
+
+
+## The crown prop rebuilt into BAND and POINTS on separate surfaces, each
+## carrying its own regalia material. Split per TRIANGLE by height, exactly the
+## way the bishop's hat is split per triangle by radius (narrowed_hat_mesh) —
+## the crown ships as one 840-triangle surface with one material, and a mesh
+## with one surface cannot have two values.
+func regalia_crown_mesh(src: Mesh) -> ArrayMesh:
+	var key := src.get_instance_id()
+	if _crown_mesh_cache.has(key):
+		return _crown_mesh_cache[key]
+	var box := src.get_aabb()
+	var base_y := box.position.y
+	var span_y := maxf(box.size.y, 0.0001)
+	var out := ArrayMesh.new()
+	for s in src.get_surface_count():
+		var arrays := src.surface_get_arrays(s)
+		var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+		var height := PackedFloat32Array()
+		height.resize(verts.size())
+		for i in verts.size():
+			height[i] = clampf((verts[i].y - base_y) / span_y, 0.0, 1.0)
+		var fmt: int = src.surface_get_format(s) & ~Mesh.ARRAY_FLAG_COMPRESS_ATTRIBUTES
+		var idx: PackedInt32Array = arrays[Mesh.ARRAY_INDEX] \
+				if arrays[Mesh.ARRAY_INDEX] != null else PackedInt32Array()
+		var groups := _split_crown_indices(idx, height)
+		for g in groups.size():   # [band indices, point indices] — band first
+			var part: PackedInt32Array = groups[g]
+			if part.is_empty():
+				continue
+			arrays[Mesh.ARRAY_INDEX] = part
+			out.add_surface_from_arrays(src.surface_get_primitive_type(s),
+					arrays, [], {}, fmt)
+			out.surface_set_material(out.get_surface_count() - 1,
+					_regalia_material(g == 0))
+	_crown_mesh_cache[key] = out
+	return out
+
+
+## Triangles whose centre sits in the bottom CROWN_BAND_TOP of the prop are the
+## BAND; the rest are the POINTS. Returns [band indices, point indices]; an
+## unindexed surface stays whole and is treated as band.
+func _split_crown_indices(idx: PackedInt32Array,
+		height: PackedFloat32Array) -> Array:
+	if idx.size() < 3 or idx.size() % 3 != 0:
+		return [idx, PackedInt32Array()]
+	var band := PackedInt32Array()
+	var points := PackedInt32Array()
+	for t in idx.size() / 3:
+		var a := idx[t * 3]
+		var b := idx[t * 3 + 1]
+		var c := idx[t * 3 + 2]
+		var mean := (height[a] + height[b] + height[c]) / 3.0
+		var into: PackedInt32Array = band if mean <= CROWN_BAND_TOP else points
+		into.append(a)
+		into.append(b)
+		into.append(c)
+	return [band, points]
+
+
+var _regalia_mat_cache: Dictionary = {}   # bool is_band -> StandardMaterial3D
+
+
+func _regalia_material(is_band: bool) -> StandardMaterial3D:
+	if _regalia_mat_cache.has(is_band):
+		return _regalia_mat_cache[is_band]
+	var mat := StandardMaterial3D.new()
+	mat.resource_name = CROWN_BAND_MATERIAL if is_band else CROWN_POINT_MATERIAL
+	mat.albedo_color = CROWN_BAND_COLOR if is_band else CROWN_POINT_COLOR
+	mat.metallic = CROWN_METALLIC
+	mat.roughness = CROWN_BAND_ROUGHNESS if is_band else CROWN_POINT_ROUGHNESS
+	_regalia_mat_cache[is_band] = mat
+	return mat
 
 
 ## Shield-decal material: the house sigil PNG as an alpha-scissor plate,
@@ -475,6 +617,12 @@ enum Stuff { NONE, STEEL, LEATHER, WOOD, STONE, SKIN, BONE, COAT, GLOW, ATLAS }
 ## by their material and pack casts by their mesh. Read it top to bottom.
 const MATERIAL_ROLES: Array = [
 	# ── authored props: the material name IS the contract ──────────────────
+	# The crown and the tiara: ONE metal on all nine, in two states of itself.
+	# crown_gold_worn is the material the .glb ships and the two below are what
+	# regalia_crown_mesh() splits it into; crown_frost is the retired cold twin,
+	# named here so a pack that still points at the old asset classifies.
+	{"n": "crown_gold_band", "role": Role.REGALIA},
+	{"n": "crown_gold_points", "role": Role.REGALIA},
 	{"n": "crown_gold_worn", "role": Role.REGALIA},
 	{"n": "crown_frost", "role": Role.REGALIA},
 	{"n": "cape_cloth", "role": Role.KIT},          # the king's cloak

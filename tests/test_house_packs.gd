@@ -65,12 +65,26 @@ const SKELETONS := "res://assets/kaykit-skeletons"
 ##     dragon's crimson and 15.8 from the sun's orange — the warm pile-up. A
 ##     stag on sable-and-or is period heraldry and its manifest already said
 ##     so: `primary` was #1d1a17 long before the jersey caught up.
-##   * swiftcrest is PURPURE. It was #37b0c8 sky-cyan, 9.0 dE from Winterfang
-##     — the tightest pair in the whole game. Nine hauses cannot hold three
-##     blues; purpure is the tincture heraldry keeps for exactly this.
+##   * swiftcrest is PURPURE, and now a LIGHT one (#b06ae0, was #9448c8). It
+##     was #37b0c8 sky-cyan, 9.0 dE from Winterfang — the tightest pair in the
+##     game; purpure is the tincture heraldry keeps for exactly this. The move
+##     to purple then created a collision nobody named: swiftcrest against
+##     silverbrook's navy sat at 8.9 dE protanopic / 11.5 deuteranopic, because
+##     to a red-blind eye violet and blue differ only in LIGHTNESS. Lifting the
+##     amethyst 11 L* takes that pair to 15.2 / 18.6 without touching its hue.
 ##   * winterfang is PALE and hartcrown is NEAR-BLACK on purpose: value and
 ##     chroma are separation axes here, not side effects. Do not "fix" the
 ##     pale one by saturating it.
+##   * winterfang wears ARGENT AND AZURE, not azure on azure. Its `primary` was
+##     #5b7a92 (mid steel) and its `secondary` #eef2f5 (near-white), so every
+##     colour it owned sat between L* 50 and L* 95 — the haus had no dark, and
+##     PieceAssets.house_charge_color can only pick a trim from the colours a
+##     haus owns. Result on the board: pale-blue domes wearing pale-blue rims,
+##     pale-blue crests, pale-blue tabards, "closer to plastic toys than to the
+##     gritty armoured look the game earned in its close-ups". The two are now
+##     SWAPPED and the mark darkened — a pale argent field with a dark slate
+##     wolf on it — which hands the haus a real dark (#2f4a66) for its trim and
+##     hands the sigil its best contrast at 26 px besides.
 ## And one field that reads like a typo and is not: hartcrown's `tower` whisper
 ## is COOL (#3d5670) under a WARM jersey. The whisper is what the rook's
 ## masonry picks up, and a near-black warm jersey lands the tower stone inside
@@ -83,7 +97,7 @@ const SKELETONS := "res://assets/kaykit-skeletons"
 const GOLDEN := [
 	{"id": "winterfang", "archetype": "wolf", "name": "Haus Winterfang",
 		"seat": "Frosthollow", "motto": "The wolf remembers.",
-		"primary": "#5b7a92", "secondary": "#eef2f5", "accent": "#8bc4ee",
+		"primary": "#dfe7ee", "secondary": "#2f4a66", "accent": "#8bc4ee",
 		"piece": "#a7cee8", "tower": "#8db3cc", "kit": "#8bc4ee",
 		"coat": "black"},
 	{"id": "goldclaw", "archetype": "lion", "name": "Haus Goldclaw",
@@ -118,8 +132,8 @@ const GOLDEN := [
 		"coat": "liver_chestnut"},
 	{"id": "swiftcrest", "archetype": "falcon", "name": "Haus Swiftcrest",
 		"seat": "Skyloft", "motto": "Honor rides the high wind.",
-		"primary": "#3f2064", "secondary": "#f2f6f9", "accent": "#b98ae0",
-		"piece": "#a273d0", "tower": "#8a5cb4", "kit": "#9448c8",
+		"primary": "#3f2064", "secondary": "#f2f6f9", "accent": "#c79ae8",
+		"piece": "#bb8ae8", "tower": "#9a63c4", "kit": "#b06ae0",
 		"coat": "bay"},
 	{"id": "silverbrook", "archetype": "trout", "name": "Haus Silverbrook",
 		"seat": "Rivergate", "motto": "The river binds us all.",

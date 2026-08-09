@@ -194,10 +194,26 @@ Two rules a pack cannot talk its way out of, both earned over four rounds of art
   `white_grey`, `drowned_grey`. Haus identity is worn on the caparison, not grown on
   the animal.
 - **Haus colour goes on kit, and nothing else.** Steel, leather, wood, stone, skin,
-  bone and hide keep their own colours; crowns stay metal; sigils carry artwork. You
+  bone and hide keep their own colours; sigils carry artwork. You
   may only declare materials prefixed with your own id, and you may not declare a
   surface whose name says *steel* or *leather* or *bone* to be kit. This is what stops
   a haus from being a monochrome plastic army.
+- **Your king wears the same crown as everyone else's.** Regalia is a *rank* marker,
+  not a haus marker: both kings on the board wear one, so the moment it varies by haus
+  it starts naming the wrong haus. It did — five of the nine crowned their kings in a
+  navy steel that is Haus Silverbrook's own identity colour, so in Goldclaw vs
+  Winterfang the gold king wore blue. There is now one crown, for all nine and for
+  yours: a dark tarnished band under polished points, so that whatever value your army
+  is, one of the two tones cuts against it.
+
+**On colour and colourblindness, precisely.** The nine are measured under the hall's
+real torchlight, on every rank, and held to 12 dE2000 apart. They are **not
+colourblind-safe** and the report says so on every run: nine categorical hues cannot
+all clear the ~10 dE a viewer needs under all three dichromacies. What holds is that
+no pair collapses on every rank at once, that the ladder is spread on lightness, that
+the sigils differ in *shape*, and that the pairs which stay weak are named rather than
+averaged away — `thornvale/duskfire` under protanopia, and `hartcrown/ashwyrm` plus
+`goldclaw/duskfire` on the queen's dark hood specifically.
 
 Check a pack before you ship it:
 

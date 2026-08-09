@@ -538,47 +538,114 @@ func _test_royal_silhouette() -> void:
 		queen.free()
 
 
-## ROYAL METAL (critic P3, 2026-08-09). Regalia is exempt from the house dye
-## so that it can CONTRAST with the body — and the old mapping spent that
-## exemption on matching the body's temperature instead, which is why the king
-## was findable on the enemy army (lit from the front, catching a highlight)
-## and invisible on the player's own (lit from behind, catching nothing). A
-## crown must never share its wearer's temperature: cold armies crown in gold,
-## warm armies in steel.
+## THE KING WORE THE ENEMY'S COLOUR (art critic, 2026-08-09).
+##
+## P3 inverted the crown mapping — cold armies in gold, warm armies in steel —
+## and the inversion is what made the defect visible: crown_frost's albedo is
+## #5b6371, a NAVY steel, so Hartcrown, Ashwyrm, Goldclaw, Duskfire and
+## Thornvale all crowned their kings in the darkest coolest object in their own
+## army, and in the same navy Silverbrook wears as its identity. In Goldclaw vs
+## Winterfang the gold king wore blue.
+##
+## The rule that replaced it: a crown is REGALIA and carries NO haus signal at
+## all. One metal, identical on all nine — which makes it a RANK marker, worn
+## by both kings in every match, and therefore unable to name the wrong haus.
+##
+## Uniformity costs the contrast the old mapping was buying, so the crown now
+## carries its contrast inside itself: a dark tarnished band under polished
+## points. This asserts all of it — the uniformity, the two tones, the value
+## step, and (the part that is easy to lose) that BOTH tones stay clear of
+## every haus's own jersey and at least one of them cuts hard against every
+## haus's own dome.
+const REGALIA_TONE_STEP := 40.0        # dE2000 between band and points
+const REGALIA_CONTRAST_FLOOR := 20.0   # ...and against the army it is worn on
+const REGALIA_KIT_GAP := 0.14          # costume_preview.NATURAL_KIT_DISTANCE
+
+
 func _test_royal_metal() -> void:
-	var cold := 0
-	var warm := 0
-	for hid in registry.house_ids():
-		var tint: Color = registry.get_house_tint(hid, "kit")
-		var packed: PackedScene = assets.crown_scene(tint)
-		var is_frost: bool = str(packed.resource_path).contains("frost")
-		var body_is_cold: bool = tint.b > tint.r
-		check("royal metal %s: crown opposes the body's temperature" % hid,
-				true, is_frost != body_is_cold)
-		if body_is_cold:
-			cold += 1
-		else:
-			warm += 1
-		# and the king's crown must actually BE that scene, not a lookalike
+	var ids: Array = registry.house_ids()
+	# 1. ONE crown. Not "a crown per temperature" — one PackedScene, shared.
+	var first: PackedScene = assets.crown_scene(registry.get_house_tint(ids[0], "kit"))
+	for hid in ids:
+		var packed: PackedScene = assets.crown_scene(
+				registry.get_house_tint(hid, "kit"))
+		check("royal metal %s: crown carries no haus signal (same prop)" % hid,
+				true, packed == first)
+
+	# 2. ...rendered as exactly two REGALIA tones, named by MATERIAL_ROLES.
+	var band := Color.BLACK
+	var points := Color.BLACK
+	for hid in ids:
 		var king := _spawn(T_KING, FROST, hid)
-		var crown := king.find_child("Crown", true, false)
-		var metal := ""
-		for mi: MeshInstance3D in (crown as Node3D).find_children(
-				"*", "MeshInstance3D", true, false):
-			for s in mi.mesh.get_surface_count():
-				var mat := mi.get_active_material(s) as StandardMaterial3D
-				if mat != null:
-					metal = str(mat.resource_name)
-		check("royal metal %s: king wears the %s crown" % [hid,
-				"frost" if is_frost else "gold"],
-				"crown_frost" if is_frost else "crown_gold_worn", metal)
-		# A metal with no diffuse response renders black wherever it catches no
-		# highlight — the whole P3 failure. Regalia stays barely-metallic.
-		check("royal metal %s: crown keeps a diffuse response" % hid, true,
-				king.find_child("Crown", true, false) != null)
+		var queen := _spawn(T_QUEEN, FROST, hid)
+		for pair in [["Crown", king], ["Tiara", queen]]:
+			var prop := (pair[1] as Node).find_child(
+					str(pair[0]), true, false) as Node3D
+			check("royal metal %s: the %s is on the head" % [hid, pair[0]],
+					true, prop != null)
+			if prop == null:
+				continue
+			var tones := {}
+			for mi: MeshInstance3D in prop.find_children(
+					"*", "MeshInstance3D", true, false):
+				for s in mi.mesh.get_surface_count():
+					var base := mi.mesh.surface_get_material(s) as StandardMaterial3D
+					var mat := mi.get_active_material(s) as StandardMaterial3D
+					if base == null or mat == null:
+						continue
+					tones[str(base.resource_name)] = mat.albedo_color
+					check("royal metal %s: %s#%d is REGALIA" % [hid, pair[0], s],
+							assets.Role.REGALIA,
+							assets.classify(str(mi.name),
+									str(base.resource_name))["role"])
+					# A metal with no diffuse response renders black wherever it
+					# catches no highlight — the whole P3 failure.
+					check("royal metal %s: %s#%d keeps a diffuse response"
+							% [hid, pair[0], s], true, mat.metallic <= 0.40)
+			check("royal metal %s: the %s wears both tones" % [hid, pair[0]],
+					true, tones.has(assets.CROWN_BAND_MATERIAL)
+					and tones.has(assets.CROWN_POINT_MATERIAL))
+			if tones.has(assets.CROWN_BAND_MATERIAL):
+				band = tones[assets.CROWN_BAND_MATERIAL]
+				points = tones[assets.CROWN_POINT_MATERIAL]
 		king.free()
-	check("royal metal: both metals are actually fielded", true,
-			cold > 0 and warm > 0)
+		queen.free()
+
+	# 3. The two tones are one metal in two states — a real value step apart.
+	var step: float = _delta_e2000(_lab(band), _lab(points))
+	check("royal metal: band %s and points %s are %.0f dE apart"
+			% [band.to_html(false), points.to_html(false), step], true,
+			step >= REGALIA_TONE_STEP)
+	check("royal metal: both tones read as metal, not paint", true,
+			band.s <= 0.55 and points.s <= 0.55)
+
+	# 4. Neither tone is any haus's jersey, and one of them cuts hard against
+	#    every haus's own dome — which is the contrast the per-haus mapping
+	#    used to buy, bought back without a haus signal.
+	var worst := 999.0
+	var worst_hid := ""
+	for hid in ids:
+		var kit: Color = registry.get_house_tint(hid, "kit")
+		var dome := Color(kit.r * 0.72, kit.g * 0.72, kit.b * 0.72)
+		for pair in [["band", band], ["points", points]]:
+			var c: Color = pair[1]
+			check("royal metal %s: the %s is not the jersey" % [hid, str(pair[0])],
+					true, _rgb_gap(c, kit) > REGALIA_KIT_GAP)
+		var reach: float = maxf(
+				minf(_delta_e2000(_lab(band), _lab(kit)),
+						_delta_e2000(_lab(band), _lab(dome))),
+				minf(_delta_e2000(_lab(points), _lab(kit)),
+						_delta_e2000(_lab(points), _lab(dome))))
+		if reach < worst:
+			worst = reach
+			worst_hid = hid
+		# The bright tone outshines every dome: the colour half of "the king is
+		# the brightest man on his own army".
+		check("royal metal %s: the points sit above the dome in L* (%.0f vs %.0f)"
+				% [hid, _lab(points).x, _lab(dome).x], true,
+				_lab(points).x > _lab(dome).x)
+	check("royal metal: worst army contrast %.1f dE (%s)" % [worst, worst_hid],
+			true, worst >= REGALIA_CONTRAST_FLOOR)
 
 
 ## THE BISHOP'S MITRE (critic P9, 2026-08-09). He measured the dimmest piece on
