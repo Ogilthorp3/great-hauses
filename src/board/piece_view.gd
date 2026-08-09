@@ -567,16 +567,15 @@ func _build_knight() -> void:
 	_anim.name = "Anim"
 	_rider.add_child(_anim)  # root_node ".." = the rider scene root
 	_anim.add_animation_library("", PieceAssets.shared_anims())
-	# Palette: rider tinted like any character; the horse joins the army
-	# tint too (charred near-dark under the Drowned Legion), the tack never
-	# — the caparison is dressed in the house banner cloth below and the
-	# saddle keeps its leather.
-	var sat := _saturation_for()
-	_tint_meshes(_rider, _tint_for("piece"), sat)
+	# Palette: rider tinted like any character; the mount DYED into the house
+	# colors (charred near-dark under the Drowned Legion) so no army fields a
+	# stock brown horse; the tack never — the caparison is dressed in the
+	# house banner cloth below and the saddle keeps its leather.
+	_tint_meshes(_rider, _tint_for("piece"), _saturation_for())
 	var horse_tint := _tint_for("piece")
 	if house_id == PieceAssets.SKELETON_HOUSE:
 		horse_tint = horse_tint.darkened(0.32)   # charred, but still a horse
-	_tint_meshes(_horse, horse_tint, sat, ["Caparison", "Saddle"])
+	_dye_mount(horse_tint)
 	_dress_caparison()
 	# Gear/crest attach AFTER the tints so they keep their own colors.
 	_attach_gear()
@@ -603,6 +602,26 @@ func _start_idle_sway() -> void:
 		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	_sway_tween.tween_property(_model, "rotation:z", -amp, half) \
 		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+
+
+## HOUSE flourish: the mount wears its house's colors in the hide itself
+## (PieceAssets.dyed_mount_material — the pack's untextured browns survive a
+## multiply-tint unchanged, so they are re-dyed by luminance instead). Tack
+## is excluded: the caparison gets the banner cloth, the saddle its leather.
+## The eyes keep their own paint — a blue-eyed horse is a horse, a horse with
+## house-colored eyeballs is a bug.
+func _dye_mount(tint: Color) -> void:
+	for mi: MeshInstance3D in _horse.find_children("*", "MeshInstance3D", true, false):
+		if mi.name in ["Caparison", "Saddle"]:
+			continue
+		for s in mi.mesh.get_surface_count():
+			var src := mi.get_active_material(s)
+			if src == null or not src is StandardMaterial3D:
+				continue
+			if str(src.resource_name).begins_with("Eye"):
+				continue
+			mi.set_surface_override_material(
+				s, PieceAssets.dyed_mount_material(src, tint))
 
 
 ## HOUSE flourish: the knight's caparison wears the house banner cloth —

@@ -297,6 +297,34 @@ func tinted_material(src: StandardMaterial3D, tint: Color, saturation: float) ->
 	return tinted
 
 
+## HOUSE layer — the knight's mount, dyed into the house palette.
+##
+## The tint pipeline above multiplies a DESATURATED ALBEDO TEXTURE by the
+## house color; the Quaternius horse's pack materials carry no texture at
+## all, so that multiply only darkens their flat browns — a brown horse
+## stayed brown in Winterfang's steel-blue army (caught in the preview,
+## 2026-08-08). So dye the mount instead: take the HOUSE hue and modulate it
+## by each material's own luminance, which keeps hide/mane/hooves contrast
+## while the whole animal reads house-colored at gameplay distance. Cached
+## and shared like every other tinted material.
+const MOUNT_DYE_FLOOR := 0.42   # darkest material still shows the hue
+const MOUNT_DYE_GAIN := 1.05    # ...and the lightest reads near full tint
+
+
+func dyed_mount_material(src: StandardMaterial3D, tint: Color) -> StandardMaterial3D:
+	var key := "mount|%d|%s" % [src.get_rid().get_id(), tint.to_html()]
+	if _tint_cache.has(key):
+		return _tint_cache[key]
+	var dyed: StandardMaterial3D = src.duplicate()
+	var lum := src.albedo_color.get_luminance()
+	dyed.albedo_color = tint * (MOUNT_DYE_FLOOR + MOUNT_DYE_GAIN * lum)
+	dyed.albedo_color.a = src.albedo_color.a
+	dyed.roughness = maxf(dyed.roughness, 0.85)
+	dyed.metallic = minf(dyed.metallic, 0.05)
+	_tint_cache[key] = dyed
+	return dyed
+
+
 func _desaturated(tex: Texture2D, saturation: float) -> Texture2D:
 	var key := tex.get_rid().get_id()
 	if _desat_cache.has(key):
