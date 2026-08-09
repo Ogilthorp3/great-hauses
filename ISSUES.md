@@ -100,3 +100,12 @@ Shipped: the pipeline no longer asks "what colour is this house?" first. It asks
 **The gate was rewritten to match** (`costume_preview.role_offenders`): KIT must be dressed and wearing one of its house's four colours (value-normalised, so a jersey's white or black charge is legal and a stock grey is not); NATURAL must be inside its material's range and must NOT be the house kit; REGALIA must stay metal. **Three negative controls**, all in `tests/test_costumes.gd`: strip a dye and the gate goes red (the original discipline), **paint a horse blue and the gate goes red** (its mirror), and rename a surface out of the table and the gate goes red.
 
 **Preserved wins, re-measured on the same instrument** (`tools/frame_rank.py`, boot frame `02_boot_lineup.png`): the king still leads his own army's peak (p90 0.867 against knights at 0.769/0.749 — the margin widened from 0.098/0.091); the far queen is further out of her black hole than the lift that rescued her (median 0.400 at the top of a 0.373–0.400 band, from 0.353 in 0.286–0.373); the nine pawn ranks are at least as separable as before (closest pair 0.055 against a 0.054 baseline, whole-figure mean RGB); the height law is unchanged and still monotonic; the Drowned Legion is coherent — bone is NATURAL and Tidegrip's colour lives entirely in its cloaks, hoods and helms.
+
+## #4 — Small art follow-ups from the jersey critic (non-blocking)
+**Status:** open · **Raised:** critic pass, 2026-08-09
+
+Critic verdict was SHIP; these are the leftovers it explicitly said should not hold the ship.
+1. **Rook banner sigils too dim on light cloth** — Winterfang and Tidegrip sigil PNGs in `assets/sigils/` need brightness/contrast so the rook's banner reads its house from the board camera. Highest value per minute of the four.
+2. **The crown is navy on five houses, gold on four** — decide: gold on all nine (a crown is metal, consistent, and kills the navy-crown-on-a-gold-king collision), or keep a warm/cool contrast rule and write it down.
+3. **Tidegrip's caparison does not lift off its drowned-grey coat** — one value step / higher chroma on the teal.
+4. No pre-change costume sheet survives for an A/B (artifacts are gitignored) — render one if a record is ever wanted.
