@@ -183,7 +183,14 @@ const ASHFALL_LINES: Array[String] = [
 @export var rest_idle_speed := 0.30    ## Perch_Idle, slowed under the coil
 @export var rest_ember_energy := 0.40  ## the throat coals, BANKED
 @export var wake_ember_energy := 2.60  ## …and kindled (emissive only)
-@export var stir_slumber_floor := 0.42 ## a stir NEVER uncoils past this
+## A stir NEVER uncoils past this. RAISED 0.42 -> 0.62 (2026-08-09) with the
+## deeper coil: the fold now travels ~220 deg of neck, so 0.42 of it left the
+## beast half-way between coiled and standing — wings tented flat on the stone
+## and the neck part-extended, which `showcase/07` and `08` both photographed
+## and which reads exactly like the sprawl the new pose exists to kill. At
+## 0.62 the body stays folded (wings mantled, tail curled) and it is the HEAD
+## that lifts, which is what a disturbed sleeper actually does.
+@export var stir_slumber_floor := 0.62
 
 ## Airborne anchor above the far wall. Nothing perches here any more — it is
 ## kept because the integrator feeds it from GreatHall.spectator_perch() (the
@@ -688,7 +695,16 @@ func play_ashfall(losing_side: int, winning_house: String = "",
 		# It must stand in the AISLE, not on the board: at z -4.5 the dolly
 		# sat a single tile from the near rank and every ashfall frame was
 		# shot from inside somebody's helmet (found by eye, 2026-08-09).
-		_cam_track(Vector3(0.0, 1.35, -9.0), _body_pos())
+		#
+		# RAISED AND TILTED DOWN 2026-08-09. At (0, 1.35, -9.0) aimed square at
+		# the body, the dolly looked so steeply UP that every sightline behind
+		# the wyrm left the room: `04_mid_ashfall` shipped a dragon on pure
+		# black, the one frame a critic called broken. The hall now has a roof
+		# (GreatHall._build_roof), and this mark keeps it in shot — back to the
+		# near wall, up to head height of a standing man, and the look point
+		# dropped BELOW the wyrm so the banner wall and the board ride the
+		# bottom of the frame instead of falling out of it.
+		_cam_track(Vector3(0.0, 2.4, -10.4), _body_pos() - Vector3.UP * 1.4)
 		if u >= 1.0:
 			break
 		var tree := get_tree()

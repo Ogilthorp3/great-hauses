@@ -59,18 +59,42 @@ const DRAGON_SCENE: PackedScene = preload("res://assets/custom-props/dragon.glb"
 ##      wings read as leather against cold scale instead of more of it,
 ##   3. stop painting a warm lift over everything — including the coals,
 ##      whose authored emission the old pass silently overwrote with it.
+##
+## ── THE WYRM WEARS NO HAUS (critic defect, 2026-08-09) ─────────────────────
+## The pass above landed on an ICE-BLUE hide, which is Winterfang's colour
+## (#7fb0d4 accent / #8d99a6 primary) — and Swiftcrest's (#7fb3d9 primary) and
+## Silverbrook's (#8fb3d9 accent). For a whole match against any of the three
+## the spectator looked like one side's mascot. The dragon is nobody's
+## bannerman: it is the hall's own beast, so its hide is pushed OFF every
+## heraldic hue in hauses/*/haus.json and onto DARK VIOLET-SLATE — a hue no
+## haus owns (the nine live at 0-45 deg warm, 130-215 deg green/blue, and
+## three near-blacks) — with the authored EMBER coals and a rust-leather sail
+## as its only colour. Fire belongs to no haus either.
+##
+## The two scars that bound the numbers: albedo 0.118 came back a BLACK BLOB,
+## and a warm lift over a near-black albedo came back UNDIFFERENTIATED BROWN.
+## So the value stays in the band that was proven to read (0.40-0.59) and the
+## separation is carried by HUE — slate hide vs rust sail vs ember coals —
+## not by brightness.
 const EMISSIVE_LIFT := Color(0.15, 0.145, 0.165)   # near-neutral, weaker
-const HIDE_GAIN := 1.62
-const HIDE_COOL := Color(0.86, 0.97, 1.22)
+const HIDE_GAIN := 1.12
+## Violet-slate, and deliberately NOT blue: b is barely over r, so the hide
+## reads as charcoal-with-a-cast rather than as anybody's ice.
+const HIDE_COOL := Color(1.12, 0.97, 1.06)
 const SAIL_GAIN := 1.34
 const SAIL_WARM := Color(1.34, 0.94, 0.70)
-const BONE_GAIN := 1.12
+## The horns, claws and teeth. Pulled down and warmed off the near-WHITE it
+## used to be — bone at 0.85 on a blue hide was the second half of the
+## Winterfang read (their secondary is #eef2f5, snow).
+const BONE_GAIN := 0.95
+const BONE_WARM := Color(1.03, 0.97, 0.88)
 ## Board units from the armature root to the torso/chest mass centre at rig
 ## scale 1.0 (measured on the shipped GLB; feet at y = 0.000). This is the
 ## number every "where does the beast READ on screen" calculation uses.
 const BODY_RISE := 0.95
 const HEAD_BONE := "Head"
 const HEAD_END_BONE := "Head_end"
+const JAW_BONE := "Jaw"
 
 ## The chains the SLUMBER pose folds (measured names, asserted by
 ## tests/test_dragon.gd against the live skeleton).
@@ -165,12 +189,13 @@ static func _paint_for_hall(m: StandardMaterial3D) -> void:
 	if role == "dragon_void":
 		return   # eye sockets stay holes
 	if role == "dragon_bone":
-		m.albedo_color = _tint(m.albedo_color, BONE_GAIN, Color.WHITE)
+		m.albedo_color = _tint(m.albedo_color, BONE_GAIN, BONE_WARM)
 		m.emission_enabled = true
 		m.emission = EMISSIVE_LIFT
 		return
 	# THE HIDE (scale / scale_dark / scute / plate) and anything unnamed:
-	# lifted out of the mud and pushed cool blue-slate.
+	# out of the mud and onto violet-slate — no haus's colour (see the palette
+	# block up top for why it is not blue any more).
 	var cool := HIDE_COOL if role.begins_with("dragon_") else Color.WHITE
 	m.albedo_color = _tint(m.albedo_color, HIDE_GAIN, cool)
 	m.emission_enabled = true
@@ -343,16 +368,43 @@ class Slumber:
 ## THE COIL, in degrees, calibrated on the shipped rig (see the probe note in
 ## `Slumber.sampled` for why it had to be measured from inside the stack).
 ##
-## `NECK` is an S, not an arc, and that is the whole trick. The clip's neck
-## already climbs steeply (bone elevations +36°, +59°, +70°, +65°, +42°, +19°
-## measured), so a UNIFORM fold big enough to bring the head down to the stone
-## also rolls the skull 126° past level and the wyrm sleeps upside-down — the
-## first calibration pass did exactly that. The head's final pitch is the SUM
-## of the profile, so the profile sums to ~+7°: down hard through the base,
-## back up through the crown. Result (rig scale 1.0): head origin y 1.91 ->
-## ~0.7, snout laid forward on the stone, skull level.
-const SLUMBER_NECK := [44.0, 36.0, 18.0, -22.0, -36.0, -34.0]
-const SLUMBER_HEAD := 6.0        ## a last nose-down onto the stone
+## ── SLEEPING ANIMALS FOLD (critic defect, 2026-08-09) ─────────────────────
+## The previous profile [44, 36, 18, -22, -36, -34] summed to ~+6°, which kept
+## the SKULL LEVEL — and level is right, but it left the neck EXTENDED. The
+## head finished 1.37 rig-units out from the chest at the end of a near-
+## straight line, jaws parted: measured on the shipped gameplay frame that is
+## ~150 px of bare neck between body and skull, and "level plus long" is the
+## silhouette of a shed skin, not of a sleeping animal. The critic's word for
+## it was "a dead lizard".
+##
+## What a sleeping animal does is FOLD. This profile carries the head all the
+## way back to the flank: down hard through the base (57, 62, 66, 44 — the
+## neck descends in front of the shoulder), then the crown UNFOLDS (-5, -54)
+## so the skull comes level again instead of rolling under, while a LATERAL
+## curl growing along the same chain (SLUMBER_NECK_LAT) sweeps the whole
+## return out to the near flank so it never ploughs through the chest.
+##
+## Measured landing (rig-local, feet at y = 0; subtract SLUMBER_ROOT_DROP for
+## height above the stone):
+##       head   (-0.44, 0.45, 0.09)   0.67 from the chest  (was 1.37)
+##       snout  (-0.64, 0.36,-0.17)   0.04 above the stone, pointing BACK
+##   muzzle sits BELOW the head origin, i.e. the skull is upright, not rolled.
+## The head lies on the stone beside the shoulder with the neck folded over
+## it and the horns swept along that curve — the same C the tail already
+## makes, closing toward the camera.
+const SLUMBER_NECK := [57.0, 62.0, 66.0, 44.0, -5.0, -54.0]
+## The lateral half of the fold, about each neck bone's own Z (the bones run
+## along local Y, so X is the pitch and Z is the sideways bend — the same
+## convention the tail's curl term uses). NEGATIVE sweeps toward local -X,
+## which at `rest_yaw` is the CAMERA's side: the head folds in front of the
+## flank where it can be seen, not behind it where it cannot.
+const SLUMBER_NECK_LAT := [-4.0, -2.0, -1.0, -9.0, -27.0, -44.0]
+const SLUMBER_HEAD := -36.0      ## the skull rolls back level on the fold
+const SLUMBER_HEAD_LAT := 48.0   ## …and turns its cheek down onto the stone
+## THE JAWS CLOSE. `Perch_Idle` is a standing-watch clip and holds the mouth
+## slightly open; parted jaws on a coiled beast read as a carcass, and this is
+## the one bone that says "asleep" rather than "dead" for free.
+const SLUMBER_JAW := 9.0
 const SLUMBER_TORSO := 8.0       ## shoulders slump forward
 const SLUMBER_TAIL_DOWN := 8.0   ## per tail joint — the whip onto the floor
 const SLUMBER_TAIL_CURL := 16.0  ## per tail joint — curled around the flank
@@ -374,18 +426,20 @@ const SLUMBER_ROOT_DROP := 0.32
 
 
 ## Build the coil's per-bone angle table (radians in, so the probe can sweep).
-## The neck carries NO lateral term on purpose: a sideways tuck (head curled
-## around to the flank, the other classic sleeping shape) was built, measured
-## and dropped — every degree of sweep it gains it pays for in chin height,
-## and the chin ON THE STONE is the strongest "asleep" signal the pose has.
-## Signs come from the measured bone frames: every neck bone and the head
-## carry local X ~ world -X, so a NEGATIVE rotation about local X folds them
-## forward and down; the tail bones carry local Z ~ world +Y, so their Z term
-## is a horizontal curl and their X term drops the tail onto the stone.
+## Signs come from the measured bone frames: every bone runs along its own
+## local Y, so X is the PITCH (a NEGATIVE rotation about local X folds a neck
+## bone forward and down) and Z is the LATERAL bend. The tail bones point
+## backward, which is why their local Z reads as a horizontal curl and their X
+## term drops the whip onto the stone; the neck bones point up, so their Z is
+## the sideways sweep that carries the head to the flank.
+##
+## `neck_lat` is optional: an empty array is the pure-sagittal fold the coil
+## shipped with before the head came back to the flank.
 static func slumber_table(neck: Array, head: float, torso: float,
 		tail_down: float, tail_curl: float,
 		thigh: float, shin: float, foot: float,
-		wing1 := Vector3.ZERO, wing2 := Vector3.ZERO) -> Array:
+		wing1 := Vector3.ZERO, wing2 := Vector3.ZERO,
+		neck_lat: Array = [], head_lat := 0.0, jaw := 0.0) -> Array:
 	var table: Array = []
 	# The wings are MIRRORED, so the left side takes the negated yaw/roll
 	# terms; only the pitch (X, the fold) is common to both.
@@ -396,8 +450,16 @@ static func slumber_table(neck: Array, head: float, torso: float,
 	table.append(["Torso", Vector3(-torso, 0.0, 0.0)])
 	for i in NECK_BONES.size():
 		var a: float = float(neck[i]) if i < neck.size() else 0.0
-		table.append([NECK_BONES[i], Vector3(-a, 0.0, 0.0)])
-	table.append([HEAD_BONE, Vector3(-head, 0.0, 0.0)])
+		var l: float = float(neck_lat[i]) if i < neck_lat.size() else 0.0
+		table.append([NECK_BONES[i], Vector3(-a, 0.0, l)])
+	table.append([HEAD_BONE, Vector3(-head, 0.0, head_lat)])
+	# THE JAW closes the OTHER way round from the neck: it hangs forward off
+	# the skull, so a POSITIVE local-X rotation swings it UP against the upper
+	# teeth. (`Perch_Idle` never touches this bone — measured — so whatever the
+	# rest pose leaves parted stays parted for the whole match unless the coil
+	# shuts it.)
+	if not is_zero_approx(jaw):
+		table.append([JAW_BONE, Vector3(jaw, 0.0, 0.0)])
 	for b in TAIL_BONES:
 		table.append([b, Vector3(-tail_down, 0.0, tail_curl)])
 	for b in ["Thigh.L", "Thigh.R"]:
@@ -419,10 +481,14 @@ static func slumber_default() -> Array:
 	var neck: Array = []
 	for a in SLUMBER_NECK:
 		neck.append(float(a) * d)
+	var lat: Array = []
+	for a in SLUMBER_NECK_LAT:
+		lat.append(float(a) * d)
 	return slumber_table(neck, SLUMBER_HEAD * d, SLUMBER_TORSO * d,
 		SLUMBER_TAIL_DOWN * d, SLUMBER_TAIL_CURL * d,
 		SLUMBER_THIGH * d, SLUMBER_SHIN * d, SLUMBER_FOOT * d,
-		SLUMBER_WING1 * d, SLUMBER_WING2 * d)
+		SLUMBER_WING1 * d, SLUMBER_WING2 * d,
+		lat, SLUMBER_HEAD_LAT * d, SLUMBER_JAW * d)
 
 
 ## Attach (once) the slumber modifier to this rig's skeleton. Returns null on

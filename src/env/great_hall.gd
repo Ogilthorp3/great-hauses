@@ -99,6 +99,28 @@ const FLOOR_Y := -0.3         # hall floor top (plinth bottom)
 const WALL_HALF := 12.0       # wall centerline distance from board center
 const SEGMENT_XS := [-10.0, -6.0, -2.0, 2.0, 6.0, 10.0]  # 6 x 4u = 24u side
 
+## ── THE HALL HAD NO TOP (critic defect, 2026-08-09) ───────────────────────
+## One wall course is 4 u, so the stone stopped at y 3.7 and above that the
+## room was the Environment's background colour. Two frames were shipping that
+## hole: `showcase/10_throne_room` is ~40 % black over the banners (its camera
+## looks level at the far wall, whose frame top is y 7.20 — three and a half
+## units of nothing), and `dragon-live/04_mid_ashfall` films the airborne wyrm
+## from a low dolly, so every sightline behind it left the room entirely.
+##
+## Both are the same missing geometry, and the fix is the cheapest one there
+## is: TWO more courses of the wall mesh — appended to the SAME MultiMesh, so
+## the enclosure costs zero extra draw calls — plus a ceiling and a rafter
+## band above the ceremony's flight ceiling.
+const WALL_COURSE := 4.0      # one wall segment's height
+const WALL_COURSES := 3       # 3 x 4 u: stone up to y 11.7
+const CEILING_Y := FLOOR_Y + WALL_COURSE * WALL_COURSES
+## The rafters hang under the ceiling, and they must clear EVERY airborne beat
+## the ceremony has: the tableau dragon tops out near y 7.6 (root 4.04 at
+## scale 1.6) and the ashfall bank flies at root 5.11 — 9.6 is above both with
+## room to spare, and still inside the frame of any camera looking up.
+const RAFTER_Y := 9.6
+const RAFTER_ZS := [-10.0, -6.0, -2.0, 2.0, 6.0, 10.0]
+
 ## Throne of Blades (custom prop): 1.5 m plinth against the far wall (inner
 ## face z = +11.5), base centered so the back edge nearly kisses the stone.
 const THRONE_POS := Vector3(0.0, FLOOR_Y, 10.7)
@@ -240,6 +262,8 @@ var _fps_seconds := 0
 func _ready() -> void:
 	_build_floor()
 	_build_walls()
+	_build_roof()
+	_build_wainscot()
 	_build_pillars()
 	_build_tables()
 	_build_torches()
@@ -386,7 +410,8 @@ static func _tinted_mesh(mesh: Mesh, tint: Color) -> Mesh:
 	return copy
 
 
-func _multimesh_node(node_name: String, mesh: Mesh, xforms: Array[Transform3D]) -> void:
+func _multimesh_node(node_name: String, mesh: Mesh, xforms: Array[Transform3D],
+		shadows := true) -> void:
 	var mm := MultiMesh.new()
 	mm.transform_format = MultiMesh.TRANSFORM_3D
 	mm.mesh = mesh
@@ -396,6 +421,8 @@ func _multimesh_node(node_name: String, mesh: Mesh, xforms: Array[Transform3D]) 
 	var mmi := MultiMeshInstance3D.new()
 	mmi.name = node_name
 	mmi.multimesh = mm
+	if not shadows:
+		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(mmi)
 
 
@@ -415,15 +442,99 @@ func _build_floor() -> void:
 
 func _build_walls() -> void:
 	## 6 segments per side, +Z face turned into the room; ends overlap at the
-	## corners so the perimeter reads sealed from every orbit angle.
+	## corners so the perimeter reads sealed from every orbit angle. Stacked
+	## WALL_COURSES high (see the constant block): the extra courses ride the
+	## same MultiMesh, so the room gets a top for no extra draw call.
 	var xforms: Array[Transform3D] = []
-	for x in SEGMENT_XS:
-		xforms.append(Transform3D(Basis(), Vector3(x, FLOOR_Y, -WALL_HALF)))
-		xforms.append(Transform3D(Basis(Vector3.UP, PI), Vector3(x, FLOOR_Y, WALL_HALF)))
-	for z in SEGMENT_XS:
-		xforms.append(Transform3D(Basis(Vector3.UP, PI * 0.5), Vector3(-WALL_HALF, FLOOR_Y, z)))
-		xforms.append(Transform3D(Basis(Vector3.UP, -PI * 0.5), Vector3(WALL_HALF, FLOOR_Y, z)))
+	for c in WALL_COURSES:
+		var y := FLOOR_Y + WALL_COURSE * float(c)
+		for x in SEGMENT_XS:
+			xforms.append(Transform3D(Basis(), Vector3(x, y, -WALL_HALF)))
+			xforms.append(Transform3D(Basis(Vector3.UP, PI), Vector3(x, y, WALL_HALF)))
+		for z in SEGMENT_XS:
+			xforms.append(Transform3D(Basis(Vector3.UP, PI * 0.5), Vector3(-WALL_HALF, y, z)))
+			xforms.append(Transform3D(Basis(Vector3.UP, -PI * 0.5), Vector3(WALL_HALF, y, z)))
 	_multimesh_node("Walls", _tinted_mesh(_extract_mesh(WALL_SCENE), Color(0.58, 0.56, 0.62)), xforms)
+
+
+func _build_roof() -> void:
+	## THE LID. A ceiling of the same floor tiles turned face-DOWN, plus a
+	## band of rafters under it.
+	##
+	## Two properties this depends on, both deliberate:
+	##   * it never casts a shadow — a 24x24 lid over the one shadow-casting
+	##     Sun would put the whole hall in the dark;
+	##   * its visible face points DOWN, so the default back-face cull makes it
+	##     INVISIBLE from above. That matters because the gameplay orbit camera
+	##     climbs to y ~9 (and to ~13 zoomed out at full pitch) — it looks into
+	##     the room from over the roof line and must never see the lid it is
+	##     standing on.
+	var tiles: Array[Transform3D] = []
+	var flip := Basis(Vector3.RIGHT, PI)
+	for gx in 6:
+		for gz in 6:
+			tiles.append(Transform3D(flip,
+				Vector3(-10.0 + gx * 4.0, CEILING_Y, -10.0 + gz * 4.0)))
+	_multimesh_node("Ceiling",
+		_tinted_mesh(_extract_mesh(FLOOR_SCENE), Color(0.30, 0.28, 0.33)), tiles,
+		false)
+	# The rafters: plain dark beams spanning the short way, plus the two wall
+	# plates they land on. A box, not a KayKit prop — nothing in the pack is a
+	# beam, and at this height and this light level it is a silhouette.
+	var beam := BoxMesh.new()
+	beam.size = Vector3(WALL_HALF * 2.0, 0.42, 0.62)
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.17, 0.155, 0.175)
+	mat.roughness = 1.0
+	beam.material = mat
+	var beams: Array[Transform3D] = []
+	for z in RAFTER_ZS:
+		beams.append(Transform3D(Basis(), Vector3(0.0, RAFTER_Y, z)))
+	for sx in [-1.0, 1.0]:
+		beams.append(Transform3D(Basis(Vector3.UP, PI * 0.5),
+			Vector3(11.6 * sx, RAFTER_Y + 0.3, 0.0)))
+	_multimesh_node("Rafters", beam, beams, false)
+
+
+## THE DARK BASE COURSE — and the reason it exists is the HUD, not the hall.
+##
+## The gameplay camera (pivot y 0.4, pitch -0.85, fov 50) stops at
+## y_top(z) = 9.04 - 0.439 (z + 7.59), so at the far wall the frame's top edge
+## is y 0.66: the TOP BAND OF EVERY FRAME is the bottom metre of the far wall,
+## and that is exactly where the HUD hangs "HAUS X vs HAUS Y". Once the hall
+## grew its full dressing, that metre filled with banner HEMS — and a champion
+## dressing (dress_for_champion paints all 22 stations one house) put gold and
+## crimson cloth directly behind pale title text. `tournament/
+## 05_championship_panel` shipped with the matchup near-illegible.
+##
+## The HUD belongs to another module, so the hall keeps its own band quiet: a
+## wainscot of dark stone standing PROUD OF THE CLOTH (front face z 11.10, the
+## cloth's is 11.31) and exactly 1.0 u tall — the height that reaches y 0.70,
+## a hair over the frame's top edge at that depth. Below the band the room is
+## unchanged; above it every banner still flies its full drop.
+const WAINSCOT_H := 1.0
+const WAINSCOT_D := 0.5
+const WAINSCOT_FACE := 11.10   # inner face; the wall's own is ~11.5
+
+
+func _build_wainscot() -> void:
+	var band := BoxMesh.new()
+	band.size = Vector3(WALL_HALF * 2.0, WAINSCOT_H, WAINSCOT_D)
+	var mat := StandardMaterial3D.new()
+	# Dark enough that pale HUD text sits clear of it, light enough that the
+	# duel and orbit cameras — which see this band edge-on across the whole
+	# back of the frame — read STONE and not a black stripe.
+	mat.albedo_color = Color(0.165, 0.155, 0.180)
+	mat.roughness = 1.0
+	band.material = mat
+	var y := FLOOR_Y + WAINSCOT_H * 0.5
+	var c := WAINSCOT_FACE + WAINSCOT_D * 0.5
+	var xforms: Array[Transform3D] = []
+	for spec: Array in [[Vector3(0.0, y, c), 0.0], [Vector3(0.0, y, -c), 0.0],
+			[Vector3(c, y, 0.0), PI * 0.5], [Vector3(-c, y, 0.0), PI * 0.5]]:
+		xforms.append(Transform3D(Basis(Vector3.UP, spec[1] as float),
+			spec[0] as Vector3))
+	_multimesh_node("Wainscot", band, xforms, false)
 
 
 func _build_pillars() -> void:
@@ -530,6 +641,21 @@ func _drape_group(node_name: String, scene: PackedScene, specs: Array) -> Dictio
 	return {"mm": mm, "tints": tints, "colors": colors}
 
 
+## Multiply every surface of an instanced prop toward `tint`, on DUPLICATED
+## materials so the shared imported resource stays clean (the same discipline
+## DragonRig._apply_emissive_lift uses).
+static func _darken(node: Node, tint: Color) -> void:
+	for mi: MeshInstance3D in node.find_children("*", "MeshInstance3D", true, false):
+		if mi.mesh == null:
+			continue
+		for s in mi.mesh.get_surface_count():
+			var src := mi.get_active_material(s)
+			if src is StandardMaterial3D:
+				var m: StandardMaterial3D = (src as StandardMaterial3D).duplicate()
+				m.albedo_color = m.albedo_color * tint
+				mi.set_surface_override_material(s, m)
+
+
 static func _vertex_dyed_mesh(mesh: Mesh) -> Mesh:
 	## A duplicate whose material takes its albedo from the MultiMesh instance
 	## color, so one mesh + one material can fly both hauses' colours in a
@@ -549,11 +675,19 @@ func _build_throne() -> void:
 	## toward the board (the GLB front faces +Z as imported — rotate PI).
 	## NO new lights: the 8-omni budget is full; the south-wall torch pair
 	## (±8, z=11.48) already rakes the blade fan.
+	##
+	## …and it is DARKENED. The throne stands at z 10.7, which is the one depth
+	## whose top metre lands in the gameplay frame's top band — the same band
+	## the HUD hangs the matchup title in. Shipped at the prop's own showroom
+	## brightness its pale plinth was the lightest thing behind
+	## "HAUS X vs HAUS Y". Blackened iron and dark stone is both the fix and
+	## what a Throne of Blades should look like.
 	throne = THRONE_SCENE.instantiate()
 	throne.name = "ThroneOfBlades"
 	throne.position = THRONE_POS
 	throne.rotation.y = PI
 	add_child(throne)
+	_darken(throne, Color(0.46, 0.44, 0.50))
 
 
 ## Championship staging: the dragon takes its perch above the throne with a

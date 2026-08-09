@@ -222,8 +222,31 @@ func _test_slumber_pose() -> void:
 		check("slumber: the snout ends near the stone (y=%.2f)"
 				% (down["Head_end"] as Vector3).y, true,
 				(down["Head_end"] as Vector3).y < 0.55)
-		check("slumber: the skull stays upright (snout FORWARD, not folded back)",
-				true, (down["Head_end"] as Vector3).z > (down["Head"] as Vector3).z)
+		# ── SLEEPING ANIMALS FOLD ──────────────────────────────────────────
+		# This pair replaced "the snout stays FORWARD of the head", which was
+		# the previous pose's contract and is exactly what an art critic
+		# rejected: a level skull at the end of an EXTENDED neck reads as a
+		# shed skin, not a sleeping animal ("a dead lizard", 2026-08-09). The
+		# head measured 1.37 out from the chest — ~150 px of bare neck on the
+		# shipped gameplay frame. It now folds back to the flank at 0.67, and
+		# the guard is that distance: a future re-tune that straightens the
+		# neck out again fails here instead of on somebody's eye.
+		var fold: float = ((down["Head"] as Vector3)
+				- (down["Chest"] as Vector3)).length()
+		check("slumber: the head folds BACK to the flank (%.2f from the chest)"
+				% fold, true, fold < 0.85)
+		# …and the fold must not roll the skull under: the muzzle sits at or
+		# below the head origin exactly as it does in the standing clip.
+		check("slumber: the skull stays upright (muzzle below the head origin)",
+				true, (down["Head_end"] as Vector3).y < (down["Head"] as Vector3).y)
+		# THE JAWS ARE SHUT. `Perch_Idle` never writes the Jaw bone, so parted
+		# jaws would stay parted for the whole match; the coil closes them,
+		# and the closing direction is a POSITIVE local X (see slumber_table).
+		var jaw_shut := false
+		for e: Array in Rig.slumber_default():
+			if str(e[0]) == Rig.JAW_BONE:
+				jaw_shut = (e[1] as Vector3).x > 0.0
+		check("slumber: the coil CLOSES the jaws", true, jaw_shut)
 		check("slumber: the tail is curled around the flank, not trailing", true,
 				absf((down["Tail6"] as Vector3).x) > 0.6)
 		check("slumber: the tail lies on the floor", true,
