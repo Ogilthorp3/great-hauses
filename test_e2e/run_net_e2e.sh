@@ -12,7 +12,10 @@
 #
 # The scripted game (see NET_FEN in test_e2e/e2e_driver.gd) walks:
 #   a normal move each way · a CAPTURE (the slow-motion duel, both screens)
-#   · continued play after the cinematic gate reopens · a CHECKMATE.
+#   · an UNDERPROMOTION chosen on the JOINER through the promotion picker,
+#     which has to survive the trip to the HOST'S validator (and is
+#     load-bearing: a queen on that square would check White and make the
+#     scripted mate illegal) · a CHECKMATE.
 # Both instances also probe HOST AUTHORITY live: the joiner asks the host for
 # illegal moves (wrong turn, illegal geometry) and must be refused with a
 # reason while both boards stand still.
@@ -37,8 +40,15 @@ RUN_DIR="$ART_ROOT/runs/net-$(date +%Y%m%d-%H%M%S)"
 PORT=7777
 HOST_HOUSE="winterfang"     # White, hosts
 JOIN_HOUSE="ashwyrm"        # Black, joins
-# Verified against the engine before it was written down (Rh7 c6 exd5 c5 Ra8#).
-NET_FEN="4k3/1pp5/8/3p4/4P3/8/8/R3K2R w KQ - 0 1"
+# THE POSITION IS NOT DUPLICATED HERE. It used to be, and on 2026-08-09 the
+# scripted game grew an underpromotion: the driver's const moved, this copy did
+# not, and both instances played the old position until they walked off the end
+# of their own move list. One source of truth — read it out of the driver, which
+# is also what tests/test_promotion.gd walks move by move.
+NET_FEN=$(sed -n 's/^const NET_FEN := "\(.*\)"$/\1/p' "$PROJ/test_e2e/e2e_driver.gd")
+if [ -z "$NET_FEN" ]; then
+  echo "[net-e2e] could not read NET_FEN out of test_e2e/e2e_driver.gd"; exit 2
+fi
 INSTANCE_TIMEOUT=210        # outer kill; the in-game watchdog is tighter
 E2E_TIMEOUT=190
 

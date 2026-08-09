@@ -9,9 +9,12 @@
 #               UciEngine/stockfish client, music (104), banter (93),
 #               dragon spectator/ASHFALL, duel face-off, costumes
 #               (273 — mounted knights and pawn helms included),
-#               head-to-head protocol (110 — host authority, the
+#               head-to-head protocol (216 — host authority, the
 #               illegal-move-from-client refusal, the cinematic
-#               gate)                                             — Gate A
+#               gate), PROMOTION (94 — all four choices, the knight's
+#               check, the rook that avoids the queen's stalemate,
+#               undo back to the pawn, host authority over the
+#               promotion piece)                                  — Gate A
 #   boot        windowed: select flows to game, 32 pieces, banners+HUD dyed
 #   orientation windowed: --debug-coords labeled overlay from the default
 #               player camera, saved as labeled.png — the permanent
@@ -29,7 +32,12 @@
 #               rook on visual f1                                — Gate B
 #   enpassant   windowed: exd6 e.p. by screen clicks; pawn lands visual d6,
 #               captured pawn vanishes from visual d5            — Gate B
-#   promote     windowed: promotion by clicks, queen view spawns — Gate B
+#   promote     windowed: THE PROMOTION PICKER — all four pieces taken in one
+#               run (click a piece model · hotkey · arrow keys · Esc for the
+#               default queen), each undone back to the pawn; asserts the
+#               knight's CHECK, the rook AVOIDING the stalemate the queen
+#               causes, the right model + flourish per choice, and the draw
+#               card + draw taunt + bracket seam at the end   — Gate B
 #   slowmo      windowed: duel director activation, time dip, skip-on-click
 #   tournament  windowed: 3 scripted mates to the throne, bracket + banner
 #               re-dress asserts, championship panel
@@ -93,8 +101,13 @@ CASTLE_FEN="4k3/8/8/8/8/8/7P/4K2R w K - 0 1"
 # e.p. is the only capture, and Black keeps ONLY the king so nothing can
 # recapture — the visual end-state (pawn d6, d5+e5 empty) is unambiguous.
 EP_FEN="4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 2"
-# Promotion-ready: a7 pawn promotes on the next move.
-PROMOTE_FEN="7k/P7/8/8/8/8/8/K7 w - - 0 1"
+# THE PROMOTION PROBLEM (Albert's bug). White Kb5, Pc7, Ph6 · Black Ka7, Ph7
+# (wedged behind h6 — it has no move). All four promotions are legal from c7
+# and all four are different games: c8=Q STALEMATES Black, c8=R does not (only
+# the rook avoids it), c8=N gives CHECK where the queen gives none, c8=B does
+# neither. The scenario takes all four, one at a time, undoing back to the pawn
+# in between. Verified headless by tests/test_promotion.gd.
+PROMOTE_FEN="8/k1P4p/7P/1K6/8/8/8/8 w - - 0 1"
 # Tournament rounds: Ra8# is mate-in-1 (Kg6 seals the king, rook takes the
 # back rank) — one scripted click-mate per bracket round.
 TOURN_FEN="6k1/8/6K1/8/8/8/8/R7 w - - 0 1"
@@ -270,6 +283,7 @@ for step in "${STEPS[@]}"; do
       run_suite duel-facing-suite res://tests/test_duel_facing.gd || SUITE_RC=1
       run_suite costumes-suite res://tests/test_costumes.gd || SUITE_RC=1
       run_suite net-suite res://tests/test_net.gd || SUITE_RC=1
+      run_suite promotion-suite res://tests/test_promotion.gd || SUITE_RC=1
       ;;
     boot)      run_scenario boot || SUITE_RC=1 ;;
     orientation) run_scenario orientation "--debug-coords" || SUITE_RC=1 ;;
@@ -279,7 +293,10 @@ for step in "${STEPS[@]}"; do
     duel)      run_scenario duel "--e2e-fen=$DUEL_FEN" || SUITE_RC=1 ;;
     castle)    run_scenario castle "--e2e-fen=$CASTLE_FEN" || SUITE_RC=1 ;;
     enpassant) run_scenario enpassant "--e2e-fen=$EP_FEN" || SUITE_RC=1 ;;
-    promote)   run_scenario promote "--e2e-fen=$PROMOTE_FEN" || SUITE_RC=1 ;;
+    promote)   SCENARIO_TIMEOUT=200 run_scenario promote "--e2e-fen=$PROMOTE_FEN" \
+                 "--e2e-timeout=180" || SUITE_RC=1 ;;
+                 # four promotions, each with its 2.2 s flourish, an AI reply
+                 # and a take-back in between
     slowmo)    run_scenario slowmo "--e2e-fen=$DUEL_FEN" || SUITE_RC=1 ;;
     music)     run_scenario music "--e2e-fen=$DUEL_FEN" || SUITE_RC=1 ;;
     banter)    run_scenario banter "--e2e-fen=$BANTER_FEN" || SUITE_RC=1 ;;

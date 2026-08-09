@@ -20,6 +20,10 @@ extends RefCounted
 ##   match_start  {protocol, seq, fen, your_color,
 ##                 white_house, black_house}               host    -> joiner
 ##   move_request {seq, from, to, promo}                   joiner  -> host
+##                promo is "" or one of PROMOTION_PIECES ("q"/"r"/"b"/"n") —
+##                the piece the joiner's promotion picker chose. The host
+##                SELECTS it out of its own legal-move list; it never builds
+##                a move from what the packet claims (see validate_request).
 ##   move_applied {seq, move, fen_after, san}              host    -> both
 ##   move_rejected{seq, reason}                            host    -> joiner
 ##   ply_ack      {seq}                                    joiner  -> host
@@ -62,6 +66,12 @@ const REQUEST_TIMEOUT_SEC := 20.0
 
 const COLOR_WHITE := false
 const COLOR_BLACK := true
+
+## The four pieces a pawn may become, in the order the picker shows them
+## (src/ui/promotion_picker.gd). Queen leads because queen is what every
+## silent path — an Esc, a timeout, an empty or unreadable `promo` field on
+## the wire — falls back to.
+const PROMOTION_PIECES: Array[String] = ["q", "r", "b", "n"]
 
 
 # ── Move encoding ──────────────────────────────────────────────────────────
@@ -144,23 +154,40 @@ static func validate_request(state, mover_color: bool, from_idx: int,
 		return _no("no piece stands on %s" % ChessMove.square_name(from_idx))
 	if ChessState.piece_color(piece) != mover_color:
 		return _no("%s carries your opponent's banner" % ChessMove.square_name(from_idx))
-	var want := promo.to_lower()
-	var fallback = null
+	# THE PROMOTION PIECE IS THE CLIENT'S CHOICE, AND THE HOST'S DECISION.
+	# `want` only ever SELECTS among moves the host generated itself — the
+	# returned ChessMove is always one of `state.legal_moves()`, never a move
+	# assembled from the packet. A client therefore cannot promote to anything
+	# this board did not already consider legal, whatever it puts on the wire.
+	# Exact match or nothing: "n" is a knight, "nq" and "knight" are neither.
+	# (No prefix-taking — a client that sends junk gets the documented default,
+	# not this file's best guess at what the junk meant.)
+	var want := promo.strip_edges().to_lower()
+	if not PROMOTION_PIECES.has(want):
+		want = ""      # unknown, empty or hostile -> the queen, named below
+	var queen_move = null
+	var any_promo = null
 	for m in state.legal_moves(true):
 		if m.from_square != from_idx or m.to_square != to_idx:
 			continue
 		if m.promotion == null:
 			return {"ok": true, "move": m, "reason": ""}
-		if fallback == null:
-			fallback = m
-		if want.is_empty():
-			want = "q"
-		if str(m.promotion).to_lower() == want:
+		var promoted := str(m.promotion).to_lower()
+		if any_promo == null:
+			any_promo = m
+		if promoted == "q":
+			queen_move = m
+		if not want.is_empty() and promoted == want:
 			return {"ok": true, "move": m, "reason": ""}
-	if fallback != null:
+	if queen_move != null:
 		# The squares are legal, only the promotion piece was unknown — take
-		# the queen rather than refusing a move the player clearly meant.
-		return {"ok": true, "move": fallback, "reason": ""}
+		# the QUEEN BY NAME rather than refusing a move the player clearly
+		# meant. (This used to hand back "the first promotion the generator
+		# produced", which is the queen only for as long as nobody reorders
+		# ChessState.generate_pawn_move_list.)
+		return {"ok": true, "move": queen_move, "reason": ""}
+	if any_promo != null:
+		return {"ok": true, "move": any_promo, "reason": ""}
 	return _no("%s%s is not a legal move in this position" % [
 		ChessMove.square_name(from_idx), ChessMove.square_name(to_idx)])
 

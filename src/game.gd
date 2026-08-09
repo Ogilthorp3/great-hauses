@@ -6,6 +6,11 @@ extends Node3D
 ## undo/take-back (HUD button + Cmd/Ctrl+Z — 3 per game in tournaments,
 ## unlimited in single matches), and hover-only type-glyph rings.
 ##
+## PROMOTION IS A CHOICE (Albert's bug, closed 2026-08-09). A promoting pawn
+## opens `PromotionPicker` — all four pieces as the real models in the
+## promoting haus's kit — and the chosen ChessMove is what goes to the engine,
+## to the AI's board, and onto the wire. See `_moves_for`/`_choose_promotion`.
+##
 ## Flow: main.tscn boots the Hall of Banners; Session carries the choices
 ## here. Unconfigured launches (probes, --smoke, direct game.tscn runs) fall
 ## back to the legacy Frost-vs-Ember skin so every old hook keeps working.
@@ -111,6 +116,16 @@ var _undo_btn: Button
 
 var _hovered_view: PieceView = null # glyph ring currently hover-revealed
 
+# -- promotion (Albert's bug: a pawn was forced to become a queen) -----------
+## The modal while it is up — non-null means it owns the board and the
+## keyboard. Read by the e2e harness.
+var promo_picker: PromotionPicker = null
+## Every piece the PLAYER chose, in order ("q"/"r"/"b"/"n") — e2e evidence.
+var promo_picks: Array[String] = []
+## Every promotion that actually landed on this board, either side, as
+## "<uci>|<piece>|<mover>" — the AI's and the wire's included (e2e evidence).
+var promotions_played: Array[String] = []
+
 var _turn_moves: Array = []         # SAN-notated legal moves for side to move
 var _san_log: Array[String] = []
 
@@ -152,6 +167,9 @@ var _chrome_fade := 0               # generation token for the wall-clock fades
 ## The verdict card, queued while a ceremony is still on screen.
 var _victory_pending := ""
 var _victory_held := false
+## What a drawn TOURNAMENT match did to the bracket, in the player's words —
+## filled by the draw seam (`settle_tournament_draw`) before the card opens.
+var _draw_bracket_lines: Array[String] = []
 
 
 ## ── THE MATCH-LOAD BREAKDOWN ───────────────────────────────────────────────
@@ -532,7 +550,7 @@ func _kick_ai_opening() -> void:
 
 func _on_square_clicked(sq: Vector2i) -> void:
 	if busy or game_over or state == null or state.turn != player_color \
-			or _net_disconnected \
+			or _net_disconnected or promo_picker != null \
 			or (duel_director != null and duel_director.is_active()):
 		return  # not interactive during animations/cinematics, after the end, or on the rival's turn
 	var idx := idx_of(sq)
@@ -548,10 +566,17 @@ func _on_square_clicked(sq: Vector2i) -> void:
 	if is_own:
 		_select(sq)
 		return
-	var move = _move_for(idx_of(selected), idx)
-	if move == null:
+	var options := _moves_for(idx_of(selected), idx)
+	if options.is_empty():
 		return
 	_clear_selection()
+	var move = options.get("")
+	if move == null:
+		# A PROMOTION. The player chooses the piece — all four of them, as the
+		# real models, before anything moves (see _choose_promotion).
+		move = await _choose_promotion(options)
+		if move == null:
+			return
 	_play_turn(move)
 
 
@@ -618,15 +643,58 @@ func _on_square_hovered(sq: Variant) -> void:
 		_hovered_view.set_hovered(true)
 
 
-func _move_for(from_idx: int, to_idx: int) -> Variant:
-	## The matching legal move; promotions auto-pick the queen (v1).
-	var found = null
+func _moves_for(from_idx: int, to_idx: int) -> Dictionary:
+	## Every legal move from->to, keyed by promotion char ("" for the ordinary
+	## move). THE PICKER IS BUILT FROM THIS, so the UI can never offer a piece
+	## the rules did not generate — and a promotion square yields four entries
+	## instead of the one queen the old `_move_for` kept (Albert's bug).
+	var out: Dictionary = {}
 	for m in _turn_moves:
-		if m.from_square == from_idx and m.to_square == to_idx:
-			found = m
-			if m.promotion == null or str(m.promotion).to_lower() == "q":
-				return m
-	return found
+		if m.from_square != from_idx or m.to_square != to_idx:
+			continue
+		var key := "" if m.promotion == null else str(m.promotion).to_lower()
+		if not out.has(key):
+			out[key] = m
+	return out
+
+
+## THE PROMOTION MODAL. Returns the chosen ChessMove, or null when the board
+## moved on underneath it (an undo, a disconnect, the scene going away).
+##
+## The board is held `busy` for the length of the panel: nothing may animate,
+## no take-back may fire, no rival ply may land while a half-made move is
+## sitting in the player's hand. Every exit from the picker produces a legal
+## piece (Esc and its timeout take the queen), so this lock always lifts.
+func _choose_promotion(options: Dictionary) -> Variant:
+	var picker := PromotionPicker.new()
+	picker.house_id = player_house_id
+	picker.side = PieceView.House.FROST     # the promoting army here is always mine
+	var offer: Array[String] = []
+	for pc in PromotionPicker.ORDER:
+		if options.has(pc):
+			offer.append(pc)
+	if offer.is_empty():
+		# Nothing this modal could legally show. Never open a panel with no way
+		# out — take whatever the engine did offer and play on.
+		return options.values()[0] if not options.is_empty() else null
+	picker.offered = offer
+	promo_picker = picker
+	var gen := _turn_gen
+	busy = true
+	_update_turn_label()
+	add_child(picker)
+	var pc: String = await picker.chosen
+	promo_picker = null
+	busy = false
+	if gen != _turn_gen or game_over or _net_disconnected or state == null:
+		_update_turn_label()
+		return null
+	var move = options.get(pc)
+	if move == null:
+		move = options.get(PromotionPicker.DEFAULT_PIECE)   # belt and braces
+	if move != null:
+		promo_picks.append(pc)
+	return move
 
 
 # -- turn flow -------------------------------------------------------------
@@ -897,11 +965,23 @@ func _animate_move(move, mover_is_ember: bool) -> void:
 	await mover.move_to(target, _walk_time(mover.position, target))
 	views[to_sq] = mover
 	if move.promotion != null:
+		# WHICHEVER PIECE WAS CHOSEN. This path was always type-correct — the
+		# picker is what finally lets a player reach it, and the AI, the
+		# Oracle and the wire have always been able to. The flourish is fired
+		# on the piece that actually arrived, with the promoting haus's own
+		# banner (`_duel_meta`), so a knight's beam is a knight's beam.
 		mover.queue_free()
+		var promo_char := str(move.promotion).to_lower()
 		var promo_side := PieceView.House.EMBER if mover_is_ember else PieceView.House.FROST
-		var promoted := _spawn(CHAR_TO_TYPE[str(move.promotion).to_lower()], promo_side, to_sq)
+		var promoted := _spawn(CHAR_TO_TYPE[promo_char], promo_side, to_sq)
+		promotions_played.append("%s|%s|%s" % [move.to_uci(),
+			str(PIECE_NAME.get(promo_char, promo_char)),
+			"rival" if mover_is_ember else "player"])
+		print("PROMOTION PLAYED uci=%s piece=%s mover=%s" % [move.to_uci(),
+			str(PIECE_NAME.get(promo_char, promo_char)),
+			"rival" if mover_is_ember else "player"])
 		promoted.spawn_flourish()  # overlaps the director's beam + banner
-		await duel_director.play_promotion(promoted)
+		await duel_director.play_promotion(promoted, _duel_meta(mover_is_ember))
 
 
 func _refresh_turn_moves() -> void:
@@ -941,6 +1021,8 @@ func _request_undo() -> void:
 	if net != null and net.is_active():
 		_flash_oracle("take-backs are off in a match against a friend", 3.0)
 		return
+	if promo_picker != null:
+		return   # a half-made move is in the player's hand — finish it first
 	if game_over or _undo_checkpoints.is_empty() or _undos_left == 0:
 		return
 	_undo_pending = true
@@ -1108,19 +1190,78 @@ func _finish_game() -> void:
 	var result: int = state.get_result()
 	# The side TO MOVE is the mated one; the player won if that side is not his.
 	var player_won := result == ChessState.RESULT.CHECKMATE and state.turn != player_color
-	if Session.configured and Session.mode == "tournament" and Session.tournament != null:
-		Session.tournament.report_result(player_won)  # a draw eliminates the player
-	if banter != null and result == ChessState.RESULT.CHECKMATE:
-		# Perspective flip: the module speaks for the rival. Draws stay silent
-		# (no draw pools — silence beats a wrong-register line).
-		banter.on_beat(BanterEngine.BEAT_ENDGAME_LOSE if player_won \
-			else BanterEngine.BEAT_ENDGAME_WIN)
+	if result == ChessState.RESULT.CHECKMATE:
+		if _in_tournament():
+			Session.tournament.report_result(player_won)
+		if banter != null:
+			# Perspective flip: the module speaks for the rival.
+			banter.on_beat(BanterEngine.BEAT_ENDGAME_LOSE if player_won \
+				else BanterEngine.BEAT_ENDGAME_WIN)
+	else:
+		# A DRAW. The bracket answer is decided in `_end_sequence`, by the ONE
+		# seam the Trial by Fire replaces (`settle_tournament_draw`) — never
+		# here, because that seam may take as long as a cinematic.
+		if banter != null:
+			# Draws used to be SILENT ("silence beats a wrong-register line").
+			# They have a pool now — a stalemate deserves a reaction.
+			banter.on_beat(BanterEngine.BEAT_DRAW,
+				{"draw": str(RESULT_TEXT.get(result, "a draw"))})
 	_update_turn_label()
 	_end_sequence.call_deferred(result, player_won)
 
 
+func _in_tournament() -> bool:
+	return Session.configured and Session.mode == "tournament" \
+		and Session.tournament != null
+
+
+# ── THE DRAW SEAM — THE TRIAL BY FIRE DROPS IN HERE, AND NOWHERE ELSE ──────
+#
+# A draw is not a loss, and until today a drawn tournament match quietly
+# ELIMINATED the player: `report_result(player_won)` with `player_won == false`
+# and a comment admitting it. The owner has since designed a king-vs-king
+# "Trial by Fire" minigame to settle draws, which is built separately — so
+# this is deliberately NOT an elaborate resolution. It is the minimum honest
+# thing: one function that decides the bracket outcome AND supplies the words
+# the verdict card says about it, so the player is never eliminated silently.
+#
+# TO DROP THE MINIGAME IN: replace THIS FUNCTION'S BODY. Nothing else moves.
+# Every caller already `await`s it, so the trial may run as long as it likes,
+# take over the camera, and play its own cinematic before answering.
+#
+#   in   result   the ChessState.RESULT that ended the war (STALEMATE,
+#                 INSUFFICIENT, FIFTY_MOVE, THREEFOLD)
+#   out  {"player_advances": bool, "lines": Array[String]}
+#        player_advances  goes straight to Tournament.report_result()
+#        lines            appended to the verdict card, in the player's words
+#
+# v1 policy, said out loud instead of hidden: this bracket has no third
+# outcome, so a drawn war advances the RIVAL — and the card says exactly that.
+func settle_tournament_draw(_result: int) -> Dictionary:
+	var tree := get_tree()
+	if tree != null:
+		await tree.process_frame   # the trial will want many; this wants one
+	return {
+		"player_advances": false,
+		"lines": [
+			"A drawn war wins no round — %s rides on in your place." % _rival_display,
+			"(Until the Trial by Fire is built, a draw does not advance you.)",
+		],
+	}
+
+
 func _end_sequence(result: int, player_won: bool) -> void:
 	if result != ChessState.RESULT.CHECKMATE:
+		# A DRAW: no dragon, no ceremony — and, in a tournament, no silent
+		# elimination. The seam decides and supplies its own words.
+		if _in_tournament():
+			var verdict: Dictionary = await settle_tournament_draw(result)
+			var lines: Variant = verdict.get("lines", [])
+			_draw_bracket_lines.clear()
+			if lines is Array:
+				for l in (lines as Array):
+					_draw_bracket_lines.append(str(l))
+			Session.tournament.report_result(bool(verdict.get("player_advances", false)))
 		_show_match_end(false, RESULT_TEXT.get(result, "The war is over"))
 		return
 	# The mated king falls under the checkmate cinematic's slow orbit.
@@ -1288,7 +1429,12 @@ func _show_match_end(player_won: bool, base_text: String) -> void:
 			btn_text = "Ride to the %s" % round_name
 		else:
 			var champ := str(t.bracket_state().get("champion", ""))
-			lines.append("%s has fallen from the war." % _player_display)
+			if _draw_bracket_lines.is_empty():
+				lines.append("%s has fallen from the war." % _player_display)
+			else:
+				# A DRAW, and the card says plainly what it did to the bracket
+				# instead of headlining "draw" and quietly eliminating you.
+				lines.append_array(_draw_bracket_lines)
 			if not champ.is_empty():
 				lines.append("%s takes the throne." % _house_name(champ))
 			_next_action = "hall"
@@ -1333,6 +1479,8 @@ func _return_to_hall() -> void:
 func _unhandled_key_input(event: InputEvent) -> void:
 	if not (event is InputEventKey and event.pressed and not event.echo):
 		return
+	if promo_picker != null:
+		return   # the modal owns the keyboard (it swallows keys itself too)
 	if event.keycode == KEY_Z and event.is_command_or_control_pressed():
 		_request_undo()   # queued through cinematics — see _try_undo
 		return
@@ -1869,6 +2017,8 @@ func _update_turn_label(ai_thinking := false) -> void:
 	_turn_label.modulate.a = 1.0
 	if _net_disconnected:
 		_turn_label.text = "the connection is gone"
+	elif promo_picker != null:
+		_turn_label.text = "choose the crown"
 	elif game_over:
 		_turn_label.text = "the field falls silent"
 	elif _net_stalled:

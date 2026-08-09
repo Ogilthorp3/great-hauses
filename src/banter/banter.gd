@@ -48,6 +48,8 @@ signal banter_skipped(beat: String, why: String)
 #   player_undo      the player took their move back -> mock the take-back
 #   endgame_win      the RIVAL won the game
 #   endgame_lose     the RIVAL lost the game
+#   draw             nobody won — stalemate, insufficient material, fifty
+#                    quiet moves, threefold repetition
 
 const BEAT_GAME_START := "game_start"
 const BEAT_PLAYER_CAPTURED := "player_captured"
@@ -58,19 +60,25 @@ const BEAT_PLAYER_BLUNDER := "player_blunder"
 const BEAT_PLAYER_UNDO := "player_undo"
 const BEAT_ENDGAME_WIN := "endgame_win"
 const BEAT_ENDGAME_LOSE := "endgame_lose"
+## The war ended with NOBODY beaten — stalemate, insufficient material, fifty
+## quiet moves, threefold repetition. Draws used to be silent here on the
+## grounds that "silence beats a wrong-register line"; the register turned out
+## to be findable (a haus that cannot win says so in its own voice), and a
+## stalemate with no reaction reads as a bug rather than a result.
+const BEAT_DRAW := "draw"
 
 const BEATS: Array[String] = [
 	BEAT_GAME_START, BEAT_PLAYER_CAPTURED, BEAT_RIVAL_CAPTURED,
 	BEAT_CHECK_GIVEN, BEAT_CHECK_RECEIVED, BEAT_PLAYER_BLUNDER,
-	BEAT_PLAYER_UNDO, BEAT_ENDGAME_WIN, BEAT_ENDGAME_LOSE,
+	BEAT_PLAYER_UNDO, BEAT_ENDGAME_WIN, BEAT_ENDGAME_LOSE, BEAT_DRAW,
 ]
 
 ## Beats exempt from the full-move gap: blunders are the best taunts and are
-## always allowed; the bookends (start/end) sit outside normal move flow; an
-## undo happens outside the move flow too — the take-back IS the moment.
+## always allowed; the bookends (start/end/draw) sit outside normal move flow;
+## an undo happens outside the move flow too — the take-back IS the moment.
 const GAP_EXEMPT: Array[String] = [
 	BEAT_GAME_START, BEAT_PLAYER_BLUNDER, BEAT_PLAYER_UNDO,
-	BEAT_ENDGAME_WIN, BEAT_ENDGAME_LOSE,
+	BEAT_ENDGAME_WIN, BEAT_ENDGAME_LOSE, BEAT_DRAW,
 ]
 
 # -- LLM configuration (endpoint resolution mirrors src/ai/ds4_opponent.gd) --
@@ -361,6 +369,11 @@ static func build_beat_prompt(beat: String, ctx: Dictionary = {}) -> String:
 			return "You have won the war. Deliver the victory line."
 		BEAT_ENDGAME_LOSE:
 			return "You have lost the war. Concede in character — bitter, proud, promising a return."
+		BEAT_DRAW:
+			var how := str(ctx.get("draw", ""))
+			var kind := (" (%s)" % how) if not how.is_empty() else ""
+			return ("The war has ended in a DRAW%s — no haus is beaten and no haus " % kind
+				+ "has won. React in character: unfinished business, not defeat.")
 	return "React, in character, to the state of the game."
 
 

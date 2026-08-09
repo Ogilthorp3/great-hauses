@@ -441,9 +441,13 @@ func _test_refusal_texts() -> void:
 	if driver.is_empty():
 		check("refuse: the e2e driver is readable from this build", true, false)
 		return
-	# The probe call is `_net_illegal_probe(game, netm, "wrong-turn", "b7", "b6",
-	# [...])` — take the window after the label and read the list it passes.
-	var at := driver.find("\"wrong-turn\", \"b7\", \"b6\",")
+	# The probe call is `_net_illegal_probe(game, netm, "wrong-turn", <from>,
+	# <to>, [...])`. The SQUARES are not pinned — they follow whatever position
+	# the scripted game starts from (they changed when the head-to-head script
+	# grew its underpromotion, 2026-08-09). What IS pinned is the property that
+	# makes the probe a probe: the move must be one the joiner could legally
+	# play ON ITS OWN TURN, so the only thing refusing it is turn ownership.
+	var at := driver.find("\"wrong-turn\", ")
 	check("refuse: the wrong-turn probe is where the test thinks it is", true, at > 0)
 	var probe_call := driver.substr(at, 160) if at > 0 else ""
 	check("refuse: the wrong-turn probe accepts the validator's answer", true,
@@ -452,6 +456,34 @@ func _test_refusal_texts() -> void:
 			probe_call.contains("earlier position"))
 	check("refuse: both accepted strings really are the host's own", true,
 			wrong.contains("not your turn") and stale.contains("earlier position"))
+	var squares: PackedStringArray = probe_call.split("\"")
+	var probe_uci := ""
+	if squares.size() > 5:
+		probe_uci = str(squares[3]) + str(squares[5])
+	check("refuse: the probe names two squares", 4, probe_uci.length())
+	var net_fen := _driver_const(driver, "NET_FEN")
+	check("refuse: the driver's NET_FEN is readable", true, net_fen.length() > 20)
+	var probed = _state(net_fen)
+	probed.turn = NetProtocol.COLOR_BLACK      # ...as if it WERE the joiner's turn
+	check("refuse: the probed move is legal on the joiner's OWN turn (%s)" % probe_uci,
+			true, probed.move_from_uci(probe_uci) != null)
+	# ...and it is never part of the scripted game, or the probe would be
+	# asking for a move the host is about to broadcast anyway.
+	check("refuse: the probed move is not one of the scripted plies", false,
+			driver.contains("NET_LINE_BLACK: Array[String] = [\"%s\"" % probe_uci)
+			or driver.contains(", \"%s\"]" % probe_uci))
+
+
+## One `const NAME := "..."` string out of a script's SOURCE. Read as text, on
+## purpose: e2e_driver.gd names the PieceAssets autoload, and a `-s` suite that
+## loads it cannot compile it (the test_costumes.gd rule).
+func _driver_const(source: String, name: String) -> String:
+	var at := source.find("const %s := \"" % name)
+	if at < 0:
+		return ""
+	var from := at + ("const %s := \"" % name).length()
+	var end := source.find("\"", from)
+	return source.substr(from, end - from) if end > from else ""
 
 
 # ── The cinematic gate ─────────────────────────────────────────────────────

@@ -56,6 +56,24 @@ into it, and time slows. The loser is removed.
 
 **Undo.** HUD button and Cmd/Ctrl+Z. Three per game in tournament play.
 
+**Promotion is a choice.** A pawn that reaches the last rank opens a panel showing
+all four pieces — Queen, Rook, Bishop, Knight — as the **actual models**, in your
+haus's own colours and kit, and you take one by clicking it, by its letter (Q R B N),
+or by walking the row with ← → and Enter. Esc, or twenty seconds of silence, takes
+the queen. This is not decoration: a knight can give check from a square a queen
+cannot, and promoting to a rook is sometimes the only way to avoid **stalemating**
+your opponent — both of which the promotion suite proves on one position, and the
+`promote` e2e walks through the real click path. It works against the engine, against
+the Oracle and against a friend, the piece you pick is the piece the host validates,
+and taking the move back gives you your pawn.
+
+**Draws.** Stalemate, insufficient material, fifty quiet moves and threefold
+repetition all end the war with their own words on the card and no dragon — nobody
+was beaten, so nobody burns — and the rival haus now has something to say about it.
+In a tournament a drawn match does not advance you, and **the card says so** instead
+of quietly eliminating you. The Trial by Fire minigame that will properly settle a
+draw drops into one function (`game.gd::settle_tournament_draw`).
+
 **A medieval score.** Menu and gameplay playlists that crossfade rather than cut,
 stingers over the duels, and separate victory / defeat / championship fanfares.
 

@@ -45,7 +45,13 @@
 ##   enpassant   (needs EP_FEN) exd6 e.p. by screen-position clicks; asserts
 ##               the pawn lands visual d6 and the captured pawn vanishes
 ##               from visual d5 — the square BEHIND the landing
-##   promote     (needs --e2e-fen with a promotion push) promotes by clicks
+##   promote     (needs PROMOTE_FEN, a real promotion PROBLEM) the promotion
+##               picker: all four pieces taken in one run — clicking the piece
+##               model, the hotkey, the arrow keys, and Esc for the silent
+##               default — each undone back to the pawn; asserts the knight's
+##               CHECK, the rook AVOIDING the stalemate the queen causes, the
+##               right model and flourish per choice, then the draw card, the
+##               rival's draw taunt and the tournament draw seam
 ##   slowmo      capture triggers the DuelDirector; asserts activation, the
 ##               time dip, skip-on-click restore, and a clean final settle
 ##   tournament  Begin Tournament with a mate-in-1 FEN: three rounds of
@@ -147,7 +153,8 @@ func _ready() -> void:
 		# autoload _ready runs before the main scene loads, so this is early
 		# enough — and each e2e launch is its own process, nothing leaks.
 		_start_mock_oracle()
-	elif scenario in ["music", "banter", "dragon-live", "net-host", "net-join", "net-hall"]:
+	elif scenario in ["music", "banter", "dragon-live", "promote",
+			"net-host", "net-join", "net-hall"]:
 		# Deterministic offline: BanterEngine shares the Oracle's endpoint
 		# family — a dead port makes its LLM path fail instantly so the
 		# canned pools answer synchronously.
@@ -1549,6 +1556,24 @@ func _scenario_enpassant() -> void:
 	_finish(0)
 
 # ── Scenario: promote ──────────────────────────────────────────────────────
+## ALBERT'S BUG, walked end to end on the real click path.
+##
+## FEN contract (run_e2e.sh PROMOTE_FEN) — and it is a CHESS PROBLEM, not a
+## prop: "8/k1P4p/7P/1K6/8/8/8/8 w - - 0 1".
+##   White Kb5, Pc7, Ph6 · Black Ka7, Ph7 (wedged behind h6 — it has no move).
+## From c7 all four promotions are legal AND all four are different games:
+##   c8=Q  covers b7 diagonally, Black has no move and is not in check
+##         -> STALEMATE. The old "promotions auto-pick the queen" code could
+##         only ever produce this one.
+##   c8=R  same rank, same file, no diagonal -> b7 is free -> the war goes on.
+##         Promoting to a ROOK is the only way to avoid the stalemate.
+##   c8=N  a knight forks out to a7 -> CHECK, from a square where the queen
+##         gives none.
+##   c8=B  no check, no stalemate.
+## The scenario takes ALL FOUR, one at a time, undoing back to the pawn in
+## between — by clicking the piece model, by hotkey, by walking the row with
+## the arrow keys, and finally by pressing Esc to prove the silent default is
+## still the queen. tests/test_promotion.gd asserts the same chess headless.
 func _scenario_promote() -> void:
 	if not await _navigate_select(DEFAULT_HOUSE, "Casual", "Single Match"):
 		return
@@ -1556,34 +1581,318 @@ func _scenario_promote() -> void:
 	if game == null:
 		return
 	var state: Object = game.get("state")
-	var move = await _click_first_matching(game,
-		func(m): return m.promotion != null, "promote")
-	if move == null:
+	var start_fen := str(state.get_fen())
+	var c7 := ChessState.square_index_from_name("c7")
+	var c8 := ChessState.square_index_from_name("c8")
+
+	# The engine's own answer to "why does this matter", read off THIS board
+	# before a single click — the proof and the position can never drift apart.
+	var offered := {}
+	for m in state.legal_moves():
+		if m.promotion != null and m.from_square == c7:
+			offered[str(m.promotion).to_lower()] = true
+	if offered.size() != 4:
+		await _fail("promote-four-offered",
+			"the engine offers %d promotions from c7, expected 4" % offered.size())
 		return
-	var to_sq: Vector2i = game.sq_of(move.to_square)
+	_pass("promote-four-offered (q r b n)")
+	var probe := {}
+	for pc in ["q", "r", "b", "n"]:
+		var s = ChessState.new()
+		s.set_fen(start_fen)
+		s.apply_move(s.move_from_uci("c7c8" + pc))
+		probe[pc] = {"result": s.get_result(), "check": s.in_check()}
+	var q_stalemates: bool = int(probe["q"]["result"]) == ChessState.RESULT.STALEMATE
+	var r_survives: bool = int(probe["r"]["result"]) == ChessState.RESULT.ONGOING
+	var n_checks: bool = bool(probe["n"]["check"]) and not bool(probe["q"]["check"])
+	if not (q_stalemates and r_survives and n_checks):
+		await _fail("promote-why-it-matters",
+			"queen->%s rook->%s knight-check=%s queen-check=%s" % [
+				ChessState.RESULT.keys()[int(probe["q"]["result"])],
+				ChessState.RESULT.keys()[int(probe["r"]["result"])],
+				str(probe["n"]["check"]), str(probe["q"]["check"])])
+		return
+	_pass("promote-why-it-matters (queen STALEMATES · rook does not · only the knight CHECKS)")
+
+	# ── 1. the ROOK, by clicking the piece model ───────────────────────────
+	if not await _promote_as(game, "r", "click", start_fen):
+		return
+	if int(state.get_result()) != ChessState.RESULT.ONGOING:
+		await _fail("promote-rook-avoids-stalemate",
+			"the war ended %s after the rook promotion"
+				% ChessState.RESULT.keys()[int(state.get_result())])
+		return
+	_pass("promote-rook-avoids-stalemate (the queen would have stalemated Black)")
+	await _shot("after_rook_promotion")
+	if not await _undo_back_to_pawn(game, start_fen, "rook"):
+		return
+
+	# ── 2. the KNIGHT, by hotkey — and it gives check ──────────────────────
+	if not await _promote_as(game, "n", "key", start_fen):
+		return
+	if not state.in_check():
+		await _fail("promote-knight-checks",
+			"the knight promotion did not put Black in check")
+		return
+	_pass("promote-knight-checks (a knight forks the king from a square a queen cannot)")
+	await _shot("after_knight_promotion")
+	if not await _undo_back_to_pawn(game, start_fen, "knight"):
+		return
+
+	# ── 3. the BISHOP, by walking the row with the arrow keys ──────────────
+	if not await _promote_as(game, "b", "arrows", start_fen):
+		return
+	if not await _undo_back_to_pawn(game, start_fen, "bishop"):
+		return
+
+	# ── 4. the QUEEN, by Esc — the silent default, and the stalemate ───────
+	if not await _promote_as(game, "q", "escape", start_fen):
+		return
+	var picks: Array = game.get("promo_picks")
+	if str(picks) != str(["r", "n", "b", "q"]):
+		await _fail("promote-all-four", "the player picked %s" % str(picks))
+		return
+	_pass("promote-all-four (%s — click · hotkey · arrows · Esc)" % str(picks))
+
+	# THE DRAW, and what the game says about it.
+	if not await _wait_until(func(): return bool(game.get("game_over")), 25.0):
+		await _fail("promote-draw", "the queen promotion never ended the game")
+		return
+	if int(state.get_result()) != ChessState.RESULT.STALEMATE:
+		await _fail("promote-draw", "result=%s, expected STALEMATE"
+			% ChessState.RESULT.keys()[int(state.get_result())])
+		return
+	_pass("promote-draw (STALEMATE — the outcome the old queen-only code forced)")
+	# A draw is not a death: no king falls, so no dragon ceremony runs.
+	if not (game.get("death_log") as Array).is_empty():
+		await _fail("promote-draw-no-ceremony",
+			"a death animation played on a draw: %s" % str(game.get("death_log")))
+		return
+	_pass("promote-draw-no-ceremony")
+	if not await _wait_until(func(): return bool(game.get("_victory_shown")), 20.0):
+		await _fail("promote-draw-card", "the verdict card never opened on the draw")
+		return
+	var card: Label = game.find_child("VictoryPanel", true, false) \
+		.find_children("*", "Label", true, false)[0]
+	if not card.text.to_lower().contains("draw"):
+		await _fail("promote-draw-card", "the draw card says '%s'" % card.text)
+		return
+	_pass("promote-draw-card (%s)" % card.text.replace("\n", " · "))
+	# THE BANTER DRAW POOL: a stalemate used to be met with silence.
+	var banter: Node = game.get("banter")
+	if banter == null or str(banter.get("last_beat")) != BanterEngine.BEAT_DRAW:
+		await _fail("promote-draw-banter", "the rival's last beat was '%s', expected 'draw'"
+			% (str(banter.get("last_beat")) if banter != null else "<no banter>"))
+		return
+	_pass("promote-draw-banter (beat=draw source=%s)" % str(banter.get("last_source")))
+	await _shot("after_queen_promotion_draw")
+
+	# THE DRAW SEAM the Trial by Fire minigame replaces — called on the LIVE
+	# game node, so its contract is checked where it is actually used.
+	var verdict: Dictionary = await game.settle_tournament_draw(state.get_result())
+	if bool(verdict.get("player_advances", true)) \
+			or (verdict.get("lines", []) as Array).is_empty():
+		await _fail("promote-draw-seam",
+			"settle_tournament_draw returned %s — it must answer the bracket AND "
+			% str(verdict) + "supply the words the card says")
+		return
+	_pass("promote-draw-seam (%s)" % str((verdict["lines"] as Array)[0]))
+	_finish(0)
+
+
+## Open the promotion modal by clicking c7 -> c8, prove it is showing the real
+## pieces, then take `want` by `how` ("click" | "key" | "arrows" | "escape").
+func _promote_as(game: Node, want: String, how: String, start_fen: String) -> bool:
+	var state: Object = game.get("state")
+	var c7 := ChessState.square_index_from_name("c7")
+	var c8 := ChessState.square_index_from_name("c8")
+	var step := "promote-%s" % PromotionPicker.NAMES[want].to_lower()
 	if not await _wait_until(func():
-		return str(state.pieces[move.to_square]) == "Q", 5.0):
-		await _fail("promote-engine-applied", "no white queen on the promotion square (engine)")
-		return
-	_pass("promote-engine-applied")
+		return not bool(game.get("busy")) and state.turn == false \
+			and not bool(game.get("game_over")), 25.0):
+		await _fail(step, "never became the player's turn again")
+		return false
+	if not await _select_square(game, game.sq_of(c7)):
+		await _fail(step, "clicking c7 never selected the pawn")
+		return false
+	await _click_square(game, game.sq_of(c8))
+	if not await _wait_until(func(): return game.get("promo_picker") != null, 6.0):
+		await _fail(step, "clicking the promotion square never opened the picker")
+		return false
+	var picker: Node = game.get("promo_picker")
+	# THE MODAL IS MADE OF THE REAL THING: four cards, each holding an actual
+	# PieceView of the right type in the promoting haus's own kit.
+	var models: Dictionary = picker.get("models")
+	var cards: Dictionary = picker.get("cards")
+	if models.size() != 4 or cards.size() != 4:
+		await _fail(step, "the picker offers %d models / %d cards, expected 4 of each"
+			% [models.size(), cards.size()])
+		return false
+	for pc in PromotionPicker.ORDER:
+		var pv = models.get(pc)
+		if pv == null or not is_instance_valid(pv):
+			await _fail(step, "no piece model on the '%s' card" % pc)
+			return false
+		if int(pv.get("piece_type")) != int(PromotionPicker.TYPE_OF[pc]):
+			await _fail(step, "the '%s' card is showing piece_type %d, expected %d"
+				% [pc, int(pv.get("piece_type")), int(PromotionPicker.TYPE_OF[pc])])
+			return false
+		if str(pv.get("house_id")) != str(game.get("player_house_id")):
+			await _fail(step, "the '%s' card wears haus '%s', expected '%s'"
+				% [pc, str(pv.get("house_id")), str(game.get("player_house_id"))])
+			return false
+		var name_label: Label = cards[pc].find_child("PromoName_%s" % pc, true, false)
+		if name_label == null \
+				or not name_label.text.contains(str(PromotionPicker.NAMES[pc])):
+			await _fail(step, "the '%s' card does not name its piece" % pc)
+			return false
+	# ── AND THEY MUST BE ON SCREEN ────────────────────────────────────────
+	# EVERY assertion above passed on the first build of this panel and the
+	# player saw FOUR EMPTY BLACK BOXES: the cards were parented after their
+	# Camera3D was aimed, `look_at` refused ("Node not inside tree"), and each
+	# camera sat inside its own piece. The models were right, the types were
+	# right, the names were right, the pixels were nothing. So the frame that
+	# is saved is also COUNTED — same image, no awaits in between.
+	var img := await _shot("promotion_picker")
+	var inks: Array[String] = []
+	for pc in PromotionPicker.ORDER:
+		var stage: Control = cards[pc].find_child("PromoStage_%s" % pc, true, false)
+		var ink := _stage_ink(img, stage)
+		inks.append("%s=%.1f%%" % [pc, ink])
+		if ink < PICKER_INK_MIN_SHARE:
+			await _fail(step, ("the '%s' card renders %.1f%% lit pixels (floor %.1f%%) "
+				+ "— the panel is showing an empty box, not a piece")
+					% [pc, ink, PICKER_INK_MIN_SHARE])
+			return false
+	_pass("%s-picker (4 real %s pieces, named and RENDERED: %s, %s)" % [step,
+		str(game.get("player_house_id")), " ".join(inks), how])
+
+	match how:
+		"click":
+			await _click_control(cards[want])
+		"key":
+			await _press_key(_promo_hotkey(want))
+		"arrows":
+			for _i in PromotionPicker.ORDER.find(want):
+				await _press_key(KEY_RIGHT)
+			await _press_key(KEY_ENTER)
+		"escape":
+			await _press_key(KEY_ESCAPE)
+	if not await _wait_until(func(): return game.get("promo_picker") == null, 6.0):
+		await _fail(step, "the picker never closed after the '%s' path" % how)
+		return false
+	var picks: Array = game.get("promo_picks")
+	if picks.is_empty() or str(picks.back()) != want:
+		await _fail(step, "the picker answered '%s', expected '%s'"
+			% [str(picks.back()) if not picks.is_empty() else "<nothing>", want])
+		return false
+	# ENGINE first (authoritative), then the piece that actually walked out.
+	if not await _wait_until(func():
+		return str(state.pieces[c8]).to_lower() == want, 8.0):
+		await _fail(step, "engine has '%s' on c8, expected '%s'"
+			% [str(state.pieces[c8]), want])
+		return false
+	_pass("%s-engine-applied" % step)
+	var to_sq: Vector2i = game.sq_of(c8)
 	if not await _wait_until(func():
 		var v: Dictionary = game.get("views")
 		return v.has(to_sq) and is_instance_valid(v[to_sq]) \
-			and v[to_sq].piece_type == PieceView.Type.QUEEN, 8.0):
-		await _fail("promote-view-replaced", "no queen view on %s" % str(to_sq))
-		return
-	_pass("promote-view-replaced")
-	# INSIDE the flourish, on the wall clock — the promotion cinematic runs at
-	# time_scale 0.6, so a scaled wait here would land the hero frame somewhere
-	# the flourish is not (the ashfall scar, same shape). 1.2 s is chosen, not
-	# guessed: the arriving piece plays Spawn_Ground (it rises OUT of the
-	# stone), so anything earlier photographs a queen still underground, and
-	# the pool's decay has not started yet at this point in the envelope.
-	await _sleep_wall(1.2)
-	await _shot("after_promotion")
-	if not await _settle(game, "promote-settled"):
-		return
-	_finish(0)
+			and int(v[to_sq].piece_type) == int(PromotionPicker.TYPE_OF[want]), 12.0):
+		var v2: Dictionary = game.get("views")
+		await _fail(step, "the view on c8 is %s, expected a %s"
+			% [str(int(v2[to_sq].piece_type)) if v2.has(to_sq) else "<none>",
+				str(PromotionPicker.NAMES[want])])
+		return false
+	_pass("%s-view-replaced (a %s stands on c8)" % [step, PromotionPicker.NAMES[want]])
+	# THE FLOURISH IS THE CHOSEN PIECE'S FLOURISH. Photographed INSIDE it, on
+	# the wall clock — the promotion cinematic runs at time_scale 0.6, so a
+	# scaled wait lands the hero frame where the flourish is not (the ashfall
+	# scar, same shape); and the arriving piece rises out of the stone, so
+	# anything earlier photographs a piece still underground.
+	if not await _wait_until(func():
+		var dd: Node = game.get("duel_director")
+		return dd != null and dd.is_active(), 6.0):
+		await _fail(step, "the promotion flourish never played for the %s"
+			% PromotionPicker.NAMES[want])
+		return false
+	_pass("%s-flourish" % step)
+	var played: Array = game.get("promotions_played")
+	if played.is_empty() \
+			or not str(played.back()).contains(str(PromotionPicker.NAMES[want]).to_lower()):
+		await _fail(step, "the promotion log says '%s'"
+			% (str(played.back()) if not played.is_empty() else "<nothing>"))
+		return false
+	return true
+
+
+## Share (%) of a Control's rect in `img` that is LIT — i.e. brighter than the
+## picker stage's own background. The stage clears to 0.07 luma; a piece under
+## the card's key light comes in far above it, and an empty box comes in at
+## zero. Measured on the saved frame, in the same call that saved it.
+const PICKER_INK_LUMA := 0.18
+## Floor for "there is a piece in this box". Pinned from the measurement, not
+## guessed — see the PASS line, which prints all four shares every run.
+const PICKER_INK_MIN_SHARE := 4.0
+
+
+func _stage_ink(img: Image, ctrl: Control) -> float:
+	if img == null or ctrl == null:
+		return 0.0
+	# Canvas -> window/image space: the same transform the click math uses.
+	var r := ctrl.get_global_rect()
+	var p0: Vector2 = _to_window * r.position
+	var p1: Vector2 = _to_window * r.end
+	var x0 := clampi(int(min(p0.x, p1.x)) + 2, 0, img.get_width() - 1)
+	var y0 := clampi(int(min(p0.y, p1.y)) + 2, 0, img.get_height() - 1)
+	var x1 := clampi(int(max(p0.x, p1.x)) - 2, 0, img.get_width() - 1)
+	var y1 := clampi(int(max(p0.y, p1.y)) - 2, 0, img.get_height() - 1)
+	if x1 <= x0 or y1 <= y0:
+		return 0.0
+	var lit := 0
+	var seen := 0
+	var y := y0
+	while y <= y1:
+		var x := x0
+		while x <= x1:
+			var c := img.get_pixel(x, y)
+			seen += 1
+			if c.get_luminance() > PICKER_INK_LUMA:
+				lit += 1
+			x += 2
+		y += 2
+	return 0.0 if seen == 0 else 100.0 * float(lit) / float(seen)
+
+
+func _promo_hotkey(pc: String) -> Key:
+	for k in PromotionPicker.HOTKEY:
+		if str(PromotionPicker.HOTKEY[k]) == pc:
+			return k
+	return KEY_Q
+
+
+## Cmd/Ctrl+Z after a promotion must put the PAWN back — never leave the new
+## piece standing, and never leave the board one ply out of step.
+func _undo_back_to_pawn(game: Node, start_fen: String, label: String) -> bool:
+	var state: Object = game.get("state")
+	var c7 := ChessState.square_index_from_name("c7")
+	if not await _settle(game, "promote-%s-settled" % label):
+		return false
+	await _press_cmd_z()
+	if not await _wait_until(func(): return str(state.get_fen()) == start_fen, 15.0):
+		await _fail("promote-%s-undo" % label,
+			"after the take-back the board reads %s, expected %s"
+				% [str(state.get_fen()), start_fen])
+		return false
+	var pawn_sq: Vector2i = game.sq_of(c7)
+	if not await _wait_until(func():
+		var v: Dictionary = game.get("views")
+		return v.has(pawn_sq) and is_instance_valid(v[pawn_sq]) \
+			and int(v[pawn_sq].piece_type) == PieceView.Type.PAWN, 8.0):
+		await _fail("promote-%s-undo" % label,
+			"no PAWN view standing on c7 after the take-back")
+		return false
+	_pass("promote-%s-undo (the pawn is back on c7, not a %s)" % [label, label])
+	return true
 
 # ── Scenario: duel / showcase ──────────────────────────────────────────────
 ## duel: assert-heavy capture via clicks (the slow-mo duel plays untouched).
@@ -2293,11 +2602,20 @@ func _view_census(game: Node) -> String:
 ##   ply 0  White  Rh7    a normal move from the host
 ##   ply 1  Black  c6     a normal move from the joiner
 ##   ply 2  White  exd5   a CAPTURE — the slow-motion duel, on both screens
-##   ply 3  Black  c5     play continues after the cinematic gate reopens
+##   ply 3  Black  b1=N   the JOINER UNDERPROMOTES through the picker, and the
+##                        piece has to survive the trip to the host's validator
 ##   ply 4  White  Ra8#   CHECKMATE — the ceremony, and the verdict card
-const NET_FEN := "4k3/1pp5/8/3p4/4P3/8/8/R3K2R w KQ - 0 1"
+##
+## THE UNDERPROMOTION IS LOAD-BEARING, on purpose. A QUEEN on b1 checks the
+## white king down the first rank, which makes ply 4's mate illegal — so a
+## client's picked KNIGHT that silently became a queen anywhere on the wire
+## cannot pass this gate: the script would simply stop working. Both instances
+## also assert the knight standing on b1 at the end (see _scenario_net).
+## tests/test_promotion.gd walks this exact line headless, including the
+## queen counterfactual.
+const NET_FEN := "4k3/2p5/8/3p4/4P3/8/1p6/R3K2R w KQ - 0 1"
 const NET_LINE_WHITE: Array[String] = ["h1h7", "e4d5", "a1a8"]
-const NET_LINE_BLACK: Array[String] = ["c7c6", "c6c5"]
+const NET_LINE_BLACK: Array[String] = ["c7c6", "b2b1n"]
 const NET_TOTAL_PLIES := 5
 
 var _net_duel_shot := false
@@ -2394,7 +2712,7 @@ func _scenario_net(host_role: bool) -> void:
 
 	if not host_role:
 		# Ply 0 belongs to White. The joiner asks for a move that WOULD be legal
-		# on its own turn (b7b6, and never part of the scripted game) — and is
+		# on its own turn (d5d4, and never part of the scripted game) — and is
 		# refused, in words a human can read.
 		#
 		# THIS PROBE RACES THE HOST BY CONSTRUCTION, and the race has TWO correct
@@ -2407,7 +2725,7 @@ func _scenario_net(host_role: bool) -> void:
 		# Demanding only the first made a CORRECT game fail about one run in
 		# three. What must hold in BOTH cases — and is asserted in both — is that
 		# the move was refused with a reason and never, ever applied.
-		if not await _net_illegal_probe(game, netm, "wrong-turn", "b7", "b6",
+		if not await _net_illegal_probe(game, netm, "wrong-turn", "d5", "d4",
 				["not your turn", "earlier position"], false):
 			return
 
@@ -2436,6 +2754,26 @@ func _scenario_net(host_role: bool) -> void:
 			% [(game.get("net_plies") as Array).size(), NET_TOTAL_PLIES])
 		return
 	_pass("net-%s-plies (%d)" % [tag, (game.get("net_plies") as Array).size()])
+
+	# THE UNDERPROMOTION, CHECKED ON BOTH BOARDS. The joiner's picker chose a
+	# KNIGHT; the host validated it out of its own legal-move list and
+	# broadcast it back. Both instances must hold the same piece, in the
+	# engine AND in the army standing on the board — a client that could
+	# promote to something the host never validated shows up right here, and
+	# so does a piece that survived the wire but spawned as a queen.
+	var b1 := ChessState.square_index_from_name("b1")
+	if str(state.pieces[b1]) != "n":
+		await _fail("net-%s-underpromotion" % tag,
+			"b1 holds '%s', expected the joiner's knight" % str(state.pieces[b1]))
+		return
+	var knight_view = (game.get("views") as Dictionary).get(game.sq_of(b1))
+	if knight_view == null or not is_instance_valid(knight_view) \
+			or int(knight_view.piece_type) != PieceView.Type.KNIGHT:
+		await _fail("net-%s-underpromotion" % tag,
+			"the piece standing on b1 is %s, expected a KNIGHT"
+				% ("nothing" if knight_view == null else str(int(knight_view.piece_type))))
+		return
+	_pass("net-%s-underpromotion (a knight on b1, engine and board)" % tag)
 
 	# The duel ran here, not only on the other machine.
 	if (game.get("death_log") as Array).is_empty():
@@ -2581,6 +2919,21 @@ func _net_play(game: Node, tag: String, uci: String) -> bool:
 		await _fail("net-%s-select-%s" % [tag, uci], "could not select %s" % uci.substr(0, 2))
 		return false
 	await _click_square(game, game.sq_of(to_idx))
+	if uci.length() > 4:
+		# A PROMOTION ON THE WIRE. The picker opens on THIS machine, the piece
+		# it answers rides in the move request, and the HOST's validator is the
+		# only thing that decides whether it is legal. Taken by hotkey so the
+		# choice is unambiguous in the log.
+		var want := uci.substr(4, 1)
+		if not await _wait_until(func(): return game.get("promo_picker") != null, 8.0):
+			await _fail("net-%s-promo-picker" % tag,
+				"the promotion picker never opened for %s" % uci)
+			return false
+		await _press_key(_promo_hotkey(want))
+		if not await _wait_until(func(): return game.get("promo_picker") == null, 8.0):
+			await _fail("net-%s-promo-picker" % tag, "the picker never closed for %s" % uci)
+			return false
+		_pass("net-%s-promo-picked (%s)" % [tag, PromotionPicker.NAMES[want]])
 	if not await _wait_until(func(): return state.pieces[from_idx] == null, 25.0):
 		await _fail("net-%s-applied-%s" % [tag, uci],
 			"the host never broadcast %s back" % uci)

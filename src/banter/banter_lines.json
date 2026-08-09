@@ -1,5 +1,5 @@
 {
-	"_readme": "Canned taunt pools for BanterEngine (src/banter/banter.gd). houses.<id>.<beat> -> array of line templates, keyed by the haus id and the BanterEngine BEAT_* names. The speaker is always the RIVAL haus: player_captured = the rival took the player's piece (gloat), rival_captured = the player took the rival's piece (wounded pride), check_given = the rival checks the player, check_received = the rival's king is checked. Token {piece} = lowercase piece name from the beat context; lines carrying it are only picked when the context supplies one. Every line is original, in-archetype homage only, and at most 90 characters AFTER substitution ({piece} is at longest 'knight'/'bishop', 6 chars). No line repeats within a game (engine dedupe).",
+	"_readme": "Canned taunt pools for BanterEngine (src/banter/banter.gd). houses.<id>.<beat> -> array of line templates, keyed by the haus id and the BanterEngine BEAT_* names. The speaker is always the RIVAL haus: player_captured = the rival took the player's piece (gloat), rival_captured = the player took the rival's piece (wounded pride), check_given = the rival checks the player, check_received = the rival's king is checked, draw = the war ended with nobody beaten (stalemate, insufficient material, fifty moves, threefold). Token {piece} = lowercase piece name from the beat context; lines carrying it are only picked when the context supplies one. Every line is original, in-archetype homage only, and at most 90 characters AFTER substitution ({piece} is at longest 'knight'/'bishop', 6 chars). No line repeats within a game (engine dedupe).",
 	"version": 1,
 	"houses": {
 		"winterfang": {
@@ -92,6 +92,16 @@
 				"The snow forgets nothing it covers.",
 				"This board thaws. Our grudge does not.",
 				"First blood to you. Winter keeps the last."
+			],
+			"draw": [
+				"No throat opened. The pack circles and waits for another winter.",
+				"A draw is only a longer hunt.",
+				"The snow covers the field and neither banner.",
+				"We remember this one. We remember all of them.",
+				"Neither wolf bled out. Both of us will be hungrier.",
+				"The ice took the war before either of us could.",
+				"Stand down. The cold keeps its own account.",
+				"You survived a wolf. Do not call it winning."
 			]
 		},
 		"goldclaw": {
@@ -184,6 +194,16 @@
 				"My gold remains. Your luck will not.",
 				"We file this under temporary.",
 				"Well played. The rematch carries compound interest."
+			],
+			"draw": [
+				"The ledger balances. Neither of us collects today.",
+				"A drawn war pays no interest. Come back with coin.",
+				"Debt outstanding. The lion is patient with debtors.",
+				"No profit, no loss. I dislike both equally.",
+				"Your account stays open. Mine always did.",
+				"We settle nothing, so nothing is settled. Note the date.",
+				"A stalemate is a debt neither party will admit to.",
+				"The gold sleeps in the vault another night."
 			]
 		},
 		"hartcrown": {
@@ -276,6 +296,16 @@
 				"A calm day. It flatters you.",
 				"The herd remembers where it stumbled.",
 				"Keep the crown dry. We will be back for it wet."
+			],
+			"draw": [
+				"The storm passed over and struck nobody. It will return.",
+				"Thunder with no lightning. We are both still standing.",
+				"The gale dies at dusk and the antlers stay locked.",
+				"No crown falls today. The weather is only gathering.",
+				"Two stags, one clearing, and no blood on the moss.",
+				"The sky holds its bolt. Do not mistake that for mercy.",
+				"A drawn war is weather. The next one is a storm.",
+				"We part under the same clouds. They are mine."
 			]
 		},
 		"ashwyrm": {
@@ -368,6 +398,16 @@
 				"The forge cools tonight, and hungers tomorrow.",
 				"You beat the wyrm, not the bloodline.",
 				"Keep your victory near water. Trust me in this."
+			],
+			"draw": [
+				"The fire banks. Ash keeps its heat for generations.",
+				"No ash today. My line waited longer than your haus has stood.",
+				"Neither pyre lit. The old blood is patient.",
+				"A draw. Even embers refuse to die for you.",
+				"The wyrm sleeps on unfinished business.",
+				"You did not burn. Nobody said you had won.",
+				"Fire that finishes nothing is still fire.",
+				"We stop. The dynasty does not."
 			]
 		},
 		"tidegrip": {
@@ -460,6 +500,16 @@
 				"A dry victory. They rot fastest.",
 				"Eight arms, one lesson learned. The next grip holds.",
 				"The salt in your wounds is mine. A keepsake."
+			],
+			"draw": [
+				"The tide goes out with neither of us in it.",
+				"A drawn war is slack water. The pull returns.",
+				"Nothing drowned today. The deep is unhurried.",
+				"The sea keeps what it is owed. It will come back for it.",
+				"Salt on both banners, blood on neither.",
+				"We surface together. Only one of us holds breath forever.",
+				"No wreck. The reef is still where I left it.",
+				"The current does not care that we stopped."
 			]
 		},
 		"thornvale": {
@@ -552,6 +602,16 @@
 				"Savor this. I will be fertilizing my patience.",
 				"Charming victory. The petals you crushed had sisters.",
 				"The garden concedes the season, never the soil."
+			],
+			"draw": [
+				"How gracious of us both. Nobody wins, nobody bleeds.",
+				"A draw — the polite word for two failures, embraced.",
+				"You pruned nothing. Neither did I. How restrained.",
+				"Your defence was almost charming. Almost.",
+				"We shall call it a truce and mean nothing by it.",
+				"The garden is unchanged, and so is my opinion of you.",
+				"No thorn drew blood. Do consider that a compliment.",
+				"Delightful. Let us disappoint each other again soon."
 			]
 		},
 		"duskfire": {
@@ -644,6 +704,16 @@
 				"Savor dusk, my friend. I own the other end of it.",
 				"The horizon holds my banner. It will rise.",
 				"One night. You have purchased one night."
+			],
+			"draw": [
+				"The sun sets on an unfinished field. It rises regardless.",
+				"A draw. Even noon must share the sky with something.",
+				"No shadow of yours crossed me. No light of mine ended you.",
+				"Magnificent, and pointless. Both of us.",
+				"The dusk takes the board. Dawn takes the rest.",
+				"I burned and you endured. Neither is a victory.",
+				"The sky is still mine. You merely stood under it.",
+				"We stop at the horizon. I am the horizon."
 			]
 		},
 		"swiftcrest": {
@@ -736,6 +806,16 @@
 				"Honor in defeat is still honor. Remember I said so.",
 				"The high wind circles. So shall we.",
 				"You beat the bird, never the height."
+			],
+			"draw": [
+				"A clean field and no kill. Well flown, both of us.",
+				"The stoop missed. Honour survives the miss.",
+				"No feather taken. We land as equals — for today.",
+				"A draw is fair, and fairness is the point.",
+				"The high wind carried us both. It carries me further.",
+				"Well met. Bring sharper talons next time.",
+				"Neither of us fell. That is worth something.",
+				"Honour rides on. The war can wait for it."
 			]
 		},
 		"silverbrook": {
@@ -828,6 +908,16 @@
 				"You won against a current. It is behind you now.",
 				"Patience lost a battle. Patience does not lose wars.",
 				"Mark the water line. It will rise past it."
+			],
+			"draw": [
+				"The river runs on. It has never needed a winner.",
+				"A draw is water finding level. Give it time.",
+				"The stone is not worn through. Come back in a season.",
+				"Neither bank flooded. The current keeps its count.",
+				"We part at the ford, both of us still dry.",
+				"Patience is not a loss. Ask the river.",
+				"The water does not hurry to a verdict.",
+				"Nothing settled. Nothing ever is, at the source."
 			]
 		}
 	}
