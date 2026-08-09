@@ -1,0 +1,88 @@
+[gd_scene load_steps=6 format=3]
+
+; TRIAL BY FIRE — the standalone arena.
+;
+; Deliberately a near-copy of scenes/game.tscn: the same BoardView, the same
+; GreatHall, the same orbit camera, the same Sun and the same Environment. That
+; is the design, not laziness — the arena has to READ as the board the war was
+; just played on, and the cheapest way to guarantee that is to be it.
+;
+; Run it on its own:
+;   Godot --path <project> res://scenes/minigame/trial_by_fire.tscn
+;   ...  -- --tbf-ai --tbf-fast          (AI vs AI, impatient wyrm)
+;   ...  -- --tbf-shots=/tmp/tbf         (photograph the beats, then quit)
+
+[ext_resource type="Script" path="res://src/minigame/trial_by_fire.gd" id="1_trial"]
+[ext_resource type="Script" path="res://src/board/board_view.gd" id="2_board"]
+[ext_resource type="Script" path="res://src/camera/orbit_camera.gd" id="3_cam"]
+[ext_resource type="Script" path="res://src/env/great_hall.gd" id="4_hall"]
+
+; The hall's Environment, with two arena-specific trims:
+;   * GLOW is stronger (0.35 -> 0.62). Every light this mode adds is emissive —
+;     no Light3D exists for the wildfire, by contract — so the glow pass IS the
+;     firelight. At the hall's match setting the green fire sat flat on the
+;     stone like a decal.
+;   * FOG is thinner still (0.006 -> 0.0035). The player is reading a whole
+;     8x8 lattice at once for a jar three squares away, not two armies facing
+;     each other; distance haze across the far ranks costs him information he
+;     needs in under a second.
+[sub_resource type="Environment" id="Environment_tbf"]
+background_mode = 1
+background_color = Color(0.027, 0.024, 0.031, 1)
+ambient_light_source = 2
+ambient_light_color = Color(0.3, 0.275, 0.265, 1)
+ambient_light_energy = 0.7
+tonemap_mode = 2
+tonemap_exposure = 1.12
+glow_enabled = true
+glow_intensity = 0.62
+glow_bloom = 0.12
+fog_enabled = true
+fog_light_color = Color(0.1, 0.093, 0.115, 1)
+fog_density = 0.0035
+
+[node name="TrialByFire" type="Node3D"]
+script = ExtResource("1_trial")
+
+[node name="Board" type="Node3D" parent="."]
+script = ExtResource("2_board")
+
+[node name="GreatHall" type="Node3D" parent="."]
+script = ExtResource("4_hall")
+
+; Raked a little harder than the match camera (-0.85 -> -0.90) and NO further,
+; which is a hard ceiling and not a taste call: the rig's eye height is
+; 0.4 + distance x sin(pitch), the hall's rafters are at GreatHall.RAFTER_Y =
+; 9.6, and the moment the eye climbs past them the beam directly overhead
+; becomes a grey slab across the bottom half of the frame. The first cut of
+; this scene shipped at -1.02 / 12.6 -> eye 11.13, and every frame it
+; photographed had the near half of the board hidden behind a rafter. -0.90 /
+; 11.2 puts the eye at 9.17, just under the beams, and still lands the board
+; across 63 % of the frame height (solved, then confirmed on the re-shoot).
+; max_distance is trimmed to 12.0 for the same reason: zooming out RAISES the
+; eye, and 13.0 would put a player back through the roof.
+[node name="CameraRig" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.4, 0)
+script = ExtResource("3_cam")
+pitch = -0.9
+target_distance = 11.2
+max_distance = 12.0
+
+[node name="Camera3D" type="Camera3D" parent="CameraRig"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 11.2)
+current = true
+fov = 50.0
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+transform = Transform3D(-0.7738, 0.5645, -0.2866, 0, 0.4525, 0.8917, 0.6331, 0.69, -0.3503, 0, 8, 0)
+light_color = Color(0.64, 0.7, 0.82, 1)
+light_energy = 0.72
+shadow_enabled = true
+shadow_opacity = 0.55
+shadow_blur = 1.6
+light_angular_distance = 2.2
+directional_shadow_mode = 0
+directional_shadow_max_distance = 30.0
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_tbf")
