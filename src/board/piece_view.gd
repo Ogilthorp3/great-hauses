@@ -37,11 +37,17 @@ extends Node3D
 ## poses read fine at this poly scale). The horse is a STATIC standing mesh
 ## (its FBX-lineage rig corrupts in-engine at piece scale — see
 ## PieceAssets.HORSE) animated procedurally, banner-rook style: idle sway
-## on the ensemble, a canter bob on moves (the rider sits still), a horse
-## step-in under the rider's Throw for the capture duel, and on death the
+## on the ensemble, a canter bob on moves (the rider sits still), a full
+## gather-and-GALLOP for the capture duel (_kill_charge), and on death the
 ## rider slides off through Death_A while the horse keels over sideways.
 ## Face-to-face duel rotation applies to this PieceView root, so the whole
 ## ensemble turns as one.
+##
+## SIX RANKS, SIX WAYS TO KILL (2026-08-09): pawn stab · knight charge ·
+## bishop fire-bolt (no contact) · rook grind · queen arrow · king execution,
+## each with three variants, each answered by its own victim death. The table
+## and the reasoning are at KILL_STYLES; the choreography is under "the six
+## kills"; the retargeting judgement call is on play_capture.
 ##
 ## Model-agnostic API (callers touch nothing else):
 ##   setup(type, side, house_id="") · move_to(world_pos, walk_time) ·
@@ -75,8 +81,62 @@ const ANIM_IDLE := "Idle_A"
 const ANIM_WALK := "Walking_A"
 const ANIM_THROW := "Throw"
 const ANIM_HIT := "Hit_A"
+const ANIM_HIT_B := "Hit_B"
 const ANIM_DEATH := "Death_A"
+const ANIM_DEATH_B := "Death_B"
 const ANIM_SPAWN := "Spawn_Ground"
+
+## EVERY RANK KILLS IN ITS OWN HAND (owner brief, 2026-08-09: "different
+## killing animations so it's not boring"). Until today every capture was the
+## same three beats — walk in, `Throw`, victim `Hit_A` then `Death_A` — so the
+## tenth duel of a game was frame-for-frame the first. Now the kill is a
+## property of the TYPE, and it is the type's own GEAR that decides it:
+##
+##   PAWN      stab       steps inside the guard, sword low, quick and brutal
+##   KNIGHT    charge     the horse gathers and gallops; the victim is
+##                        trampled and LAUNCHED, never cut
+##   BISHOP    bolt       NO CONTACT — he gives ground, raises the staff, and
+##                        a bolt of fire crosses the gap (the dracarys kit)
+##   ROOK      grind      the tower does not walk: it rolls OVER him. Dust.
+##   QUEEN     arrow      she looses from where she stands; it takes him in
+##                        the chest
+##   KING      execution  a slow two-handed raise, one downward blow
+##
+## Each has KILL_VARIANTS approach/timing/follow-through variants, and the
+## victim answers with its own variety (Hit_A/Hit_B, Death_A/Death_B, the
+## direction he falls), so two duels of the same rank still differ.
+##
+## The clips are the KayKit Rig_Medium library the cast already ships with
+## (Throw · Hit_A/B · Death_A/B) driven at different speeds and combined with
+## PROCEDURAL motion — lunges, gathers, gallops, launches, squash. Cross-vendor
+## retargeting of the Quaternius Universal library was evaluated and declined
+## (see the KILL SIGNATURES note above `play_capture`).
+const KILL_STAB := "stab"
+const KILL_CHARGE := "charge"
+const KILL_BOLT := "bolt"
+const KILL_GRIND := "grind"
+const KILL_ARROW := "arrow"
+const KILL_EXECUTION := "execution"
+const KILL_STYLES := {
+	Type.PAWN: KILL_STAB,
+	Type.ROOK: KILL_GRIND,
+	Type.KNIGHT: KILL_CHARGE,
+	Type.BISHOP: KILL_BOLT,
+	Type.QUEEN: KILL_ARROW,
+	Type.KING: KILL_EXECUTION,
+}
+## Approach/timing/follow-through variants per style — see each _kill_* func.
+const KILL_VARIANTS := 3
+
+## How the VICTIM goes down. Passed by the killer to die(); the empty string
+## is the legacy path (Hit_A -> Death_A), which stays byte-for-byte what it
+## was because checkmate and the costume suite both call `die()` bare.
+const DEATH_BLADE := "blade"
+const DEATH_LAUNCH := "launch"
+const DEATH_BURN := "burn"
+const DEATH_CRUSH := "crush"
+const DEATH_ARROW := "arrow"
+const DEATH_CRUMBLE := "crumble"
 
 ## Ensemble proportions, tuned BY EYE against the IN-GAME board frame (the
 ## KayKit cast is chibi — big head, wide shoulders — so a horse scaled to
@@ -156,7 +216,22 @@ var side: House = House.FROST
 ## Canonical HouseRegistry id skinning this piece ("" = legacy FROST/EMBER).
 var house_id := ""
 ## Set just before `died` fires — e2e reads it to prove a death anim played.
+## It is the NAME OF THE CLIP that played (or "Tower_Crumble"), which is the
+## contract game.gd's death_log and the costume suite both read; the FLAVOUR
+## of the death lives in death_style beside it.
 var death_anim := ""
+## How this piece went down ("" until it dies): DEATH_BLADE/LAUNCH/BURN/
+## CRUSH/ARROW/CRUMBLE. e2e reads it to prove a signature kill landed.
+var death_style := ""
+## The kill this piece last performed (KILL_STAB…KILL_EXECUTION) and which
+## variant of it fired. Set by play_capture BEFORE the first beat, so a test
+## can read them the moment the strike callable starts.
+var kill_style := ""
+var kill_variant := -1
+## TEST SEAM: pin the next kill's variant (-1 = pick at random, which is the
+## only thing gameplay ever does). The suites walk all three variants of all
+## six kills with this; nothing in src/ writes it.
+var kill_variant_force := -1
 
 var _model: Node3D
 var _anim: AnimationPlayer  # null for the rook (static tower); the RIDER's for the knight
@@ -173,6 +248,7 @@ var _ring_shown := false    # target state (true while fading in)
 var _mitre_brim: Dictionary = {}   # bishop only: hat MeshInstance3D -> brim surfaces
 var _hovered := false
 var _is_selected := false
+var _bolt: Node3D           # bishop only: the DracarysVFX kit, built on the first bolt
 
 
 func setup(new_type: Type, new_side: House, new_house_id: String = "") -> void:
@@ -194,6 +270,11 @@ func setup(new_type: Type, new_side: House, new_house_id: String = "") -> void:
 	_ring_shown = false
 	_hovered = false
 	_is_selected = false
+	_bolt = null
+	kill_style = ""
+	kill_variant = -1
+	death_style = ""
+	death_anim = ""
 	if piece_type == Type.ROOK:
 		_build_tower()
 	elif piece_type == Type.KNIGHT:
@@ -327,60 +408,387 @@ func move_to(world_pos: Vector3, walk_time: float = 0.4) -> void:
 	move_finished.emit()
 
 
+## KILL SIGNATURES — the capture duel, dispatched on the attacker's TYPE.
+##
+## Face the victim (the director holds that lock through the strike), then run
+## the rank's own choreography; when the await returns the victim is dead and
+## freed. `kill_style` / `kill_variant` are set BEFORE the first beat so a test
+## reading them from inside the strike callable sees the truth.
+##
+## ON RETARGETING (evaluated 2026-08-09, declined). The Quaternius Universal
+## Animation Library ships the clips this brief describes by name —
+## Sword_Attack, Spell_Simple_Shoot, Hit_Chest — but it is a DIFFERENT RIG:
+## different bone names, different rest pose, different root scale, and this
+## project has already been bitten once by cross-vendor skinning (the horse,
+## whose FBX-lineage rig corrupts in-engine at piece scale — PieceAssets.HORSE
+## — and which we ship as a STATIC mesh animated procedurally for exactly that
+## reason). A retarget pass is a bone-map plus a rest-pose reconciliation plus
+## a per-clip QA sweep across five casts and nine houses, and it buys clips we
+## can approximate: `Throw` at 2.1x IS a fast stab, `Throw` at 0.5x IS a heavy
+## two-handed raise. So the variety is bought with SPEED, PROCEDURAL MOTION and
+## VFX instead — which is also the pattern the banner-rook and the mount
+## already prove out. If a later pass wants true per-type clips, do the retarget
+## as its own turn with its own gate; it is not a free rider on this one.
 func play_capture(victim: PieceView) -> void:
-	## The capture duel: face the victim, strike (Throw — the free rig's
-	## best attack read — sold with a weapon-trail flash), victim takes the
-	## hit and dies. When the await returns the victim is dead and freed.
-	## Mounted strike (knight): the horse steps in under the rider's Throw.
 	var to_victim := victim.position - position
+	kill_style = str(KILL_STYLES.get(piece_type, KILL_STAB))
+	kill_variant = kill_variant_force if kill_variant_force >= 0 \
+		else randi() % KILL_VARIANTS
 	await _face(Vector3(to_victim.x, 0.0, to_victim.z))
 	victim.face_attacker(position)
-	if _anim != null:
-		if piece_type == Type.KNIGHT:
-			_horse_step(to_victim)   # concurrent step-in while the rider strikes
-		_anim.play(ANIM_THROW, 0.1)
-		_anim.speed_scale = 1.3
-		await get_tree().create_timer(0.5 / 1.3).timeout  # strike release beat
-	else:
-		await _tower_lunge(to_victim)
-	_strike_flash(victim.global_position)
-	await victim.die()
-	if _anim != null:
-		_anim.speed_scale = 1.0
-		if piece_type == Type.KNIGHT:
-			_reseat_rider()   # back to the still saddle pose, horse idles on
-		else:
-			_anim.play(ANIM_IDLE, 0.3)
+	match piece_type:
+		Type.KNIGHT:
+			await _kill_charge(victim)
+		Type.BISHOP:
+			await _kill_bolt(victim)
+		Type.ROOK:
+			await _kill_grind(victim)
+		Type.QUEEN:
+			await _kill_arrow(victim)
+		Type.KING:
+			await _kill_execution(victim)
+		_:
+			await _kill_stab(victim)
 
 
-func die() -> void:
-	## Hit reaction, death animation, then the corpse sinks into the stone.
-	## Emits died (with death_anim set) before freeing. Mounted death
-	## (knight): the rider plays Death_A and tumbles out of the saddle while
-	## the horse collapses through its own Death clip — same wall budget.
-	if _anim != null:
-		_anim.play(ANIM_HIT, 0.1)
-		_anim.speed_scale = 1.2
-		await get_tree().create_timer(PieceAssets.anim_length(ANIM_HIT) / 1.2 - 0.1).timeout
-		_anim.speed_scale = 1.0
-		_anim.play(ANIM_DEATH, 0.1)
-		death_anim = ANIM_DEATH
-		if piece_type == Type.KNIGHT:
-			_mounted_fall(PieceAssets.anim_length(ANIM_DEATH))   # concurrent
-		await get_tree().create_timer(PieceAssets.anim_length(ANIM_DEATH)).timeout
-	else:
+## Hit reaction, death animation, then the corpse sinks into the stone.
+## Emits died (with death_anim set) before freeing.
+##
+## `style` is the killer's signature (DEATH_* above). The BARE call — which is
+## what the checkmate cinematic and the costume suite make — is deliberately
+## unchanged: Hit_A, Death_A, sink, death_anim "Death_A". Everything new hangs
+## off an explicit style, so nothing that already depended on this contract can
+## be surprised by a randomised clip.
+func die(style: String = "") -> void:
+	death_style = style
+	if _anim == null:
+		# The watchtower does not bleed; it comes down. (Also the path any
+		# rig-less stand-in takes.)
+		if death_style.is_empty():
+			death_style = DEATH_CRUMBLE
 		death_anim = "Tower_Crumble"
 		_drop_banner()   # the banner tears free and falls with the tower
 		var fall := create_tween()
 		fall.tween_property(self, "rotation:z", rotation.z + PI * 0.28, 0.4) \
 			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 		await fall.finished
+	else:
+		match style:
+			DEATH_BURN:
+				await _die_burning()
+			DEATH_LAUNCH:
+				await _die_launched()
+			DEATH_CRUSH:
+				await _die_crushed()
+			"":
+				await _die_struck(ANIM_HIT, 1.2, ANIM_DEATH, 1.0, 0.0)
+			_:
+				var clip := _victim_death_clip()
+				await _die_struck(_victim_hit_clip(style), randf_range(1.15, 1.5),
+					clip, _victim_death_speed(clip), randf_range(-0.42, 0.42))
+	await _sink()
+	died.emit()
+	queue_free()
+
+
+# ── the six kills ─────────────────────────────────────────────────────────
+
+
+## PAWN — THE SHORT BRUTAL STAB. He does not wind up: he steps inside the
+## guard where a sword is useless, puts it in low, and steps back out.
+## Variants: 0 straight thrust · 1 off-line (he slips to a flank first) ·
+## 2 the double tap (a jab, a beat, then the one that lands).
+func _kill_stab(victim: PieceView) -> void:
+	var dir := _flat_dir_to(victim)
+	var home := position
+	var flank := Vector3.ZERO
+	if kill_variant == 1:
+		flank = dir.cross(Vector3.UP).normalized() * (0.2 if randf() < 0.5 else -0.2)
+	var inside := home + dir * (0.22 if kill_variant == 2 else 0.3) + flank
+	if _anim != null:
+		_anim.play(ANIM_THROW, 0.04)
+		_anim.speed_scale = 1.9 if kill_variant == 0 else 2.1
+	var step := create_tween()
+	step.tween_property(self, "position", inside, 0.15) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	await step.finished
+	_strike_flash(victim.global_position, {"height": 0.34, "scale": 0.72, "life": 0.34})
+	if kill_variant == 2:
+		await _beat(0.11)
+		var jab := create_tween()
+		jab.tween_property(self, "position", inside + dir * 0.14, 0.09) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+		await jab.finished
+		_strike_flash(victim.global_position, {"height": 0.3, "scale": 0.8, "life": 0.4})
+	await victim.die(DEATH_BLADE)
+	_settle_attacker()
+	var back := create_tween()
+	back.tween_property(self, "position", home, 0.2) \
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	await back.finished
+
+
+## KNIGHT — THE MOUNTED CHARGE. The ensemble gathers backwards, the horse
+## gallops in with the rider's sword out, and the victim is TRAMPLED — thrown
+## off his feet rather than cut. The mount is a static mesh, so the gallop is
+## the canter bob from move_to, run hard.
+## Variants: 0 straight down the file · 1 a wide approach that converges ·
+## 2 a rear-up, then a shorter, heavier slam.
+func _kill_charge(victim: PieceView) -> void:
+	var dir := _flat_dir_to(victim)
+	var home := position
+	var gap := _flat_gap_to(victim)
+	var flank := dir.cross(Vector3.UP).normalized()
+	var gather := home - dir * (0.46 if kill_variant == 2 else 0.34) \
+		+ flank * (0.3 if kill_variant == 1 else 0.0)
+	var rear := create_tween().set_parallel(true)
+	rear.tween_property(self, "position", gather, 0.24) \
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	if _model != null:
+		rear.tween_property(_model, "rotation:x", -0.24 if kill_variant == 2 else -0.1,
+			0.24).set_trans(Tween.TRANS_QUAD)
+	await rear.finished
+	if _anim != null:
+		_anim.play(ANIM_THROW, 0.04)   # the sword comes out, extended
+		_anim.speed_scale = 1.6
+	var impact := home + dir * maxf(gap - 0.42, 0.06)
+	var from := position
+	var charge := create_tween()
+	var gallop := func(t: float) -> void:
+		position = from.lerp(impact, t) + Vector3.UP * absf(sin(t * PI * 2.0)) * 0.05
+		if _model != null:
+			_model.rotation.x = sin(t * PI * 4.0) * 0.08 - 0.03 * (1.0 - t)
+	charge.tween_method(gallop, 0.0, 1.0, 0.3 if kill_variant == 2 else 0.34) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	await charge.finished
+	if _model != null:
+		_model.rotation.x = 0.0
+	_strike_flash(victim.global_position, {"height": 0.72, "scale": 1.25, "life": 0.42})
+	_dust_puff(victim.global_position, 22, 0.5)   # hooves on stone
+	await victim.die(DEATH_LAUNCH)
+	_settle_attacker()
+	var wheel := create_tween()
+	wheel.tween_property(self, "position", home, 0.34) \
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	await wheel.finished
+
+
+## BISHOP — NO CONTACT. He gives ground rather than closing, raises the staff,
+## and a bolt of fire crosses the gap; the victim burns where he stands. The
+## fire is the DRACARYS kit (assets/vfx/dracarys.gd) at bolt scale — the same
+## instrument the wyrm breathes with, wired the same way (tune BEFORE
+## add_child; the kit builds itself in _ready).
+## Variants: 0 one bolt · 1 two pulses · 2 a high bolt that falls onto him.
+func _kill_bolt(victim: PieceView) -> void:
+	var dir := _flat_dir_to(victim)
+	var home := position
+	var stand := home - dir * (0.34 if kill_variant == 2 else 0.55)
+	var give_ground := create_tween()
+	give_ground.tween_property(self, "position", stand, 0.24) \
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	_prepare_bolt()   # build the kit NOW, under the raise — not on the ignition frame
+	if _anim != null:
+		_anim.play(ANIM_THROW, 0.05)   # the staff comes up
+		_anim.speed_scale = 1.15
+	await give_ground.finished
+	await _beat(0.2)
+	var chest := victim.global_position + Vector3.UP * _chest_height(victim)
+	match kill_variant:
+		1:
+			_fire_bolt(chest, 0.24)
+			await _beat_wall(0.34)
+			_fire_bolt(chest, 0.3)
+		2:
+			var high := chest + Vector3.UP * 1.0
+			_fire_bolt(high, 0.5)
+			await _sweep_bolt(high, chest, 0.22)
+		_:
+			_fire_bolt(chest, 0.42)
+	await _beat_wall(0.16)
+	await victim.die(DEATH_BURN)
+	_stop_bolt()
+	_settle_attacker()
+	var ret := create_tween()
+	ret.tween_property(self, "position", home, 0.26) \
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	await ret.finished
+
+
+## ROOK — THE GRIND. A watchtower has no arms: it comes forward over the
+## square and what is standing on it is under it. Dust, not blood — and the
+## tower ends the duel standing where the victim stood.
+## Variants: 0 a steady roll · 1 a heavy lean into it · 2 rise, then drop on
+## him first and grind through.
+func _kill_grind(victim: PieceView) -> void:
+	var dir := _flat_dir_to(victim)
+	var home := position
+	var over := victim.position
+	var stop := over + dir * 0.08
+	if kill_variant == 2:
+		var rise := create_tween()
+		rise.tween_property(self, "position", home + Vector3.UP * 0.16, 0.16) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		rise.tween_property(self, "position", home, 0.1) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+		await rise.finished
+		_dust_puff(global_position, 16, 0.35)
+	var lean: float = 0.13 if kill_variant == 1 else 0.06
+	var start := position
+	var grind := create_tween()
+	var roll := func(u: float) -> void:
+		position = start.lerp(stop, u) + Vector3.UP * absf(sin(u * PI * 3.0)) * 0.028
+		rotation.z = sin(u * PI * 7.0) * 0.02          # masonry judder
+		rotation.x = -lean * sin(u * PI)               # it leans into the weight
+	grind.tween_method(roll, 0.0, 1.0, 0.62 if kill_variant == 1 else 0.55) \
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	await _beat(0.24)   # the shadow reaches him
+	var gone := _fell(victim, DEATH_CRUSH)
+	_dust_puff(victim.global_position, 34, 0.7)
+	await grind.finished
+	rotation.x = 0.0
+	rotation.z = 0.0
+	_dust_puff(global_position, 18, 0.45)
+	await _await_death(gone, victim)
+
+
+## QUEEN — THE BOW. She never leaves her square: she draws, looses, and the
+## arrow takes him in the chest.
+## Variants: 0 a flat fast shot · 1 a lobbed arc · 2 two arrows, the second
+## before the first has landed.
+func _kill_arrow(victim: PieceView) -> void:
+	# SHE OPENS THE RANGE FIRST. game.gd walks every capturing piece to
+	# `target - dir*0.55`, which puts an archer close enough to hand the man
+	# her arrow — and a bow shot with no flight in it is just a stab with a
+	# strange prop. She gives ground while she draws (and takes it back after),
+	# so the arrow is in the air long enough to be seen.
+	var dir := _flat_dir_to(victim)
+	var home := position
+	var open_range := create_tween()
+	open_range.tween_property(self, "position", home - dir * 0.62, 0.26) \
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	if _anim != null:
+		_anim.play(ANIM_THROW, 0.05)   # draw and loose
+		_anim.speed_scale = 1.0 if kill_variant == 1 else 1.3
+	await open_range.finished
+	await _beat(0.16)
+	var chest := victim.global_position + Vector3.UP * _chest_height(victim)
+	if kill_variant == 2:
+		_loose_arrow(victim, chest + Vector3(randf_range(-0.06, 0.06), 0.08, 0.0), 0.0)
+		await _beat(0.13)
+	await _loose_arrow(victim, chest, 0.34 if kill_variant == 1 else 0.0)
+	await victim.die(DEATH_ARROW)
+	_settle_attacker()
+	var close_range := create_tween()
+	close_range.tween_property(self, "position", home, 0.24) \
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	await close_range.finished
+
+
+## KING — THE EXECUTION. Two hands, a slow raise the eye has time to read,
+## and one downward blow that ends it.
+## Variants: 0 straight overhead · 1 a step into it · 2 a side sweep taken
+## across the body (the victim spins as he falls).
+func _kill_execution(victim: PieceView) -> void:
+	var dir := _flat_dir_to(victim)
+	var home := position
+	if _anim != null:
+		_anim.play(ANIM_THROW, 0.06)
+		_anim.speed_scale = 0.5        # THE RAISE — deliberately slow
+	if kill_variant == 1:
+		var step := create_tween()
+		step.tween_property(self, "position", home + dir * 0.24, 0.36) \
+			.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	await _beat(0.55)
+	if _anim != null:
+		_anim.speed_scale = 2.6        # THE BLOW
+	await _beat(0.12)
+	if kill_variant == 2:
+		_strike_flash(victim.global_position,
+			{"height": 0.62, "scale": 1.35, "life": 0.5, "tilt": 0.1})
+	else:
+		_strike_flash(victim.global_position,
+			{"height": 0.78, "scale": 1.2, "life": 0.5, "tilt": PI * 0.5})
+	_dust_puff(victim.global_position, 26, 0.6)
+	await victim.die(DEATH_BLADE if kill_variant == 2 else DEATH_CRUSH)
+	_settle_attacker()
+	if kill_variant == 1:
+		var back := create_tween()
+		back.tween_property(self, "position", home, 0.26) \
+			.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+		await back.finished
+
+
+# ── kill plumbing ─────────────────────────────────────────────────────────
+
+
+func _settle_attacker() -> void:
+	if _anim == null:
+		return
+	_anim.speed_scale = 1.0
+	if piece_type == Type.KNIGHT:
+		_reseat_rider()   # back to the still saddle pose, horse idles on
+	else:
+		_anim.play(ANIM_IDLE, 0.3)
+
+
+func _flat_dir_to(victim: Node3D) -> Vector3:
+	var d := victim.position - position
+	d.y = 0.0
+	return d.normalized() if d.length() > 0.001 else Vector3.FORWARD
+
+
+func _flat_gap_to(victim: Node3D) -> float:
+	var d := victim.position - position
+	d.y = 0.0
+	return d.length()
+
+
+## Roughly where a piece's chest is, in world units above its feet — the
+## height grading makes this a per-type number, not a constant.
+func _chest_height(piece: PieceView) -> float:
+	return PieceAssets.piece_height(piece.piece_type) * 0.62
+
+
+## A scaled beat (bends with the duel's slow-mo, like every other tween here).
+func _beat(sec: float) -> void:
+	var tree := get_tree()
+	if tree == null:
+		return
+	await tree.create_timer(sec).timeout
+
+
+## A WALL-CLOCK beat — for the dracarys kit only, which runs its own timeline
+## on Time.get_ticks_usec and is immune to the time_scale the duel bends.
+## Waiting on a scaled timer for a wall-clock effect drifts them apart.
+func _beat_wall(sec: float) -> void:
+	var tree := get_tree()
+	if tree == null:
+		return
+	await tree.create_timer(sec, true, false, true).timeout
+
+
+## Start a death concurrently with the attacker's follow-through; returns a
+## flag dict to hand to _await_death.
+func _fell(victim: PieceView, style: String) -> Dictionary:
+	var gone := {"v": false}
+	victim.died.connect(func() -> void: gone["v"] = true, CONNECT_ONE_SHOT)
+	victim.die(style)   # fire and forget — the caller waits on the flag
+	return gone
+
+
+func _await_death(gone: Dictionary, victim: PieceView) -> void:
+	while not bool(gone["v"]) and is_instance_valid(victim):
+		var tree := get_tree()
+		if tree == null:
+			return
+		await tree.process_frame
+
+
+func _sink() -> void:
 	var sink := create_tween()
 	sink.tween_property(self, "position:y", position.y - 1.3, 0.45) \
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 	await sink.finished
-	died.emit()
-	queue_free()
 
 
 func spawn_flourish() -> void:
@@ -439,17 +847,11 @@ func _face_home() -> void:
 	tw.tween_property(self, "rotation:y", _home_yaw, 0.18).set_trans(Tween.TRANS_SINE)
 
 
-func _horse_step(to_victim: Vector3) -> void:
-	## Mounted strike: the horse steps into the blow while the rider throws
-	## — the whole ensemble advances and settles back. Fire-and-forget; the
-	## step-back plays out under the victim's death.
-	var dir := Vector3(to_victim.x, 0.0, to_victim.z).normalized()
-	var start := position
-	var tw := create_tween()
-	tw.tween_property(self, "position", start + dir * 0.2, 0.24) \
-		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN_OUT)
-	tw.tween_property(self, "position", start, 0.3) \
-		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+## NOTE the old `_horse_step` (a 0.2-unit step-in under the rider's Throw) and
+## `_tower_lunge` (a tilt-slam for the rig-less rook) are GONE — `_kill_charge`
+## and `_kill_grind` are what those two beats grew into, and leaving the
+## originals behind as dead code would have left two ways to strike with the
+## same piece.
 
 
 func _mounted_fall(window: float) -> void:
@@ -530,18 +932,6 @@ func _apply_seat_pose() -> void:
 						* seat[bone_name])
 
 
-func _tower_lunge(to_victim: Vector3) -> void:
-	## The rook has no skeleton: sell the strike with a heavy tilt-slam.
-	var dir := Vector3(to_victim.x, 0.0, to_victim.z).normalized()
-	var start := position
-	var tw := create_tween()
-	tw.tween_property(self, "position", start + dir * 0.22 + Vector3.UP * 0.12, 0.22) \
-		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
-	tw.tween_property(self, "position", start, 0.18) \
-		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	await tw.finished
-
-
 ## THE WEAPON TRAIL (critic defect #1, 2026-08-09). This used to be a bare
 ## 0.85 x 0.22 QuadMesh at 90 % mustard alpha, and every duel screenshot in
 ## the suite caught it as a filled rectangle over the fighters' heads — the
@@ -583,11 +973,22 @@ const TRAIL_LIFE := 0.50
 const TRAIL_LIFT := 0.45   # metres toward the camera, off the duellists' line
 
 
-func _strike_flash(victim_world: Vector3) -> void:
+## `opts` shapes the arc per KILL (all optional, defaults = the numbers this
+## trail was tuned to): "height" metres above the fighters' feet · "scale"
+## overall size · "life" seconds · "tilt" radians (PI/2 = the king's vertical
+## chop) · "tint" emission colour · "at" a world point to anchor the arc on
+## INSTEAD of the midpoint between the fighters (the queen's arrow strikes
+## where it lands, which is not halfway to the man who shot it).
+func _strike_flash(victim_world: Vector3, opts: Dictionary = {}) -> void:
 	## A fast, thin, additive arc of light along the blade's path.
+	var height: float = float(opts.get("height", 0.62))
+	var size: float = float(opts.get("scale", 1.0))
+	var life: float = float(opts.get("life", TRAIL_LIFE))
+	var tilt: float = float(opts.get("tilt", randf_range(-0.35, 0.35)))
+	var tint: Color = opts.get("tint", Color(1.0, 0.72, 0.34))
 	var quad := MeshInstance3D.new()
 	var mesh := QuadMesh.new()
-	mesh.size = TRAIL_QUAD_SIZE
+	mesh.size = TRAIL_QUAD_SIZE * size
 	quad.mesh = mesh
 	var mat := StandardMaterial3D.new()
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
@@ -597,26 +998,539 @@ func _strike_flash(victim_world: Vector3) -> void:
 	mat.albedo_texture = PieceAssets.strike_trail_texture()
 	mat.albedo_color = Color(1.0, 1.0, 1.0, 0.85)
 	mat.emission_enabled = true
-	mat.emission = Color(1.0, 0.72, 0.34)
+	mat.emission = tint
 	mat.emission_energy_multiplier = 1.4
 	quad.name = "StrikeTrail"   # the name IS its role (PieceAssets.Role.EFFECT)
 	quad.material_override = mat
 	quad.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(quad)
 	quad.top_level = true   # world pose, set below — never the attacker's frame
-	var mid := (global_position + victim_world) * 0.5 + Vector3(0.0, 0.62, 0.0)
+	var mid: Vector3 = opts.get("at", (global_position + victim_world) * 0.5) \
+		+ Vector3(0.0, height, 0.0)
 	var cam := get_viewport().get_camera_3d()
 	if cam != null:
 		mid += (cam.global_position - mid).normalized() * TRAIL_LIFT
 	quad.global_position = mid
-	quad.rotation = Vector3(0.0, 0.0, randf_range(-0.35, 0.35))
+	quad.rotation = Vector3(0.0, 0.0, tilt)
 	quad.scale = Vector3(1.05, 0.85, 1.0)
 	var tw := create_tween().set_parallel(true)
-	tw.tween_property(quad, "scale", Vector3(1.55, 0.55, 1.0), TRAIL_LIFE) \
+	tw.tween_property(quad, "scale", Vector3(1.55, 0.55, 1.0), life) \
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	tw.tween_property(mat, "albedo_color:a", 0.0, TRAIL_LIFE) \
+	tw.tween_property(mat, "albedo_color:a", 0.0, life) \
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	tw.chain().tween_callback(quad.queue_free)
+
+
+# ── the victim's side ─────────────────────────────────────────────────────
+#
+# The other half of "so the tenth duel does not look like the first": a
+# repeated kill still varies because the man taking it answers differently —
+# which of the two hit reactions he plays, which of the two death clips, how
+# fast, and which way he falls. The LEGACY bare die() is exempt on purpose
+# (see die()); everything here is reached only through an explicit style.
+
+
+func _victim_hit_clip(style: String) -> String:
+	if style == DEATH_ARROW:
+		return ANIM_HIT   # taken in the chest — the short recoil, always
+	return ANIM_HIT if randf() < 0.5 else ANIM_HIT_B
+
+
+func _victim_death_clip() -> String:
+	return ANIM_DEATH if randf() < 0.6 else ANIM_DEATH_B
+
+
+## Death_B is 2.63 s against Death_A's 0.80 — a duel cannot spend that, so
+## when it is drawn it is played fast enough to land in the same ~0.8-1.1 s
+## window. (Measured the hard way: left at 1.0x it pushed a single stab to
+## 4.2 s wall, past the budget the whole cinematic is built around.)
+func _victim_death_speed(clip: String) -> float:
+	if clip == ANIM_DEATH_B:
+		return randf_range(2.35, 2.75)
+	return randf_range(0.95, 1.2)
+
+
+## The standard fall: a hit reaction, then a death clip, with `fall_yaw`
+## twisting the MODEL (never the root — the director's face-lock owns the
+## root's yaw through the strike and would overwrite it) so bodies do not all
+## drop along the same line.
+func _die_struck(hit_clip: String, hit_speed: float, death_clip: String,
+		death_speed: float, fall_yaw: float) -> void:
+	if not hit_clip.is_empty():
+		_anim.play(hit_clip, 0.1)
+		_anim.speed_scale = hit_speed
+		await _beat(maxf(PieceAssets.anim_length(hit_clip) / hit_speed - 0.1, 0.05))
+	if _model != null and not is_zero_approx(fall_yaw):
+		_model.rotation.y += fall_yaw
+	_anim.speed_scale = death_speed
+	_anim.play(death_clip, 0.1)
+	death_anim = death_clip
+	var window := PieceAssets.anim_length(death_clip) / death_speed
+	if piece_type == Type.KNIGHT:
+		_mounted_fall(window)   # concurrent: rider off the saddle, horse over
+	await _beat(window)
+
+
+## TRAMPLED. No hit reaction — he is off his feet before he can take one:
+## Death_A plays while the ensemble that hit him throws him back and over.
+## Death_A specifically, because a launch is a SHORT beat and because the
+## mounted-capture contract (test_costumes) reads this clip name.
+func _die_launched() -> void:
+	death_anim = ANIM_DEATH
+	_anim.speed_scale = 1.15
+	_anim.play(ANIM_DEATH, 0.05)
+	var window := PieceAssets.anim_length(ANIM_DEATH) / 1.15
+	if piece_type == Type.KNIGHT:
+		_mounted_fall(window)
+	# He faces his killer (face_attacker + the director's lock), so his own
+	# BACK is the direction he is thrown.
+	var away := -global_transform.basis.z
+	away.y = 0.0
+	away = away.normalized() if away.length() > 0.01 else Vector3.BACK
+	var p0 := global_position
+	var spin := randf_range(-0.5, 0.5)
+	var tw := create_tween().set_parallel(true)
+	var arc := func(u: float) -> void:
+		global_position = p0 + away * (0.78 * u) + Vector3.UP * (sin(u * PI) * 0.4)
+	tw.tween_method(arc, 0.0, 1.0, window * 0.8) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	if _model != null:
+		tw.tween_property(_model, "rotation:x", -1.25, window * 0.8) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		tw.tween_property(_model, "rotation:y", _model.rotation.y + spin, window * 0.8)
+	await _beat(window)
+
+
+## CRUSHED under the tower (or under the king's blow): he collapses and then
+## the weight lands — the model squashes, dust goes up, and there is no blood
+## in it at all.
+func _die_crushed() -> void:
+	death_anim = ANIM_DEATH
+	_anim.speed_scale = 1.5
+	_anim.play(ANIM_DEATH, 0.05)
+	if piece_type == Type.KNIGHT:
+		_mounted_fall(PieceAssets.anim_length(ANIM_DEATH) / 1.5)
+	await _beat(0.16)
+	if _model != null:
+		var flat := Vector3(_model.scale.x * 1.3, _model.scale.y * 0.12,
+			_model.scale.z * 1.3)
+		var tw := create_tween().set_parallel(true)
+		tw.tween_property(_model, "scale", flat, 0.24) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+		tw.tween_property(_model, "rotation:y",
+			_model.rotation.y + randf_range(-0.3, 0.3), 0.24)
+		_dust_puff(global_position, 30, 0.62)
+		await tw.finished
+	else:
+		await _beat(0.24)
+
+
+## BURNED. The bishop's bolt does not touch him: it lights him. Every surface
+## spikes white-hot, the flesh chars to charcoal as he goes down, and thin
+## embers come off the body — the dragon's incineration beat (dragon_spectator
+## ._incinerate) at duel scale and duel budget.
+##
+## Materials are DUPLICATED before they are written: PieceAssets hands out
+## cached, shared materials, and charring one in place would char every piece
+## of that house wearing it.
+const CHAR_COLOR := Color(0.07, 0.06, 0.06)
+const CHAR_FLASH := Color(1.0, 0.86, 0.5)
+
+
+func _die_burning() -> void:
+	death_anim = ANIM_DEATH
+	var mats := _burnable_materials()
+	var flash := func(f: float) -> void:
+		for e in mats:
+			var m: StandardMaterial3D = e[0]
+			if is_instance_valid(m):
+				m.emission_enabled = true
+				# Capped at 1.9, not the wyrm's 3.2: over that the man stops
+				# being a man on fire and becomes a white cut-out of one.
+				m.emission = CHAR_FLASH * (0.25 + 1.65 * f)
+	var lit := create_tween()
+	lit.tween_method(flash, 0.0, 1.0, 0.18).set_trans(Tween.TRANS_QUAD)
+	await lit.finished
+	_ember_wisps()
+	_anim.speed_scale = 1.05
+	_anim.play(ANIM_DEATH, 0.06)
+	var window := PieceAssets.anim_length(ANIM_DEATH) / 1.05
+	if piece_type == Type.KNIGHT:
+		_mounted_fall(window)
+	var char_it := func(f: float) -> void:
+		for e in mats:
+			var m: StandardMaterial3D = e[0]
+			if is_instance_valid(m):
+				m.albedo_color = (e[1] as Color).lerp(CHAR_COLOR, f)
+				m.emission = CHAR_FLASH * (1.2 * (1.0 - f))   # the glow cools
+	var burn := create_tween()
+	burn.tween_method(char_it, 0.0, 1.0, window).set_trans(Tween.TRANS_SINE)
+	await burn.finished
+
+
+## Every surface on this piece, duplicated so the fire owns its own copy.
+## Returns [[material, original_albedo], ...].
+func _burnable_materials() -> Array:
+	var mats: Array = []
+	for mi: MeshInstance3D in find_children("*", "MeshInstance3D", true, false):
+		if mi.material_override is StandardMaterial3D:
+			var m: StandardMaterial3D = (mi.material_override as StandardMaterial3D).duplicate()
+			mi.material_override = m
+			mats.append([m, m.albedo_color])
+			continue
+		if mi.mesh == null:
+			continue
+		for s in mi.mesh.get_surface_count():
+			var src := mi.get_active_material(s)
+			if src is StandardMaterial3D:
+				var m2: StandardMaterial3D = (src as StandardMaterial3D).duplicate()
+				mi.set_surface_override_material(s, m2)
+				mats.append([m2, m2.albedo_color])
+	return mats
+
+
+# ── kill VFX (particles and props only — NEVER a Light3D) ─────────────────
+#
+# The hall's eight omnis are the eight torches and the suites assert it, so
+# every effect below sells its light the way dracarys.gd does: emissive,
+# unshaded, additive geometry. Nothing here creates a lamp.
+
+
+## A one-shot puff of stone dust — hooves, a tower's weight, a king's blow.
+##
+## DUST IS A HAZE, NOT A DOME. The first cut fired 30 half-opaque billboards
+## from one point with the emitter's explosiveness at 0.85, and the frames came
+## back with a white hemisphere sitting on the flagstones beside the fighters —
+## the same "flat bright shape a critic reads as an unfinished debug panel"
+## the weapon trail already paid for once. So: fewer of them, a quarter of the
+## alpha, thrown wide enough to separate, and spawned a hand's height off the
+## floor so the ground plane stops cutting them into a flat-bottomed dome.
+func _dust_puff(world_pos: Vector3, amount: int, spread_scale: float) -> void:
+	var p := GPUParticles3D.new()
+	p.name = "KillDust"
+	p.amount = clampi(int(round(amount * 0.5)), 4, 20)
+	p.lifetime = 0.85
+	p.one_shot = true
+	p.explosiveness = 0.55
+	p.randomness = 0.8
+	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var pm := ParticleProcessMaterial.new()
+	pm.direction = Vector3(0.0, 1.0, 0.0)
+	pm.spread = 72.0
+	pm.initial_velocity_min = 0.9 * spread_scale
+	pm.initial_velocity_max = 2.1 * spread_scale
+	pm.gravity = Vector3(0.0, -0.9, 0.0)
+	pm.damping_min = 1.4
+	pm.damping_max = 2.8
+	pm.scale_min = 0.1
+	pm.scale_max = 0.26
+	pm.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
+	pm.emission_sphere_radius = 0.16
+	var ramp := Gradient.new()
+	ramp.offsets = PackedFloat32Array([0.0, 0.35, 1.0])
+	ramp.colors = PackedColorArray([
+		Color(0.58, 0.55, 0.5, 0.2), Color(0.5, 0.47, 0.44, 0.12),
+		Color(0.45, 0.43, 0.4, 0.0)])
+	var ramp_tex := GradientTexture1D.new()
+	ramp_tex.gradient = ramp
+	pm.color_ramp = ramp_tex
+	p.process_material = pm
+	var quad := QuadMesh.new()
+	quad.size = Vector2(0.34, 0.34)
+	var mat := StandardMaterial3D.new()
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+	mat.vertex_color_use_as_albedo = true
+	mat.albedo_texture = _soft_dot()
+	quad.material = mat
+	p.draw_pass_1 = quad
+	p.visibility_aabb = AABB(Vector3(-2, -1, -2), Vector3(4, 4, 4))
+	_spawn_world_effect(p, world_pos + Vector3.UP * 0.1, 1.8)
+	p.emitting = true
+
+
+## A soft round particle mask — dust with a hard rectangular edge is a
+## rectangle, which is the exact defect the weapon trail already paid for.
+func _soft_dot() -> GradientTexture2D:
+	var g := Gradient.new()
+	g.offsets = PackedFloat32Array([0.0, 0.45, 1.0])
+	g.colors = PackedColorArray([
+		Color(1, 1, 1, 1.0), Color(1, 1, 1, 0.5), Color(1, 1, 1, 0.0)])
+	var t := GradientTexture2D.new()
+	t.gradient = g
+	t.width = 64
+	t.height = 64
+	t.fill = GradientTexture2D.FILL_RADIAL
+	t.fill_from = Vector2(0.5, 0.5)
+	t.fill_to = Vector2(1.0, 0.5)
+	return t
+
+
+## Thin embers coming off a burning body — the only thing that says "fire"
+## once the jet has cut.
+func _ember_wisps() -> void:
+	var p := GPUParticles3D.new()
+	p.name = "BurnEmbers"
+	p.amount = 26
+	p.lifetime = 1.1
+	p.explosiveness = 0.1
+	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var pm := ParticleProcessMaterial.new()
+	pm.direction = Vector3(0.0, 1.0, 0.0)
+	pm.spread = 24.0
+	pm.initial_velocity_min = 0.25
+	pm.initial_velocity_max = 0.7
+	pm.gravity = Vector3(0.0, 0.35, 0.0)   # embers RISE
+	pm.scale_min = 0.02
+	pm.scale_max = 0.05
+	pm.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
+	pm.emission_sphere_radius = 0.18
+	var ramp := Gradient.new()
+	ramp.offsets = PackedFloat32Array([0.0, 0.4, 1.0])
+	ramp.colors = PackedColorArray([
+		Color(3.0, 1.5, 0.5, 1.0), Color(2.0, 0.6, 0.15, 0.8),
+		Color(0.6, 0.15, 0.05, 0.0)])
+	var ramp_tex := GradientTexture1D.new()
+	ramp_tex.gradient = ramp
+	ramp_tex.use_hdr = true   # or every colour clamps to 1.0 and nothing blooms
+	pm.color_ramp = ramp_tex
+	p.process_material = pm
+	var quad := QuadMesh.new()
+	quad.size = Vector2(0.08, 0.08)
+	var mat := StandardMaterial3D.new()
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+	mat.vertex_color_use_as_albedo = true
+	mat.albedo_texture = _soft_dot()
+	quad.material = mat
+	p.draw_pass_1 = quad
+	p.visibility_aabb = AABB(Vector3(-1.5, -0.5, -1.5), Vector3(3, 3.5, 3))
+	_spawn_world_effect(p, global_position + Vector3.UP * _chest_height(self), 2.2)
+	p.emitting = true
+
+
+## Park a fire-and-forget effect in WORLD space (never under a piece that is
+## about to sink into the stone or walk away) and free it after `life`.
+func _spawn_world_effect(node: Node3D, world_pos: Vector3, life: float) -> void:
+	var holder := get_parent()
+	if holder == null:
+		holder = self
+	holder.add_child(node)
+	node.global_position = world_pos
+	var tree := get_tree()
+	if tree == null:
+		return
+	var t := tree.create_timer(life, true, false, true)   # wall clock: it must always die
+	t.timeout.connect(func() -> void:
+		if is_instance_valid(node):
+			node.queue_free())
+
+
+## THE QUEEN'S ARROW. A shaft with a head, flown from the bow to the chest —
+## awaitable, so "the arrow lands, THEN he falls" is a sequence and not a
+## coincidence. `arc` lifts the flight for the lobbed variant.
+##
+## IT STAYS IN HIM. The flight is ~0.2 s and the frames that matter (the
+## suite's, and the player's memory of the kill) are of the fall AFTER it, so
+## an arrow that despawns on contact leaves a man who simply fell over. On
+## impact it is re-parented to the victim and rides the body down — and is
+## freed with him, since he owns it now.
+func _loose_arrow(victim: PieceView, target: Vector3, arc: float) -> void:
+	var bow := find_child("Gear_bow", true, false) as Node3D
+	var from := bow.global_position if bow != null \
+		else global_position + Vector3.UP * _chest_height(self)
+	var shaft := MeshInstance3D.new()
+	shaft.name = "Arrow"
+	# Scaled to the CAST, not to a real arrow: these fighters are 0.78-1.2 world
+	# units tall, so a 0.42 m shaft crossed the frame like a spear.
+	var cyl := CylinderMesh.new()
+	cyl.top_radius = 0.008
+	cyl.bottom_radius = 0.008
+	cyl.height = 0.24
+	shaft.mesh = cyl
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.22, 0.16, 0.1)
+	mat.roughness = 0.9
+	shaft.material_override = mat
+	shaft.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var head := MeshInstance3D.new()
+	head.name = "ArrowHead"
+	var tip := CylinderMesh.new()
+	tip.top_radius = 0.0
+	tip.bottom_radius = 0.018
+	tip.height = 0.07
+	head.mesh = tip
+	var hmat := StandardMaterial3D.new()
+	hmat.albedo_color = Color(0.6, 0.62, 0.66)
+	hmat.metallic = 0.9
+	hmat.roughness = 0.35
+	head.material_override = hmat
+	head.position = Vector3(0.0, 0.14, 0.0)
+	head.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	shaft.add_child(head)
+	var holder := get_parent()
+	if holder == null:
+		holder = self
+	holder.add_child(shaft)
+	var flight := clampf(from.distance_to(target) * 0.14, 0.12, 0.26)
+	var fly := create_tween()
+	var travel := func(u: float) -> void:
+		if not is_instance_valid(shaft):
+			return
+		var p := from.lerp(target, u) + Vector3.UP * (sin(u * PI) * arc)
+		var nxt := from.lerp(target, minf(u + 0.05, 1.0)) \
+			+ Vector3.UP * (sin(minf(u + 0.05, 1.0) * PI) * arc)
+		var dir := nxt - p
+		if dir.length() > 0.0001:
+			# The cylinder's long axis is +Y — build the basis so that +Y runs
+			# down the flight path (look_at would point -Z, which is the wrong
+			# axis for a shaft).
+			var ay := dir.normalized()
+			var ax := ay.cross(Vector3.UP)
+			if ax.length() < 0.001:
+				ax = ay.cross(Vector3.FORWARD)
+			ax = ax.normalized()
+			shaft.global_transform = Transform3D(
+				Basis(ax, ay, ax.cross(ay).normalized()), p)
+		else:
+			shaft.global_position = p
+	fly.tween_method(travel, 0.0, 1.0, flight).set_trans(Tween.TRANS_LINEAR)
+	await fly.finished
+	# Anchored ON the chest it hit — a flash halfway back to the archer is not
+	# an impact, it is a decoration.
+	_strike_flash(target, {"at": target, "height": 0.0, "scale": 0.45,
+		"life": 0.26, "tint": Color(1.0, 0.86, 0.6)})
+	if not is_instance_valid(shaft):
+		return
+	if is_instance_valid(victim) and not victim.is_queued_for_deletion():
+		var xf := shaft.global_transform
+		shaft.get_parent().remove_child(shaft)
+		victim.add_child(shaft)
+		shaft.global_transform = xf
+		# Buried to the fletching rather than resting on the surface.
+		shaft.global_position -= xf.basis.y.normalized() * 0.07
+	else:
+		shaft.queue_free()
+
+
+# ── the bishop's bolt (DRACARYS at staff scale) ────────────────────────────
+#
+# The kit is model-independent: it aims from any Node3D and re-reads that
+# node's GLOBAL transform every frame, so a marker on the staff tip makes the
+# bolt track the raise. Two hard-won wiring rules are honoured here:
+#   1. TUNE BEFORE add_child — the kit bakes these into shaders, gradients and
+#      particle materials in _build(), which runs from its own _ready();
+#   2. bind NOTHING. No camera (no shake) and no WorldEnvironment (no exposure
+#      lift): a capture is not a ceremony, and the duel already owns the
+#      camera and the clock.
+# It is built lazily, under the staff raise (never on the ignition frame) and
+# freed at the end of the kill, so a board of bishops costs nothing until one
+# of them actually kills.
+const DracarysScript := preload("res://assets/vfx/dracarys.gd")
+
+
+func _prepare_bolt() -> void:
+	if _bolt != null and is_instance_valid(_bolt):
+		return
+	var fx: Node3D = DracarysScript.new()
+	fx.name = "StaffBolt"
+	fx.reach = 1.6                   # a staff bolt, not a wyrm's breath
+	fx.torrent_spread = 6.0
+	# 0.30, not the kit's 1.0 and not the wyrm's 0.40. This is a ONE-METRE shot
+	# fired between two figures 0.8 m tall in a dark hall: at 0.34 the first
+	# frames came back with the victim a featureless white silhouette and the
+	# far wall lit orange — the same "hot core is fine, the ROOM stays a dark
+	# stone hall" line dragon_spectator draws, at a tenth of the range.
+	fx.intensity = 0.3
+	fx.ember_tail = 0.6
+	fx.ash_tail = 0.4
+	fx.heat_shimmer_enabled = false  # a 1.5 m bolt has no heat haze worth a pass
+	fx.environment_lift_enabled = false
+	fx.auto_punch = false
+	fx.floor_y = global_position.y
+	add_child(fx)                    # AFTER the tuning — see above
+	_bolt = fx
+
+
+func _staff_muzzle() -> Node3D:
+	var staff := find_child("Gear_staff", true, false) as Node3D
+	if staff == null:
+		return null
+	var existing := staff.get_node_or_null("StaffTip") as Node3D
+	if existing != null:
+		return existing
+	# The tip is the highest point of the prop in WORLD space at the moment we
+	# look (the staff is held, so its local axes are not the world's), stored
+	# back as a local offset so it then tracks the animation.
+	var best := -INF
+	var top := staff.global_position
+	for mi: MeshInstance3D in staff.find_children("*", "MeshInstance3D", true, false):
+		if mi.mesh == null:
+			continue
+		var ab := mi.mesh.get_aabb()
+		for i in 8:
+			var c: Vector3 = mi.global_transform * (ab.position + Vector3(
+				ab.size.x * float(i & 1),
+				ab.size.y * float((i >> 1) & 1),
+				ab.size.z * float((i >> 2) & 1)))
+			if c.y > best:
+				best = c.y
+				top = c
+	var tip := Node3D.new()
+	tip.name = "StaffTip"
+	staff.add_child(tip)
+	tip.global_position = top
+	return tip
+
+
+func _fire_bolt(target: Vector3, duration: float) -> void:
+	if _bolt == null or not is_instance_valid(_bolt):
+		return
+	var muzzle := _staff_muzzle()
+	if muzzle != null:
+		_bolt.start(muzzle, target, duration)
+	else:
+		_bolt.start(global_position + Vector3.UP * PieceAssets.piece_height(piece_type),
+			target, duration)
+
+
+## Variant 2: the bolt comes down out of the air onto him. Wall clock — the
+## kit's own timeline is wall clock and the two must not drift apart.
+func _sweep_bolt(from_aim: Vector3, to_aim: Vector3, sec: float) -> void:
+	var muzzle := _staff_muzzle()
+	if _bolt == null or not is_instance_valid(_bolt) or muzzle == null:
+		await _beat_wall(sec)
+		return
+	var t0 := Time.get_ticks_msec()
+	while true:
+		var u := clampf(float(Time.get_ticks_msec() - t0) / (sec * 1000.0), 0.0, 1.0)
+		if is_instance_valid(_bolt) and _bolt.is_active():
+			_bolt.aim(muzzle, from_aim.lerp(to_aim, u * u))
+		if u >= 1.0:
+			return
+		var tree := get_tree()
+		if tree == null:
+			return
+		await tree.process_frame
+
+
+## The bolt is done: clear it instantly (hard_stop is idempotent and restores
+## everything the kit ever touched) and give the node back.
+func _stop_bolt() -> void:
+	if _bolt == null or not is_instance_valid(_bolt):
+		_bolt = null
+		return
+	_bolt.hard_stop()
+	_bolt.queue_free()
+	_bolt = null
+
+
+func _exit_tree() -> void:
+	## A piece freed mid-bolt must not leave a torrent behind.
+	_stop_bolt()
 
 
 # -- construction ----------------------------------------------------------

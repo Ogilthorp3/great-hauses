@@ -7,7 +7,8 @@
 #   tests       ALL headless suites — engine (79), tournament, cinematics
 #               time-restore, DS4 opponent (mock+live, 3 modes),
 #               UciEngine/stockfish client, music (104), banter (93),
-#               dragon spectator/ASHFALL, duel face-off, costumes
+#               dragon spectator/ASHFALL, duel face-off, SIGNATURE KILLS
+#               (18 — three variants of each rank's kill), costumes
 #               (273 — mounted knights and pawn helms included),
 #               head-to-head protocol (216 — host authority, the
 #               illegal-move-from-client refusal, the cinematic
@@ -39,6 +40,10 @@
 #               causes, the right model + flourish per choice, and the draw
 #               card + draw taunt + bracket seam at the end   — Gate B
 #   slowmo      windowed: duel director activation, time dip, skip-on-click
+#   kills       windowed: SIX RANKS, SIX KILLS — one duel per piece type under
+#               the real director; asserts each signature style fires, the
+#               victim dies of it, the clock restores and no lamp is added,
+#               and saves a frame of every kill
 #   tournament  windowed: 3 scripted mates to the throne, bracket + banner
 #               re-dress asserts, championship panel
 #   oracle-mock windowed: DS4-Oracle (Pure) vs in-driver canned HTTP mock
@@ -95,6 +100,11 @@ SUITE_START=$(date +%s)
 # The duel/showcase position: after 1.e4 d5 White has exactly one capture
 # (exd5) — a clean scripted duel two squares from board center.
 DUEL_FEN="rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2"
+# The six-kills position: both armies keep a full pawn wall and their kings,
+# and the four middle ranks are EMPTY — the duellists the scenario stands up
+# (outside game.views) have the centre of the board to themselves, and with no
+# capture on offer the engine sits quietly on the player's turn throughout.
+KILLS_FEN="4k3/pppppppp/8/8/8/8/PPPPPPPP/4K3 w - - 0 1"
 # Castling-ready: White can O-O immediately (the h2 pawn keeps material legal).
 CASTLE_FEN="4k3/8/8/8/8/8/7P/4K2R w K - 0 1"
 # En-passant-ready: Black just double-stepped d7d5 past the e5 pawn; exd6
@@ -264,7 +274,7 @@ run_scenario() {  # <name> [extra user args...]
 if [ ! -x "$GODOT" ]; then note "Godot binary missing: $GODOT"; exit 2; fi
 STEPS=("$@")
 [ ${#STEPS[@]} -eq 0 ] && STEPS=(preflight tests boot orientation board-truth \
-  board-moves move duel castle enpassant promote slowmo music banter \
+  board-moves move duel castle enpassant promote slowmo kills music banter \
   dragon-live tournament oracle-mock oracle-modes undo net-hall fullgame showcase)
 
 SUITE_RC=0
@@ -281,6 +291,7 @@ for step in "${STEPS[@]}"; do
       run_suite banter-suite res://tests/test_banter.gd || SUITE_RC=1
       run_suite dragon-suite res://tests/test_dragon.gd || SUITE_RC=1
       run_suite duel-facing-suite res://tests/test_duel_facing.gd || SUITE_RC=1
+      run_suite kill-styles-suite res://tests/test_kill_styles.gd || SUITE_RC=1
       run_suite costumes-suite res://tests/test_costumes.gd || SUITE_RC=1
       run_suite net-suite res://tests/test_net.gd || SUITE_RC=1
       run_suite promotion-suite res://tests/test_promotion.gd || SUITE_RC=1
@@ -298,6 +309,9 @@ for step in "${STEPS[@]}"; do
                  # four promotions, each with its 2.2 s flourish, an AI reply
                  # and a take-back in between
     slowmo)    run_scenario slowmo "--e2e-fen=$DUEL_FEN" || SUITE_RC=1 ;;
+    kills)     SCENARIO_TIMEOUT=170 run_scenario kills "--e2e-fen=$KILLS_FEN" \
+                 "--e2e-timeout=150" || SUITE_RC=1 ;;
+                 # six duels back to back, each with its own ~5.5 s cinematic
     music)     run_scenario music "--e2e-fen=$DUEL_FEN" || SUITE_RC=1 ;;
     banter)    run_scenario banter "--e2e-fen=$BANTER_FEN" || SUITE_RC=1 ;;
     dragon-live) run_scenario dragon-live "--e2e-fen=$DRAGON_FEN" \
@@ -330,7 +344,7 @@ for step in "${STEPS[@]}"; do
                  # 45 s soak + tableau is ~56 s alone but needs headroom at
                  # the tail of a full sequential run (watchdogged at 90 s
                  # under end-of-suite load, 2026-08-08)
-    *) note "unknown step '$step' (use preflight|tests|boot|orientation|board-truth|board-moves|move|duel|castle|enpassant|promote|slowmo|music|banter|dragon-live|tournament|oracle-mock|oracle-modes|undo|net-hall|fullgame|showcase|perf)"; SUITE_RC=1 ;;
+    *) note "unknown step '$step' (use preflight|tests|boot|orientation|board-truth|board-moves|move|duel|castle|enpassant|promote|slowmo|kills|music|banter|dragon-live|tournament|oracle-mock|oracle-modes|undo|net-hall|fullgame|showcase|perf)"; SUITE_RC=1 ;;
   esac
 done
 

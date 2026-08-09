@@ -54,6 +54,13 @@
 ##               rival's draw taunt and the tournament draw seam
 ##   slowmo      capture triggers the DuelDirector; asserts activation, the
 ##               time dip, skip-on-click restore, and a clean final settle
+##   kills       SIX RANKS, SIX KILLS — one duel per piece type on the real
+##               board, under the real DuelDirector: asserts each rank's
+##               signature style fires (PieceView.kill_style), that the victim
+##               dies OF THAT KILL (death_style + a named death clip), that the
+##               view is consumed and the clock restored, and saves a frame of
+##               each so the six can be looked at side by side. Also asserts
+##               the hall's Light3D count is unchanged by any of it.
 ##   tournament  Begin Tournament with a mate-in-1 FEN: three rounds of
 ##               scripted mates; asserts bracket advance, banner re-dress
 ##               each round, and the championship panel
@@ -205,6 +212,8 @@ func _run() -> void:
 			await _scenario_promote()
 		"slowmo":
 			await _scenario_slowmo()
+		"kills":
+			await _scenario_kills()
 		"tournament":
 			await _scenario_tournament()
 		"oracle-mock":
@@ -2144,6 +2153,159 @@ func _scenario_slowmo() -> void:
 	_pass("slowmo-final-timescale-1.0")
 	await _shot("post_slowmo")
 	_finish(0)
+
+# ── Scenario: kills (a signature kill per rank, on the real board) ─────────
+#
+# THE GATE FOR "different killing animations so it's not boring" (owner brief,
+# 2026-08-09). A capture scenario can only ever test the rank that happens to
+# be capturing in its FEN; this one walks all six.
+#
+# The duellists are REAL PieceViews spawned into the running hall — same
+# scene, same houses, same director, same camera — but they are NOT registered
+# in game.views, so the engine's position is never touched and the game is
+# still sitting on the player's turn when the scenario ends. They stand where
+# gameplay would stand them: victim on a square, attacker 0.55 units short of
+# it, which is exactly the edge game.gd walks a capturing piece to.
+#
+# [PieceView.Type, label, expected kill_style, expected death_style(s),
+#  wall seconds from cinematic start at which THIS kill's frame is taken]
+#
+# The last column is per-kill on purpose: the six do not peak together. A stab
+# is over almost as soon as the slow-mo hold starts; the king's whole point is
+# a raise slow enough to read, and under the 0.25 dip that raise alone spends
+# ~2.2 s of wall clock — photographed on the pawn's schedule he is caught
+# standing there with his sword still down, which is a frame of nothing.
+const KILL_MATRIX := [
+	[PieceView.Type.PAWN, "pawn", "stab", ["blade"], 2.2],
+	[PieceView.Type.KNIGHT, "knight", "charge", ["launch"], 2.0],
+	[PieceView.Type.BISHOP, "bishop", "bolt", ["burn"], 2.6],
+	[PieceView.Type.ROOK, "rook", "grind", ["crush"], 2.2],
+	[PieceView.Type.QUEEN, "queen", "arrow", ["arrow"], 3.0],
+	[PieceView.Type.KING, "king", "execution", ["crush", "blade"], 2.8],
+]
+
+func _scenario_kills() -> void:
+	if not await _navigate_select(DEFAULT_HOUSE, "Casual", "Single Match"):
+		return
+	var game := await _boot_game(0)
+	if game == null:
+		return
+	var state: Object = game.get("state")
+	var dd: Node = game.get("duel_director")
+	if dd == null:
+		await _fail("kills-director", "game has no DuelDirector")
+		return
+	if not await _wait_until(func():
+		return game.get("busy") == false and state.turn == false, 15.0):
+		await _fail("kills-player-turn", "never became the player's turn")
+		return
+	_pass("kills-player-turn")
+	var lamps_before := get_tree().root.find_children("*", "Light3D", true, false).size()
+	for spec in KILL_MATRIX:
+		if not await _one_signature_kill(game, dd, spec):
+			return
+	var lamps_after := get_tree().root.find_children("*", "Light3D", true, false).size()
+	if lamps_after != lamps_before:
+		await _fail("kills-no-new-lights",
+			"Light3D count moved %d -> %d across the six kills" % [lamps_before, lamps_after])
+		return
+	_pass("kills-no-new-lights (%d torches, unchanged)" % lamps_after)
+	if not is_equal_approx(Engine.time_scale, 1.0):
+		await _fail("kills-final-timescale", "time_scale=%f after the six" % Engine.time_scale)
+		return
+	_pass("kills-final-timescale-1.0")
+	_finish(0)
+
+
+func _one_signature_kill(game: Node, dd: Node, spec: Array) -> bool:
+	var label := str(spec[1])
+	var board: Node = game.get("board")
+	var victim_pos: Vector3 = board.square_to_world(Vector2i(3, 4))
+	var attacker_pos: Vector3 = board.square_to_world(Vector2i(3, 3))
+	var approach := (victim_pos - attacker_pos).normalized()
+	var attacker := _spawn_duellist(game, int(spec[0]), PieceView.House.FROST,
+		str(game.get("player_house_id")), victim_pos - approach * 0.55)
+	var victim := _spawn_duellist(game, PieceView.Type.PAWN, PieceView.House.EMBER,
+		str(game.get("rival_house_id")), victim_pos)
+	if attacker == null or victim == null:
+		await _fail("kills-%s-spawn" % label, "could not stand the duellists up")
+		return false
+	# Read at `died`: the view frees itself the moment the corpse is gone.
+	var fell := {"died": false, "style": "", "anim": ""}
+	victim.died.connect(func() -> void:
+		fell["died"] = true
+		fell["style"] = victim.death_style
+		fell["anim"] = victim.death_anim)
+	var done := {"v": false}
+	var t0 := Time.get_ticks_msec()
+	var runner := func() -> void:
+		await dd.play_duel(attacker, victim,
+			{"attacker_house": str(game.get("player_house_id")),
+			"victim_house": str(game.get("rival_house_id"))},
+			func() -> void: await attacker.play_capture(victim))
+		done["v"] = true
+	runner.call()
+	if not await _wait_until(func(): return dd.is_active(), 6.0):
+		await _fail("kills-%s-cinematic" % label, "the duel director never took over")
+		return false
+	# WALL CLOCK — the cinematic is bending Engine.time_scale under us, and a
+	# scaled sleep here would land the frame somewhere else entirely (the scar
+	# _sleep_wall exists for). The delay is per kill — see KILL_MATRIX.
+	await _sleep_wall(float(spec[4]))
+	await _shot("kill_%s" % label)
+	if not await _wait_until(func(): return done["v"], 25.0):
+		await _fail("kills-%s-finished" % label, "the duel never returned")
+		return false
+	# THE BUDGET, measured on the real thing rather than asserted in a comment:
+	# swoop + face-off + the slow-mo curve + this rank's choreography + the
+	# survivor's rest yaw + the camera's return, wall clock, end to end.
+	var wall := float(Time.get_ticks_msec() - t0) / 1000.0
+	print("E2E DUELWALL %-7s %.2fs" % [label, wall])
+	if wall > 7.0:
+		await _fail("kills-%s-budget" % label,
+			"the duel ran %.2f s (budget is ~5.5 s, failsafe 8 s)" % wall)
+		return false
+	if str(attacker.kill_style) != str(spec[2]):
+		await _fail("kills-%s-style" % label,
+			"expected kill_style '%s', got '%s'" % [str(spec[2]), str(attacker.kill_style)])
+		return false
+	if not bool(fell["died"]):
+		await _fail("kills-%s-victim-died" % label, "the victim never emitted died")
+		return false
+	if not (spec[3] as Array).has(str(fell["style"])):
+		await _fail("kills-%s-death-style" % label,
+			"expected one of %s, got '%s'" % [str(spec[3]), str(fell["style"])])
+		return false
+	if str(fell["anim"]).is_empty():
+		await _fail("kills-%s-death-anim" % label, "no death clip was named")
+		return false
+	if is_instance_valid(victim) and not victim.is_queued_for_deletion():
+		await _fail("kills-%s-victim-consumed" % label, "the victim view is still standing")
+		return false
+	if not await _wait_until(func(): return is_equal_approx(Engine.time_scale, 1.0), 5.0):
+		await _fail("kills-%s-timescale" % label,
+			"time_scale=%f after the duel" % Engine.time_scale)
+		return false
+	_pass("kills-%s (%s -> %s/%s, variant %d)" % [label, str(attacker.kill_style),
+		str(fell["style"]), str(fell["anim"]), int(attacker.kill_variant)])
+	if is_instance_valid(attacker):
+		attacker.queue_free()
+	await _sleep(0.4)   # let the director's camera return before the next one
+	return true
+
+
+## A duellist standing in the real hall but OUTSIDE game.views — the engine's
+## position never learns about it, so the board is untouched by this scenario.
+func _spawn_duellist(game: Node, piece_type: int, side: int, house_id: String,
+		pos: Vector3) -> Node:
+	var scene: PackedScene = load("res://scenes/piece_view.tscn")
+	if scene == null:
+		return null
+	var pv: Node = scene.instantiate()
+	game.add_child(pv)
+	pv.setup(piece_type, side, house_id)
+	pv.position = pos
+	return pv
 
 # ── Scenario: tournament (3 scripted mates to the throne) ──────────────────
 func _scenario_tournament() -> void:

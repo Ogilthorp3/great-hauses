@@ -16,7 +16,7 @@ var failures := 0
 var checks_run := 0
 
 ## Silent-abort floor (same guard as test_cinematics.gd).
-const MIN_EXPECTED_CHECKS := 20
+const MIN_EXPECTED_CHECKS := 42
 
 
 class Duck:
@@ -46,6 +46,8 @@ func _main() -> void:
 	Engine.time_scale = 1.0
 	await _test_duel_face_off()
 	await _test_rook_exemption()
+	_test_exemption_is_towers_only()
+	_test_every_kill_has_a_frame()
 	await _test_checkmate_facing()
 	await _test_skip_still_rests()
 	check("final: time_scale is 1.0", true, is_equal_approx(Engine.time_scale, 1.0))
@@ -186,6 +188,43 @@ func _test_rook_exemption() -> void:
 	d.free()
 	a.free()
 	rook.free()
+
+
+## THE EXEMPTION IS A TOWER'S, AND ONLY A TOWER'S. `_has_facing` keys off a
+## single int and the two values sit next to each other — tower 1, KNIGHT 2 —
+## so an off-by-one here would silently stop the cavalry turning onto its
+## victim and nothing else in the suite would notice (the knight would simply
+## fight whichever way he happened to be standing). Asserted per type, by
+## name, so the failure message says which rank lost its face.
+func _test_exemption_is_towers_only() -> void:
+	var names := ["PAWN", "ROOK", "KNIGHT", "BISHOP", "QUEEN", "KING"]
+	for t in names.size():
+		var d := Duck.new(t, 0, 0.0)
+		root.add_child(d)
+		check("facing: %s (type %d) %s" % [names[t], t,
+				"is exempt" if t == 1 else "turns"],
+				t != 1, DD._has_facing(d))
+		d.free()
+	check("facing: a fighter with no piece_type still turns", true,
+			DD._has_facing(Node3D.new()))
+
+
+## Every rank the game can field has its own duel frame — a missing entry
+## falls back silently to the old one-size framing, which is exactly the
+## boredom this pass exists to end.
+func _test_every_kill_has_a_frame() -> void:
+	for t in 6:
+		var frame = DD.DUEL_FRAMES.get(t)
+		check("frame: type %d has one" % t, true,
+				frame != null and (frame as Array).size() == 3)
+		if frame == null:
+			continue
+		check("frame: type %d fov is sane" % t, true,
+				float(frame[2]) > 25.0 and float(frame[2]) < 75.0)
+		# Metres, not multipliers — see DUEL_FRAMES: a standoff under a metre
+		# is the bug where every rank was filmed from the clamp floor.
+		check("frame: type %d stands off the fight" % t, true,
+				float(frame[0]) >= 1.5 and float(frame[0]) <= 6.0)
 
 
 func _test_checkmate_facing() -> void:

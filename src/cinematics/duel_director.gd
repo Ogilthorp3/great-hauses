@@ -28,6 +28,11 @@ extends Node3D
 ## All cinematic timing runs on wall-clock ticks (immune to the very
 ## time_scale it manipulates), so total duel wall time stays <= ~5.5 s
 ## (face-off + rest-yaw beats add ~0.5 s to the old ~5 s budget).
+## MEASURED end to end on the real board, one duel per rank, after the six
+## signature kills landed (e2e `kills`, 2026-08-09, "E2E DUELWALL" lines):
+## rook 3.10 · king 4.01 · pawn 4.25 · bishop 4.43 · knight 4.45 · queen 4.73 s.
+## The scenario fails the run if any of them passes 7 s, so the budget is a
+## gate now rather than a comment.
 ##
 ## FACE TO FACE (2026-08-08): play_duel turns both combatants to meet
 ## before the strike and holds the lock through it; the survivor eases
@@ -673,6 +678,39 @@ func _process(_delta: float) -> void:
 	_cam.global_transform = xf
 
 
+## THE CAMERA KNOWS WHICH KILL IT IS FILMING (2026-08-09). Six ranks now kill
+## six different ways (PieceView.KILL_STYLES), and one fixed side-on frame
+## flatters exactly one of them. A stab is a small movement inside arm's reach
+## and wants the lens close; a mounted charge needs the run-up in shot or it
+## reads as a step; a bishop's bolt is ABOUT the gap it crosses, so the gap has
+## to be in the picture; a tower grinding over a man wants a low angle where
+## its mass crosses the frame. Per type: how far back, how high, how wide.
+##
+## The frame is still built from the two fighters' midpoint and still chooses
+## whichever side the gameplay camera is already nearer, so a duel never cuts
+## across the line the player was watching from — only the standoff, the
+## height and the lens change.
+##
+## STANDOFF IS AN ABSOLUTE, NOT A MULTIPLIER (measured 2026-08-09). The first
+## cut of this table scaled the fighters' separation, which is ALWAYS ~0.55 u
+## (game.gd walks a capturing piece to `target - dir*0.55`), so every product
+## fell under the clamp floor and all six ranks were filmed from the same
+## distance — the frames came back with a queen's hood filling half the
+## picture and the tower a featureless grey wall. Metres, then, plus a small
+## term for the separation:  back = dist*0.5 + standoff.
+##   [standoff (m), camera height (m), fov (deg)]
+const DUEL_FRAMES := {
+	0: [1.9, 0.42, 40.0],   # PAWN — inside the guard: close, near eye level
+	1: [3.2, 1.35, 48.0],   # ROOK — high and back, looking DOWN at the square
+	                        #        it rolls over; at eye level the tower is
+	                        #        simply a grey wall filling the picture
+	2: [3.1, 0.8, 50.0],    # KNIGHT — the charge needs its run-up in shot
+	3: [2.7, 0.6, 46.0],    # BISHOP — the gap the bolt crosses IS the shot
+	4: [2.6, 0.7, 44.0],    # QUEEN — the arrow's whole flight in frame
+	5: [2.2, 0.55, 42.0],   # KING — a hero angle under the raised blade
+}
+
+
 ## Swoop from the current viewport camera to a low side angle framing both
 ## fighters. No-op when there is no active camera (headless unit tests).
 func _cam_enter_duel(attacker: Node3D, victim: Node3D, seq: int) -> void:
@@ -680,18 +718,34 @@ func _cam_enter_duel(attacker: Node3D, victim: Node3D, seq: int) -> void:
 		return
 	var a := attacker.global_position if is_instance_valid(attacker) else Vector3.ZERO
 	var v := victim.global_position if is_instance_valid(victim) else a + Vector3.FORWARD
-	var mid := (a + v) * 0.5 + Vector3.UP * 0.55
+	var frame: Array = DUEL_FRAMES.get(_fighter_type(attacker), [2.0, 0.42, duel_fov])
+	# A small per-duel jitter on top of the type's frame: the same rank killing
+	# twice in a row is filmed from two slightly different places.
+	var lift: float = float(frame[1]) + randf_range(-0.08, 0.16)
+	var mid := (a + v) * 0.5 + Vector3.UP * (0.55 + lift * 0.3)
 	var axis := v - a
 	axis.y = 0.0
 	axis = axis.normalized() if axis.length() > 0.01 else Vector3.FORWARD
 	var side := axis.cross(Vector3.UP).normalized()
-	var back := clampf(a.distance_to(v) * 1.55, 2.0, 4.5)
-	var p1 := mid + side * back + Vector3.UP * 0.42
-	var p2 := mid - side * back + Vector3.UP * 0.42
+	var back := clampf(a.distance_to(v) * 0.5 + float(frame[0]) * randf_range(0.94, 1.08),
+		1.8, 5.5)
+	# Slide a little along the duel line too — never past the fighters, so both
+	# stay comfortably inside the frame.
+	var along := axis * randf_range(-0.25, 0.25) * back * 0.2
+	var p1 := mid + side * back + Vector3.UP * lift + along
+	var p2 := mid - side * back + Vector3.UP * lift + along
 	var from := _cam_base.origin
 	var cam_pos := p1 if from.distance_to(p1) <= from.distance_to(p2) else p2
 	var target := Transform3D(Basis.looking_at(mid - cam_pos, Vector3.UP), cam_pos)
-	await _cam_glide(seq, target, duel_fov, swoop_wall, 0.35)
+	await _cam_glide(seq, target, float(frame[2]), swoop_wall, 0.35)
+
+
+## The fighter's PieceView.Type, duck-read (-1 when it is not a piece).
+static func _fighter_type(n: Node3D) -> int:
+	if not is_instance_valid(n):
+		return -1
+	var pt = n.get("piece_type")
+	return int(pt) if typeof(pt) == TYPE_INT else -1
 
 
 ## Swoop to the dying king, then slow-orbit it until _orbiting is cleared.
