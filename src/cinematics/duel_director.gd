@@ -904,11 +904,25 @@ func _animate_beam(beam: MeshInstance3D, seq: int) -> void:
 	await _wall_lerp(seq, setter, 0.0, 1.0, promo_wall * 0.9)
 
 
+## The promotion banner. It hangs over the newly crowned piece for the length
+## of the flourish, so it is READ, not glimpsed — and until 2026-08-09 it was
+## a flat, borderless, untextured quad in the house's tint. For a pale house
+## (Winterfang) that shipped as "a blank white rectangle floating a full
+## square above the promoted piece's head" (critic defect P4): the tint was
+## used at 75–100% brightness across the whole face, so the banner had no
+## edge, no device, no hem — nothing that says "cloth".
+##
+## It is now finished rather than removed: a DEEP house-dyed field, a bright
+## selvage on all four sides, the house pale-and-chevron device down the
+## middle, and a swallow-tail hem cut out of the bottom (a banner never ends
+## in a straight edge). It hangs from a real rod, and it hangs LOWER — close
+## enough to the crown to read as this piece's banner.
 func _spawn_banner(piece: Node3D, tint: Color) -> MeshInstance3D:
 	var banner := MeshInstance3D.new()
+	banner.name = "PromotionBanner"
 	var plane := PlaneMesh.new()
 	plane.orientation = PlaneMesh.FACE_Z
-	plane.size = Vector2(0.46, 0.72)
+	plane.size = Vector2(0.54, 0.82)   # big enough for the device to READ
 	plane.subdivide_width = 6
 	plane.subdivide_depth = 10
 	banner.mesh = plane
@@ -923,20 +937,59 @@ void vertex() {
 	VERTEX.x += sin(TIME * 3.4 + VERTEX.y * 3.0) * 0.02 * hang;
 }
 void fragment() {
-	ALBEDO = tint.rgb * (0.75 + 0.25 * (1.0 - UV.y));
+	vec2 uv = UV;
+	// Swallow-tail hem: the cloth ends in a notch, never a straight edge.
+	float hem = 0.80 + 0.20 * abs(uv.x - 0.5) * 2.0;
+	if (uv.y > hem) discard;
+	// Bright selvage all the way round the cut cloth.
+	float edge = min(min(uv.x, 1.0 - uv.x), min(uv.y, hem - uv.y));
+	float selvage = 1.0 - smoothstep(0.052, 0.072, edge);
+	// House device: a pale (vertical bar) under a chevron.
+	float pale = (1.0 - smoothstep(0.070, 0.092, abs(uv.x - 0.5)))
+		* step(0.42, uv.y) * step(uv.y, 0.74);
+	float chev = (1.0 - smoothstep(0.030, 0.052,
+			abs(abs(uv.x - 0.5) * 1.8 - (uv.y - 0.20))))
+		* step(0.18, uv.y) * step(uv.y, 0.40);
+	float device = clamp(max(pale, chev), 0.0, 1.0);
+	vec3 field  = tint.rgb * 0.20;                 // deep dye — cloth, not paper
+	vec3 bright = mix(tint.rgb, vec3(1.0), 0.30);  // lit thread
+	float fall  = 0.78 + 0.22 * (1.0 - uv.y);      // light dies down the hang
+	ALBEDO = mix(field, bright, max(selvage, device * 0.9)) * fall;
 	ALPHA = tint.a;
 }
 """
 	var mat := ShaderMaterial.new()
 	mat.shader = sh
-	mat.set_shader_parameter("tint", Color(tint.r, tint.g, tint.b, 0.92))
+	mat.set_shader_parameter("tint", Color(tint.r, tint.g, tint.b, 0.96))
 	banner.material_override = mat
 	banner.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	banner.position = Vector3(0.0, 1.95, 0.0)
+	banner.position = Vector3(0.0, 1.62, 0.0)
 	banner.rotation.y = 0.5
 	piece.add_child(banner)
 	_props.append(banner)
+	_spawn_banner_rod(banner, plane.size, tint)
 	return banner
+
+
+func _spawn_banner_rod(banner: MeshInstance3D, cloth: Vector2, tint: Color) -> void:
+	## The rod the cloth hangs from. Without it the banner is a quad floating
+	## in mid-air with nothing holding it — which is exactly what "an
+	## unfinished debug panel" looks like.
+	var rod := MeshInstance3D.new()
+	rod.name = "BannerRod"
+	var cyl := CylinderMesh.new()
+	cyl.top_radius = 0.016
+	cyl.bottom_radius = 0.016
+	cyl.height = cloth.x * 1.22
+	rod.mesh = cyl
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.albedo_color = Color(tint.r, tint.g, tint.b, 1.0).darkened(0.55)
+	rod.material_override = m
+	rod.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	rod.rotation.z = PI * 0.5                       # lie the cylinder across
+	rod.position = Vector3(0.0, cloth.y * 0.5 + 0.012, 0.0)
+	banner.add_child(rod)
 
 
 # ── fighter identity (duck-typed, meta-overridable) ────────────────────────

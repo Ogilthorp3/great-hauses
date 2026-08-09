@@ -35,7 +35,9 @@ const HOVER_THROTTLE_MS := 30
 const DARK_STONE := Color(0.105, 0.098, 0.094)
 const LIGHT_STONE := Color(0.5, 0.468, 0.425)
 const PLINTH_STONE := Color(0.07, 0.065, 0.06)
-const SELECT_COLOR := Color(0.95, 0.62, 0.22)   # ember amber
+## Ember amber, brightened — the selection now spends its light on the FRAME
+## instead of flooding the tile face (see _select_frame_texture).
+const SELECT_COLOR := Color(1.0, 0.68, 0.26)
 const MARKER_COLOR := Color(0.58, 0.79, 0.86)   # cold steel
 const CAPTURE_COLOR := Color(0.94, 0.36, 0.24)  # blood on the stone
 
@@ -301,9 +303,26 @@ static func _capture_ring_texture() -> ImageTexture:
 	return _alpha_texture(a)
 
 
+## Where the medallion sits, in the same 0..1 half-extent coordinate the
+## squircle below is drawn in: the hover/selection glyph ring (pieces lane)
+## is a DARK disc covering roughly the middle 60% of the tile.
+const MEDALLION_EXTENT := 0.62
+
+
 static func _select_frame_texture() -> ImageTexture:
-	## Selection: a squircle frame hugging the tile with a soft inner wash —
-	## a deliberate rune tile instead of a flat slab of paint.
+	## Selection: a squircle frame hugging the tile, a warm collar just
+	## OUTSIDE the glyph medallion, and almost nothing under the medallion
+	## itself.
+	##
+	## ISSUES.md #17 residual: the type-glyph medallion is a near-black disc,
+	## and the old flat 0.34 amber wash ran straight underneath it — a dark
+	## disc dropped on a bright amber field reads as a hole punched in the
+	## board, not as an emblem (measured 4.6:1 medallion-to-field on the
+	## shipped frame). The medallion's own material belongs to the pieces
+	## lane; the LIGHT it sits in is ours, so the light moved: the amber now
+	## rings the medallion instead of lying under it. The dark icon then sits
+	## on plain stone (where every other dark icon in this game already
+	## works) and the collar + frame carry "this square is selected".
 	var a := PackedFloat32Array()
 	a.resize(HL_TEX_SIZE * HL_TEX_SIZE)
 	for y in HL_TEX_SIZE:
@@ -312,7 +331,13 @@ static func _select_frame_texture() -> ImageTexture:
 			var v := absf((float(y) + 0.5) / HL_TEX_SIZE - 0.5) * 2.0
 			# p-norm squircle: square-ish frame with rounded corners
 			var m: float = pow(pow(u, 6.0) + pow(v, 6.0), 1.0 / 6.0)
-			var border := _band(m, 0.84, 0.95, 0.035) * 0.95
-			var wash := (1.0 - smoothstep(0.70, 0.92, m)) * 0.34
-			a[y * HL_TEX_SIZE + x] = maxf(border, wash)
+			var border := _band(m, 0.80, 0.95, 0.035) * 1.0
+			# A dark moat where the medallion's rim lands: the amber must NOT
+			# be at its brightest exactly where the black disc ends, or the
+			# disc reads as a hole cut in a lit plate.
+			var moat := _band(m, MEDALLION_EXTENT, 0.80, 0.09) * 0.09
+			# Whisper of amber under the medallion — enough to say the square
+			# is claimed, far too little to make a plate out of it.
+			var wash := (1.0 - smoothstep(0.42, MEDALLION_EXTENT, m)) * 0.06
+			a[y * HL_TEX_SIZE + x] = maxf(border, maxf(moat, wash))
 	return _alpha_texture(a)

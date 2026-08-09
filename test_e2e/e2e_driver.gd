@@ -270,9 +270,216 @@ func _shot(step_name: String) -> void:
 	var err := img.save_png(path)
 	if err != OK:
 		print("E2E WARN screenshot save failed (err %d): %s" % [err, path])
+	# The frames an art critic reads are the frames whose overlay planes we
+	# photograph — no awaits between the pixel grab and the census, so the
+	# rects below ARE the rects in the PNG just saved.
+	if OVERLAY_DUMP_SHOTS.has(step_name):
+		_dump_overlays(step_name)
 
 func _colors_close(a: Color, b: Color) -> bool:
 	return absf(a.r - b.r) < 0.02 and absf(a.g - b.g) < 0.02 and absf(a.b - b.b) < 0.02
+
+## Banter caption identity check. This used to be `_colors_close(got, accent)`
+## — an exact-RGB pin that FROZE the taunt at whatever value the house dye
+## happened to be, and Goldclaw's dye measured 1.13:1 against the stone floor
+## it lands on (the taunt was on screen and unreadable). The contract is now
+## the right one: the caption must still be THIS HOUSE'S HUE, and it must
+## carry a value a human can read. Returns "" when both hold.
+func _accent_identity_why(game: Node, got: Color, accent: Color) -> String:
+	var want: Color = game.legible_accent(accent)
+	if not _colors_close(got, want):
+		return "caption color %s != legible_accent(%s) = %s" % [got, accent, want]
+	# Hue is the house. (An achromatic dye has no meaningful hue to keep.)
+	var dh: float = absf(got.h - accent.h)
+	dh = minf(dh, 1.0 - dh)
+	if accent.s > 0.1 and dh > 0.02:
+		return "caption hue %.3f drifted from rival accent hue %.3f" % [got.h, accent.h]
+	if got.v < 0.9:
+		return "caption value %.2f is too dark to read over torch-lit stone" % got.v
+	return ""
+
+# ── Overlay census (the "who painted that rectangle?" instrument) ──────────
+## Earned 2026-08-09: an art critic found a flat mustard slab across three
+## shipped mid-duel frames and two passes of eyeballing the source failed to
+## name it. A screenshot cannot be interrogated; the tree at the instant of
+## the screenshot can. `_dump_overlays` photographs BOTH overlay planes at
+## the exact frame `_shot` saves:
+##
+##   * every visible Control (CanvasLayer HUD, captions, panels) with its
+##     screen rect, and
+##   * every visible VisualInstance3D projected through the LIVE camera to a
+##     screen-space bbox — so a 3D quad that only exists under the duel cam
+##     (marker, decal, weapon-trail flash) is measured in the same pixel
+##     units the critic used.
+##
+## Output lines are `E2E OVERLAY <tag> ...`, never PASS/FAIL: this is an
+## evidence instrument, not a gate. Match a suspect rect from the PNG against
+## these lines and the culprit names itself, file and node.
+const OVERLAY_MIN_AREA := 3000.0   # px² — below this it is not "a rectangle on the frame"
+## Fraction of the frame a single flat billboard may cover before it stops
+## being an effect and starts being a panel slapped over the fight.
+const OVERLAY_SLAB_SHARE := 0.04
+## The hero/critique frames. Every one of these is a shot a human has been
+## asked to judge, so every one gets its overlay census in the run log.
+const OVERLAY_DUMP_SHOTS: Array[String] = [
+	"mid_duel", "mid_slowmo", "duel_caption", "banter_caption",
+	"after_promotion", "attacker_selected",
+]
+
+func _dump_overlays(tag: String) -> void:
+	var vp := get_viewport()
+	var vp_size := vp.get_visible_rect().size
+	print("E2E OVERLAY %s viewport=%dx%d" % [tag, int(vp_size.x), int(vp_size.y)])
+	var cam := vp.get_camera_3d()
+	var rows: Array[Dictionary] = []
+	_collect_overlays(get_tree().root, cam, vp_size, rows)
+	rows.sort_custom(func(a, b): return float(a["area"]) > float(b["area"]))
+	for r in rows:
+		print("E2E OVERLAY %s %-3s %-22s %-18s pos=(%d,%d) size=%dx%d aspect=%.2f path=%s %s" % [
+			tag, r["plane"], r["name"], r["cls"],
+			int(r["x"]), int(r["y"]), int(r["w"]), int(r["h"]),
+			(float(r["w"]) / maxf(float(r["h"]), 1.0)), r["path"], r["note"]])
+	# Loud, non-gating: a single flat billboard covering a big slice of a hero
+	# frame is the "unfinished debug panel" failure mode. WARN (never FAIL) so
+	# the suite stays a correctness gate while the art defect still shouts in
+	# the log with the node path and mesh/material that produced it.
+	var frame_area := maxf(vp_size.x * vp_size.y, 1.0)
+	for r in rows:
+		if r["plane"] != "3D":
+			continue
+		var share := float(r["area"]) / frame_area
+		if share >= OVERLAY_SLAB_SHARE and str(r["note"]).contains("BILLBOARD"):
+			print("E2E OVERLAY WARN %s flat billboard covers %.1f%% of the frame: %s (%s)"
+				% [tag, share * 100.0, r["path"], r["note"]])
+	print("E2E OVERLAY %s end (%d node(s) >= %d px²)" % [tag, rows.size(), int(OVERLAY_MIN_AREA)])
+
+func _collect_overlays(node: Node, cam: Camera3D, vp_size: Vector2,
+		rows: Array[Dictionary]) -> void:
+	for child in node.get_children():
+		_collect_overlays(child, cam, vp_size, rows)
+	var rect := Rect2()
+	var plane := ""
+	if node is Control:
+		var c := node as Control
+		if not c.is_visible_in_tree():
+			return
+		rect = c.get_global_rect()
+		plane = "2D"
+	elif node is VisualInstance3D and cam != null and is_instance_valid(cam):
+		var vi := node as VisualInstance3D
+		if not vi.is_visible_in_tree():
+			return
+		rect = _screen_bbox(vi, cam)
+		if rect.size == Vector2.ZERO:
+			return
+		plane = "3D"
+	else:
+		return
+	if rect.size.x * rect.size.y < OVERLAY_MIN_AREA:
+		return
+	# Off-frame nodes are not what anyone is looking at.
+	if not rect.intersects(Rect2(Vector2.ZERO, vp_size)):
+		return
+	rows.append({
+		"plane": plane, "name": node.name, "cls": node.get_class(),
+		"x": rect.position.x, "y": rect.position.y,
+		"w": rect.size.x, "h": rect.size.y,
+		"area": rect.size.x * rect.size.y,
+		"path": str(node.get_path()).replace("/root/", ""),
+		"note": _overlay_note(node),
+	})
+
+func _overlay_note(node: Node) -> String:
+	## Enough of a mesh/material fingerprint to identify the SOURCE LINE that
+	## built an anonymous runtime node ("@MeshInstance3D@89" names nothing).
+	if not (node is MeshInstance3D):
+		return ""
+	var mi := node as MeshInstance3D
+	var bits: Array[String] = []
+	var mesh := mi.mesh
+	if mesh != null:
+		var d := mesh.get_class()
+		if mesh is QuadMesh or mesh is PlaneMesh:
+			d += " %.2fx%.2f" % [mesh.size.x, mesh.size.y]
+		elif mesh is BoxMesh:
+			d += " %.2fx%.2fx%.2f" % [mesh.size.x, mesh.size.y, mesh.size.z]
+		elif mesh is CylinderMesh:
+			d += " r%.2f h%.2f" % [mesh.top_radius, mesh.height]
+		bits.append(d)
+	var mat := mi.material_override
+	if mat is BaseMaterial3D:
+		var bm := mat as BaseMaterial3D
+		bits.append("albedo=%s" % bm.albedo_color.to_html())
+		if bm.billboard_mode != BaseMaterial3D.BILLBOARD_DISABLED:
+			bits.append("BILLBOARD keep_scale=%s" % str(bm.billboard_keep_scale))
+	elif mat is ShaderMaterial:
+		bits.append("ShaderMaterial")
+	if mi.scale != Vector3.ONE:
+		bits.append("scale=%.2f,%.2f,%.2f" % [mi.scale.x, mi.scale.y, mi.scale.z])
+	return " ".join(bits)
+
+func _screen_bbox(vi: VisualInstance3D, cam: Camera3D) -> Rect2:
+	## Screen-space bbox of a 3D instance as it is ACTUALLY RASTERISED.
+	##
+	## A billboarded quad is the whole reason this instrument exists, and its
+	## world AABB is a lie: the billboard basis is rebuilt in the vertex
+	## shader from the camera, and with billboard_keep_scale = false (Godot's
+	## default) the node's own scale is normalised away too. Projecting the
+	## AABB of such a node reports a rect that is nowhere on screen. So:
+	## billboards are measured in the camera's own right/up basis, everything
+	## else by its eight world-AABB corners.
+	var xf := vi.global_transform
+	var bb := _billboard_quad_size(vi)
+	if bb != Vector2.ZERO:
+		if cam.is_position_behind(xf.origin):
+			return Rect2()
+		var cb := cam.global_transform.basis
+		var right := cb.x * (bb.x * 0.5)
+		var up := cb.y * (bb.y * 0.5)
+		var lo_b := Vector2.INF
+		var hi_b := -Vector2.INF
+		for sx in [-1.0, 1.0]:
+			for sy in [-1.0, 1.0]:
+				var p := cam.unproject_position(xf.origin + right * sx + up * sy)
+				lo_b = lo_b.min(p)
+				hi_b = hi_b.max(p)
+		return Rect2(lo_b, hi_b - lo_b)
+	var aabb := vi.get_aabb()
+	var lo := Vector2.INF
+	var hi := -Vector2.INF
+	for i in 8:
+		var corner := xf * (aabb.position + Vector3(
+			aabb.size.x * float(i & 1),
+			aabb.size.y * float((i >> 1) & 1),
+			aabb.size.z * float((i >> 2) & 1)))
+		if cam.is_position_behind(corner):
+			return Rect2()
+		var p := cam.unproject_position(corner)
+		lo = lo.min(p)
+		hi = hi.max(p)
+	return Rect2(lo, hi - lo)
+
+func _billboard_quad_size(vi: VisualInstance3D) -> Vector2:
+	## World-space width/height of a billboarded flat mesh, or ZERO if the
+	## node is not one. Honours billboard_keep_scale (off = scale ignored,
+	## which is exactly the trap that froze a "weapon-trail" tween).
+	if not (vi is MeshInstance3D):
+		return Vector2.ZERO
+	var mi := vi as MeshInstance3D
+	var mat := mi.material_override
+	if not (mat is BaseMaterial3D):
+		return Vector2.ZERO
+	var bm := mat as BaseMaterial3D
+	if bm.billboard_mode == BaseMaterial3D.BILLBOARD_DISABLED:
+		return Vector2.ZERO
+	var mesh := mi.mesh
+	if not (mesh is QuadMesh or mesh is PlaneMesh):
+		return Vector2.ZERO
+	var sz: Vector2 = mesh.size
+	if bm.billboard_keep_scale:
+		var s := mi.global_transform.basis.get_scale()
+		sz = Vector2(sz.x * s.x, sz.y * s.y)
+	return sz
 
 # ── Input synthesis ────────────────────────────────────────────────────────
 ## parse_input_event feeds events as-if-from-the-OS, i.e. in window
@@ -2058,9 +2265,9 @@ func _scenario_banter() -> void:
 	var rival := str(game.get("rival_house_id"))
 	var accent: Color = HouseRegistry.get_colors(rival)["accent"]
 	var got: Color = caption.get_theme_color("font_color")
-	if not _colors_close(got, accent):
-		await _fail("banter-accent-color", "caption color %s != rival accent %s"
-			% [got, accent])
+	var why_accent := _accent_identity_why(game, got, accent)
+	if not why_accent.is_empty():
+		await _fail("banter-accent-color", why_accent)
 		return
 	_pass("banter-opening-line (accent-tinted: %s)" % caption.text)
 	var opening_text := caption.text
@@ -2082,9 +2289,9 @@ func _scenario_banter() -> void:
 			% int(banter.get("taunt_count")))
 		return
 	got = caption.get_theme_color("font_color")
-	if not _colors_close(got, accent):
-		await _fail("banter-capture-accent", "capture caption color %s != accent %s"
-			% [got, accent])
+	why_accent = _accent_identity_why(game, got, accent)
+	if not why_accent.is_empty():
+		await _fail("banter-capture-accent", why_accent)
 		return
 	_pass("banter-capture-line (%s)" % caption.text)
 	await _shot("banter_capture_caption")

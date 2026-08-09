@@ -982,7 +982,9 @@ func _on_banter_line(house_id: String, text: String, _beat: String) -> void:
 		if my != _banter_token or not is_instance_valid(_banter_caption):
 			return   # a newer line (or teardown) superseded this one
 	var accent: Color = HouseRegistry.get_colors(house_id)["accent"]
-	_banter_caption.add_theme_color_override("font_color", accent)
+	# HUE = whose voice this is; VALUE = whether anyone can read it. Only the
+	# second is negotiable (see legible_accent).
+	_banter_caption.add_theme_color_override("font_color", legible_accent(accent))
 	_banter_caption.text = "%s: “%s”" % [_house_name(house_id), text]
 	_banter_caption.modulate = Color(1, 1, 1, 0)
 	_banter_caption.visible = true
@@ -1038,21 +1040,77 @@ func _process(_delta: float) -> void:
 
 # -- HUD -------------------------------------------------------------------
 
-const HUD_TEXT := Color(0.85, 0.8, 0.7)
-const HUD_DIM := Color(0.62, 0.58, 0.5)
-const HUD_GOLD := Color(0.8, 0.62, 0.3)
+const HUD_TEXT := Color(0.93, 0.89, 0.79)
+const HUD_DIM := Color(0.75, 0.71, 0.62)
+const HUD_GOLD := Color(0.88, 0.70, 0.35)
+## Every HUD line crosses BOTH the black hall and a torch-lit pale surface
+## somewhere in a match. One flat color can never clear both, so each line
+## carries its own dark: a glyph outline (ISSUES.md P11 — "House Winterfang
+## to move" vanished into the pale Winterfang banner behind the throne).
+const HUD_OUTLINE := Color(0.02, 0.02, 0.03, 0.92)
+## The top band also gets a scrim, because an outline alone leaves the text
+## sitting IN the scene rather than on a title bar. A vertical gradient (not
+## a filled bar) keeps it a cinematic vignette instead of one more rectangle.
+const HUD_SCRIM_H := 118.0
+const HUD_SCRIM := Color(0.02, 0.02, 0.03)
+## The banter caption's accent, forced to a value that clears torch-lit
+## stone. Hue is the rival's identity and is never touched.
+const ACCENT_MIN_VALUE := 0.93
+const ACCENT_MAX_SAT := 0.55
+
+
+## The rival's accent color, made legible without losing whose voice it is:
+## HUE is preserved exactly, saturation is capped so a deep dye cannot drag
+## the value down with it, and the value is floored. Public so the e2e
+## banter check can assert "same house, legible value" rather than an exact
+## RGB triple (which is what used to pin the caption to an unreadable dye).
+func legible_accent(accent: Color) -> Color:
+	return Color.from_hsv(accent.h, minf(accent.s, ACCENT_MAX_SAT),
+		maxf(accent.v, ACCENT_MIN_VALUE), 1.0)
+
+
+func _hud_scrim() -> TextureRect:
+	## Top-of-frame gradient scrim: opaque-ish at the very top, gone by
+	## HUD_SCRIM_H. Works over the dark hall (invisible there) AND over the
+	## pale throne dais / house banners (where it buys the text its ground).
+	var grad := Gradient.new()
+	grad.offsets = PackedFloat32Array([0.0, 0.55, 1.0])
+	grad.colors = PackedColorArray([
+		Color(HUD_SCRIM, 0.74), Color(HUD_SCRIM, 0.44), Color(HUD_SCRIM, 0.0)])
+	var tex := GradientTexture2D.new()
+	tex.gradient = grad
+	tex.width = 4
+	tex.height = 128
+	tex.fill_from = Vector2(0.0, 0.0)
+	tex.fill_to = Vector2(0.0, 1.0)
+	var scrim := TextureRect.new()
+	scrim.name = "TopScrim"
+	scrim.texture = tex
+	scrim.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	scrim.stretch_mode = TextureRect.STRETCH_SCALE
+	scrim.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	scrim.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	scrim.offset_bottom = HUD_SCRIM_H
+	return scrim
+
+
+static func _outline(label: Label, px: int) -> void:
+	label.add_theme_color_override("font_outline_color", HUD_OUTLINE)
+	label.add_theme_constant_override("outline_size", px)
 
 
 func _build_hud() -> void:
 	var hud := CanvasLayer.new()
 	hud.name = "HUD"
 	add_child(hud)
+	hud.add_child(_hud_scrim())   # FIRST child — everything below draws over it
 
 	var title := Label.new()
 	title.name = "Title"
 	title.text = "%s  vs  %s" % [_player_display.to_upper(), _rival_display.to_upper()]
 	title.add_theme_font_size_override("font_size", 22)
 	title.add_theme_color_override("font_color", HUD_TEXT)
+	_outline(title, 6)
 	title.set_anchors_preset(Control.PRESET_CENTER_TOP)
 	title.anchor_left = 0.5
 	title.anchor_right = 0.5
@@ -1068,6 +1126,7 @@ func _build_hud() -> void:
 			str(HouseRegistry.get_house(rival_house_id).get("motto", ""))]
 	mottos.add_theme_font_size_override("font_size", 13)
 	mottos.add_theme_color_override("font_color", HUD_DIM)
+	_outline(mottos, 4)
 	mottos.set_anchors_preset(Control.PRESET_CENTER_TOP)
 	mottos.anchor_left = 0.5
 	mottos.anchor_right = 0.5
@@ -1078,7 +1137,8 @@ func _build_hud() -> void:
 	_turn_label = Label.new()
 	_turn_label.name = "TurnLabel"
 	_turn_label.add_theme_font_size_override("font_size", 15)
-	_turn_label.add_theme_color_override("font_color", HUD_DIM)
+	_turn_label.add_theme_color_override("font_color", HUD_TEXT)
+	_outline(_turn_label, 5)
 	_turn_label.set_anchors_preset(Control.PRESET_CENTER_TOP)
 	_turn_label.anchor_left = 0.5
 	_turn_label.anchor_right = 0.5
@@ -1096,6 +1156,7 @@ func _build_hud() -> void:
 		ctx.text = " · ".join(bits)
 	ctx.add_theme_font_size_override("font_size", 14)
 	ctx.add_theme_color_override("font_color", HUD_DIM)
+	_outline(ctx, 4)
 	ctx.position = Vector2(16, 14)
 	hud.add_child(ctx)
 
@@ -1106,6 +1167,7 @@ func _build_hud() -> void:
 		mode_lbl.text = str(Ds4Opponent.MODE_LABELS.get(oracle.mode, oracle.mode))
 		mode_lbl.add_theme_font_size_override("font_size", 12)
 		mode_lbl.add_theme_color_override("font_color", HUD_GOLD)
+		_outline(mode_lbl, 4)
 		mode_lbl.position = Vector2(16, 34)
 		hud.add_child(mode_lbl)
 
@@ -1114,6 +1176,7 @@ func _build_hud() -> void:
 	_oracle_flash.visible = false
 	_oracle_flash.add_theme_font_size_override("font_size", 17)
 	_oracle_flash.add_theme_color_override("font_color", HUD_GOLD)
+	_outline(_oracle_flash, 5)
 	_oracle_flash.set_anchors_preset(Control.PRESET_CENTER_TOP)
 	_oracle_flash.anchor_left = 0.5
 	_oracle_flash.anchor_right = 0.5
@@ -1169,20 +1232,37 @@ func _build_hud() -> void:
 	_banter_caption.name = "BanterCaption"
 	_banter_caption.visible = false
 	_banter_caption.add_theme_font_size_override("font_size", 16)
-	# A hard black outline instead of a backing slab: the rival's taunt lives
-	# in the bottom-left corner over moving torchlight, and a filled panel
-	# there would be one more rectangle on the frame (ISSUES.md #4).
-	_banter_caption.add_theme_color_override(
-		"font_outline_color", Color(0.0, 0.0, 0.0, 0.85))
-	_banter_caption.add_theme_constant_override("outline_size", 5)
-	_banter_caption.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	# Outline-only was the original call (ISSUES.md #4: "a filled panel there
+	# would be one more rectangle on the frame"). Measured on the shipped
+	# frame it lost: the taunt's glyphs came in at 0.086 relative luminance
+	# against 0.071 of stone floor — 1.13:1, the same value as the flagstones
+	# behind them, i.e. invisible. The rival's taunts are one of the best
+	# things in this game and nobody could read them.
+	#
+	# So the taunt now wears the SAME clothes as the kill line — the shared
+	# DuelDirector.caption_backing() plate — which is not "one more
+	# rectangle" but the one caption look repeated in the other corner. The
+	# plate HUGS its text (autowrap off + zero-width rect grown to the
+	# label's minimum size), so it never becomes a slab across the frame,
+	# and the outline stays for the glyph edges that overhang it.
+	_banter_caption.add_theme_stylebox_override("normal",
+		DuelDirector.caption_backing())
+	_banter_caption.add_theme_color_override("font_outline_color", HUD_OUTLINE)
+	_banter_caption.add_theme_constant_override("outline_size", 4)
+	# BanterEngine clamps every line to 90 chars, so the widest possible
+	# caption (house name + quotes + 90) fits inside half the frame without
+	# wrapping — and only an un-wrapped label can size its plate to its text.
+	_banter_caption.autowrap_mode = TextServer.AUTOWRAP_OFF
 	_banter_caption.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	_banter_caption.offset_left = 16
+	_banter_caption.anchor_right = 0.0
+	_banter_caption.grow_horizontal = Control.GROW_DIRECTION_END
+	_banter_caption.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	# Bottom row, BELOW the cinematic caption's band (which occupies 96..160
 	# px off the bottom edge) — the two voices can never share a screen row.
-	_banter_caption.offset_top = -64
-	_banter_caption.offset_right = 440
-	_banter_caption.offset_bottom = -10
+	_banter_caption.offset_left = 16
+	_banter_caption.offset_right = 16
+	_banter_caption.offset_top = -14
+	_banter_caption.offset_bottom = -14
 	hud.add_child(_banter_caption)
 
 	_victory_panel = PanelContainer.new()
