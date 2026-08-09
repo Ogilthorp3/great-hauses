@@ -14,7 +14,10 @@ extends Node3D
 ##     fading in on mouse hover (set_hovered), staying lit while selected
 ##     (set_selected also brightens the glyph to beacon energy). ISSUES.md #2.
 ##   HOUSE layer (flourish — never changes the type silhouette):
-##     palette tints · helmet crests on knight/queen/king · sigil decals
+##     palette tints · helmet crests on knight/queen/king · per-house PAWN
+##     half-helms (ISSUES.md #3 — the footman's quieter answer to the crest:
+##     it wraps the skull instead of towering over it, and only its rim and
+##     motif take the house accent) · sigil decals
 ##     on shields · the rook's banner + fluttering pennant · the knight's
 ##     caparison dressed in the house banner cloth (sigil on the flank) ·
 ##     Tidegrip fields the skeleton cast (same rig, same anims) on a
@@ -96,6 +99,13 @@ const KNIGHT_FALL_OFFSET := Vector3(1.6, -1.55, -0.2)
 ## Head-bone mount for house crests (crown-attach pattern): sits above the
 ## crown line so king crest + crown coexist.
 const CREST_MOUNT_POS := Vector3(0.0, 1.04, 0.0)
+## Head-bone mount for the PAWN half-helm (ISSUES.md #3). 0.095 BELOW the
+## crest line, because a crest sits ABOVE the skull while a helm WRAPS it:
+## 0.945 is the measured bone-space Y of the skull crown. One transform, no
+## scale, no rotation, no per-cast branch — the Drowned Legion's skeleton skull
+## sits 0.020 lower and its helm is pre-shifted by exactly that in the
+## generator, so both casts mount identically.
+const HELM_MOUNT_POS := Vector3(0.0, 0.945, 0.0)
 ## Chest-bone mount for the king's cape (Skeleton_Rogue cape convention).
 const CAPE_MOUNT_POS := Vector3(0.0, 0.04, -0.08)
 
@@ -527,6 +537,8 @@ func _build_character() -> void:
 	_attach_gear()
 	if PieceAssets.wants_crest(piece_type):
 		_attach_crest()
+	if PieceAssets.wants_helm(piece_type):
+		_attach_helm()
 	if piece_type == Type.KING:
 		_attach_crown()
 		_attach_cape()
@@ -718,6 +730,60 @@ func _attach_crest() -> void:
 	crest.name = "Crest"
 	crest.position = CREST_MOUNT_POS
 	att.add_child(crest)
+
+
+## HOUSE flourish: the PAWN's half-helm on the head bone (ISSUES.md #3) — the
+## footman's answer to the royal crest, and deliberately quieter than one: it
+## wraps the skull instead of towering over it, and only its rim + motif take
+## the house color while the shell stays plain dark iron. Same
+## BoneAttachment3D pattern as crest/crown, so the helm tracks idle, walk and
+## death animations for free, and — because _raw_model_height skips meshes
+## under a BoneAttachment3D — it cannot disturb the height grading.
+func _attach_helm() -> void:
+	var packed: PackedScene = PieceAssets.pawn_helm_scene(house_id)
+	if packed == null:
+		return   # legacy FROST/EMBER pawns keep the body they shipped with
+	var att := _bone_mount("head", "HelmMount")
+	if att == null:
+		return
+	_doff_bear_hood()
+	var helm: Node3D = packed.instantiate()
+	helm.name = "Helm"   # NEVER "Crest"/"Crown"/"Tiara" — those names are contracts
+	helm.position = HELM_MOUNT_POS
+	att.add_child(helm)
+	_dress_helm(helm)
+
+
+## The Barbarian (the pawn body for all eight living houses) ships wearing a
+## full bear-skull hood that completely swallows a helm. HIDE it — never free
+## it: _raw_model_height measures mesh AABBs regardless of visibility, and the
+## hood is the model's TALLEST mesh (top 2.398 vs the bald head's 2.186), so
+## removing the node would drop raw_h and silently scale every living-house
+## pawn up ~10%, breaking the strict height grading. Hiding changes nothing —
+## and the skull underneath is complete front and back, so it leaves no hole.
+func _doff_bear_hood() -> void:
+	for mi: MeshInstance3D in _model.find_children(
+			PieceAssets.BEAR_HOOD_PATTERN, "MeshInstance3D", true, false):
+		mi.visible = false
+
+
+## HOUSE flourish: the helm's rim + motif take the house ACCENT (the brightest
+## of the three house colors — it has to carry the house at a few pixels), the
+## iron shell is left alone. Materials are found BY NAME, never by surface
+## index. Saturation is irrelevant here (the helms are untextured flat colors,
+## so tinted_material's desaturation pass never runs) — the near-white accent
+## base is what makes the multiply land the house hue true.
+func _dress_helm(helm: Node3D) -> void:
+	var accent: Color = _tint_for("piece")
+	if HouseRegistry.has_house(house_id):
+		accent = HouseRegistry.get_colors(house_id)["accent"]
+	for mi: MeshInstance3D in helm.find_children("*", "MeshInstance3D", true, false):
+		for s in mi.mesh.get_surface_count():
+			var src := mi.get_active_material(s)
+			if src is StandardMaterial3D and str(src.resource_name) \
+					.begins_with(PieceAssets.HELM_ACCENT_MATERIAL):
+				mi.set_surface_override_material(
+					s, PieceAssets.tinted_material(src, accent, 1.0))
 
 
 func _attach_crown() -> void:

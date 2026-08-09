@@ -1,8 +1,9 @@
 extends SceneTree
 
 # Headless suite for the HOUSE COSTUMES + PIECE READABILITY + BANNER-ROOK
-# + MOUNTED-KNIGHT module: assembly correctness (right gear per type, right
-# crest per house, skeleton cast only for Tidegrip, glyph ring present,
+# + MOUNTED-KNIGHT + PAWN-HELM module: assembly correctness (right gear per
+# type, right crest per house, a distinct per-house half-helm on every pawn
+# and on nobody else, skeleton cast only for Tidegrip, glyph ring present,
 # horse+saddle+caparison under every knight), strict height-grading
 # monotonicity, rig retarget compatibility for the skeleton cast, glyph-ring
 # selection feedback, the banner-rook crumble path, and the mounted knight's
@@ -22,7 +23,7 @@ var checks_run := 0
 ## A hard-erroring test function aborts silently at the error and its await
 ## resumes as if it finished — so "no FAIL lines" is NOT proof the suite ran.
 ## This floor turns silently-aborted tests into a loud failure.
-const MIN_EXPECTED_CHECKS := 140
+const MIN_EXPECTED_CHECKS := 250
 
 # PieceView.Type values (int-mirrored: PAWN ROOK KNIGHT BISHOP QUEEN KING).
 const T_PAWN := 0
@@ -65,6 +66,7 @@ func _main() -> void:
 	_test_shield_types()
 	_test_height_grading()
 	_test_glyph_orientation()
+	_test_pawn_helms()
 	_test_mounted_knight()
 	await _test_selection_feedback()
 	await _test_rook_crumble()
@@ -219,6 +221,115 @@ func _test_glyph_orientation() -> void:
 	check("ember glyph ring counter-yaw", true,
 			absf((ember.get_node("GlyphRing") as Node3D).rotation.y + PI) < 0.001)
 	ember.free()
+
+
+## The per-house PAWN HALF-HELM (ISSUES.md #3): every house's pawns wear THEIR
+## OWN helm — a distinct asset per house, mounted on the head bone exactly like
+## a royal crest, its rim/motif dyed in the house accent while the iron shell
+## is left plain. Nobody but a pawn wears one, legacy sides wear none, the
+## Barbarian's bear hood is hidden (never freed) so the helm is visible, and
+## none of it may move the height grading.
+func _test_pawn_helms() -> void:
+	var mount_pos: Vector3 = Vector3(0.0, 0.945, 0.0)
+	var scenes := {}
+	var iron_albedo := {}
+	for hid in registry.house_ids():
+		var pv := _spawn(T_PAWN, FROST, hid)
+		var helm: Node3D = pv.find_child("Helm", true, false)
+		check("helm %s: pawn wears a helm" % hid, true, helm != null)
+		if helm == null:
+			pv.free()
+			continue
+		# Mounted the crest way: a BoneAttachment3D on the rig's head bone, so
+		# it tracks idle/walk/death for free.
+		var att := helm.get_parent() as BoneAttachment3D
+		check("helm %s: mounted on a head BoneAttachment3D" % hid, true,
+				att != null and att.bone_name == "head" and att.name == "HelmMount")
+		check("helm %s: at the measured skull-crown mount, unscaled" % hid, true,
+				helm.position.is_equal_approx(mount_pos)
+				and helm.scale.is_equal_approx(Vector3.ONE))
+		# A helm WRAPS the skull; a crest TOWERS over it. Never both, never
+		# the royal names (they are contracts the e2e board-truth greps for).
+		check("helm %s: pawn wears no crest/crown/tiara" % hid, true,
+				pv.find_child("Crest", true, false) == null
+				and pv.find_child("Crown", true, false) == null
+				and pv.find_child("Tiara", true, false) == null)
+		check("helm %s: sits below the royal crest line" % hid, true,
+				helm.position.y < 1.04)
+		# THIS house's own helm, not a shared one: distinct scene per house,
+		# and the mesh node inside carries the house name.
+		var packed: PackedScene = assets.pawn_helm_scene(hid)
+		scenes[hid] = packed.resource_path
+		check("helm %s: helm mesh names its own house" % hid, true,
+				helm.find_child("*%s*" % hid, true, false) != null)
+		# Rim + motif wear the house accent; the iron shell is left alone.
+		var accent_ok := false
+		var iron_ok := true
+		for mi: MeshInstance3D in helm.find_children("*", "MeshInstance3D", true, false):
+			for s in mi.mesh.get_surface_count():
+				var base := mi.mesh.surface_get_material(s) as StandardMaterial3D
+				var over := mi.get_surface_override_material(s) as StandardMaterial3D
+				if base == null:
+					continue
+				if str(base.resource_name).begins_with(assets.HELM_ACCENT_MATERIAL):
+					var want: Color = registry.get_colors(hid)["accent"]
+					accent_ok = over != null \
+							and over.albedo_color.is_equal_approx(base.albedo_color * want)
+				elif str(base.resource_name).begins_with(assets.HELM_IRON_MATERIAL):
+					iron_ok = iron_ok and over == null
+					iron_albedo[hid] = base.albedo_color
+		check("helm %s: rim/motif dyed in the house accent" % hid, true, accent_ok)
+		check("helm %s: iron shell left plain" % hid, true, iron_ok)
+		# The bear hood must be OFF (it swallows the helm) and still THERE —
+		# _raw_model_height counts it, so freeing it would rescale the pawn.
+		var hoods: Array = pv.find_children("*BearHat*", "MeshInstance3D", true, false)
+		var want_hood: bool = str(hid) != "tidegrip"  # the skeleton cast has none
+		check("helm %s: bear hood still in the tree (hidden, not freed)" % hid,
+				want_hood, not hoods.is_empty())
+		for mi: MeshInstance3D in hoods:
+			check("helm %s: bear hood doffed" % hid, false, mi.visible)
+		# The helm hangs off a bone, so the height law cannot feel it.
+		check("helm %s: height law untouched (%.3f)" % [hid,
+				float(preview.measured_height(pv))], true,
+				absf(float(preview.measured_height(pv))
+						- float(assets.piece_height(T_PAWN))) < 0.01)
+		pv.free()
+	check("helm: nine houses, nine distinct helm assets", 9,
+			scenes.values().size() - _dupes(scenes.values()))
+	# The Drowned Legion fields the pre-charred twin — same kraken geometry,
+	# iron and rim baked black, mirroring its charred charger.
+	check("helm: Drowned Legion wears the charred twin", true,
+			str(scenes["tidegrip"]).contains("charred"))
+	check("helm: charred iron is darker than a living house's", true,
+			(iron_albedo["tidegrip"] as Color).get_luminance()
+			< (iron_albedo["goldclaw"] as Color).get_luminance())
+	# Pawns ONLY — a helm on a bishop or a crest on a pawn would break the
+	# rank read the whole costume system is built on.
+	for t in [T_BISHOP, T_KNIGHT, T_ROOK, T_QUEEN, T_KING]:
+		var pv := _spawn(t, FROST, "goldclaw")
+		check("helm: %s wears no helm" % TYPE_NAMES[t], true,
+				pv.find_child("Helm", true, false) == null)
+		pv.free()
+	# Legacy FROST/EMBER sides have no house, so no helm — and they keep the
+	# bear hood they shipped with rather than standing there bare-headed.
+	var legacy := _spawn(T_PAWN, FROST, "")
+	check("helm: legacy pawn wears no helm", true,
+			legacy.find_child("Helm", true, false) == null)
+	var legacy_hoods: Array = legacy.find_children("*BearHat*", "MeshInstance3D", true, false)
+	check("helm: legacy pawn keeps its bear hood", true,
+			not legacy_hoods.is_empty()
+			and (legacy_hoods[0] as MeshInstance3D).visible)
+	legacy.free()
+
+
+func _dupes(values: Array) -> int:
+	var seen := {}
+	var n := 0
+	for v in values:
+		if seen.has(v):
+			n += 1
+		seen[v] = true
+	return n
 
 
 ## The MOUNTED knight (ISSUES.md #1): horse+rider ensemble per house — the

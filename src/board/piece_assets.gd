@@ -143,7 +143,9 @@ const GLYPH_ENERGY_REST := 1.1
 const GLYPH_ENERGY_SELECTED := 3.4
 
 ## HOUSE layer — helmet crests (tools/props/make_crests.py), worn by
-## knight/queen/king only. Pawns stay visually quiet (palette + shield sigil).
+## knight/queen/king only. Pawns wear the humbler half-helm below — never a
+## crest: the two registries are deliberately SEPARATE lists, because adding
+## PAWN to this one would put a royal crest on every footman.
 const CRESTED_TYPES: Array[int] = [2, 4, 5]
 const CREST_SCENES := {
 	"hartcrown": preload("res://assets/custom-props/crests/crest_hartcrown.glb"),
@@ -156,6 +158,44 @@ const CREST_SCENES := {
 	"silverbrook": preload("res://assets/custom-props/crests/crest_silverbrook.glb"),
 	"goldclaw": preload("res://assets/custom-props/crests/crest_goldclaw.glb"),
 }
+
+## HOUSE layer — PAWN half-helms (ISSUES.md #3, tools/props/make_pawn_helms.py).
+## Worn by pawns ONLY, and deliberately quieter than the royal crest above: a
+## crest sits ABOVE the skull (mount y 1.04, reaching ~0.85 higher still), a
+## helm WRAPS it (mount y 0.945, ≤0.21 of motif above the crown line). The
+## player reads "pawn" first and "which house" second.
+##
+## Each helm carries its house's archetype in ~200 tris — wolf ear plates,
+## lion mane-comb, stag antler nubs, dragon saw-ridge, kraken tentacles, rose
+## browline beads, sun disc, falcon wing-flares, trout fin — and exactly two
+## materials, found BY NAME (never by surface index): HELM_IRON_MATERIAL is
+## the shell (left as plain dark iron — that restraint is what keeps a pawn
+## humble) and HELM_ACCENT_MATERIAL is the flared rim plus the motif, authored
+## near-white so the multiply tint lands the house color true. The rim carries
+## the accent on every helm, so a house reads by COLOR even when its motif is
+## only a few pixels tall on the board.
+const HELMED_TYPES: Array[int] = [0]
+const PAWN_HELM_SCENES := {
+	"hartcrown": preload("res://assets/custom-props/pawn-helms/pawn_helm_hartcrown.glb"),
+	"winterfang": preload("res://assets/custom-props/pawn-helms/pawn_helm_winterfang.glb"),
+	"ashwyrm": preload("res://assets/custom-props/pawn-helms/pawn_helm_ashwyrm.glb"),
+	"tidegrip": preload("res://assets/custom-props/pawn-helms/pawn_helm_tidegrip.glb"),
+	"thornvale": preload("res://assets/custom-props/pawn-helms/pawn_helm_thornvale.glb"),
+	"duskfire": preload("res://assets/custom-props/pawn-helms/pawn_helm_duskfire.glb"),
+	"swiftcrest": preload("res://assets/custom-props/pawn-helms/pawn_helm_swiftcrest.glb"),
+	"silverbrook": preload("res://assets/custom-props/pawn-helms/pawn_helm_silverbrook.glb"),
+	"goldclaw": preload("res://assets/custom-props/pawn-helms/pawn_helm_goldclaw.glb"),
+}
+## HOUSE layer — the Drowned Legion's twin: identical kraken geometry with the
+## iron and rim baked charred (the crown.glb / crown_frost.glb precedent, one
+## asset swap instead of a runtime material branch). Tidegrip's pawns are
+## drowned skeletons on a charred charger; their helm came out of the same fire.
+const PAWN_HELM_CHARRED := preload("res://assets/custom-props/pawn-helms/pawn_helm_tidegrip_charred.glb")
+const HELM_IRON_MATERIAL := "pawnhelm_iron"
+const HELM_ACCENT_MATERIAL := "pawnhelm_accent"
+## The Barbarian pawn body ships wearing a full bear-skull hood that swallows
+## any helm — PieceView hides (never frees) meshes matching this.
+const BEAR_HOOD_PATTERN := "*BearHat*"
 
 var _shared_anims: AnimationLibrary
 var _tint_cache: Dictionary = {}    # "<material rid>|<tint html>" -> StandardMaterial3D
@@ -221,6 +261,19 @@ func wants_crest(piece_type: int) -> bool:
 ## The helmet-crest scene for a house (null for legacy sides / unknown ids).
 func crest_scene(house_id: String) -> PackedScene:
 	return CREST_SCENES.get(house_id)
+
+
+func wants_helm(piece_type: int) -> bool:
+	return piece_type in HELMED_TYPES
+
+
+## The PAWN half-helm scene for a house (null for legacy sides / unknown ids —
+## legacy pawns keep the bear hood they shipped with). The Drowned Legion
+## fields the pre-charred twin.
+func pawn_helm_scene(house_id: String) -> PackedScene:
+	if house_id == SKELETON_HOUSE:
+		return PAWN_HELM_CHARRED
+	return PAWN_HELM_SCENES.get(house_id)
 
 
 ## Crown-variant mapping (kings only, custom-props INTEGRATION.md): a house

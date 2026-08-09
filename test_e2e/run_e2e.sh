@@ -8,7 +8,7 @@
 #               time-restore, DS4 opponent (mock+live, 3 modes),
 #               UciEngine/stockfish client, music (104), banter (93),
 #               dragon spectator/ASHFALL, duel face-off, costumes
-#               (165, mounted knights included)                   — Gate A
+#               (273 — mounted knights and pawn helms included)   — Gate A
 #   boot        windowed: select flows to game, 32 pieces, banners+HUD dyed
 #   orientation windowed: --debug-coords labeled overlay from the default
 #               player camera, saved as labeled.png — the permanent
@@ -175,6 +175,10 @@ run_tests() {
   note "tests: chess engine suite headless"
   run_with_timeout 300 "$log" "$GODOT" --headless --path "$PROJ" -s res://tests/run_tests.gd
   rc=$?
+  if grep -Eq 'Parse Error|Failed to load script' "$log"; then
+    record engine-tests FAIL "suite failed to compile — no checks ran (log: $log)"
+    return 1
+  fi
   if [ "$rc" -eq 0 ] && grep -q 'RESULT: ALL GREEN' "$log"; then
     record engine-tests PASS "$(grep -m1 '^TOTAL:' "$log")"
     return 0
@@ -189,6 +193,14 @@ run_suite() {  # <name> <res://script>  (suite exits 0 = green)
   note "tests: $name suite headless"
   run_with_timeout 300 "$log" "$GODOT" --headless --path "$PROJ" -s "$script"
   rc=$?
+  # A suite script that fails to COMPILE never runs a single check — and
+  # `godot -s` still exits 0, so the exit code alone would record PASS on a
+  # suite that did nothing (2026-08-08: a typo in test_costumes.gd reported
+  # green). Parse failures are their own FAIL lane.
+  if grep -Eq 'Parse Error|Failed to load script' "$log"; then
+    record "$name" FAIL "suite failed to compile — no checks ran (log: $log)"
+    return 1
+  fi
   if [ "$rc" -eq 0 ]; then
     record "$name" PASS "exit 0"
     return 0

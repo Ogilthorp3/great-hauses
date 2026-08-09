@@ -35,6 +35,43 @@ tools/props/ (all deterministic, seeded RNG):
                                <- tools/props/make_glyph_rings.py
                                   (deterministic, no RNG)
 
+The per-house PAWN half-helms added later on the same day have their own
+section below.
+
+pawn-helms/*.glb — provenance
+=============================
+
+Added 2026-08-08 (PER-HOUSE PAWN HELMETS, ISSUES.md #3): ORIGINAL procedural
+geometry, headless Blender 4.0.2, committed script in tools/props/:
+
+  pawn-helms/pawn_helm_<house>.glb x9   <- tools/props/make_pawn_helms.py
+  pawn-helms/pawn_helm_tidegrip_charred.glb  (the Drowned Legion's twin —
+                                  identical geometry, charred materials)
+
+One half-helm per Great House, worn by PAWNS only and deliberately humbler
+than the royal crest above (a crest towers over the skull; a helm wraps it).
+Each is <= 250 tris (194/214/154/198/232/238/166/178/206, avg 197) and keeps
+its house motif within 0.21 head-bone units of the skull crown. Two flat
+Principled BSDF materials each, same names in every file: "pawnhelm_iron"
+(the shell, left plain by the runtime) and "pawnhelm_accent" (rim + motif,
+authored near-white so PieceView's multiply tint lands the house color true).
+
+The shell is fitted to a MEASURED slice profile of each cast's head-bone-
+weighted vertices, not to the head AABB — the KayKit Barbarian's AABB
+half-width is its BEARD, and the skeleton's widest point is elsewhere, so an
+AABB-fitted ellipsoid was baggy on one skull and cut through the other. The
+KayKit heads were used as measuring references only; no third-party geometry
+is included (KayKit Adventurers 2.0 / Skeletons 1.1 are CC0 regardless).
+
+Geometry is deterministic: rebuilding reproduces every vertex/normal buffer
+byte-for-byte and every triangle set identically. Nine of the ten GLB FILES
+are also byte-identical run to run; thornvale's is not, because Blender
+4.0.2's glTF exporter emits that mesh's second surface's triangles in a
+run-dependent ORDER (not Python hash order — reproduced under
+PYTHONHASHSEED=0 — and not the triangulator, which is pinned to
+quad_method='FIXED'). Triangle order is irrelevant to Godot, so the geometry
+is reproducible even where the bytes are not.
+
 The glyph rings extrude the Unicode chess glyphs U+265A-U+265F as text
 geometry using a system font (Apple Symbols / Arial Unicode, with Blender's
 bundled Noto Sans Symbols 2 as fallback) — font OUTLINES used as mesh input

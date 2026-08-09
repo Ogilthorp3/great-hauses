@@ -5,7 +5,9 @@ extends Node3D
 ##   /Applications/Godot.app/Contents/MacOS/Godot --path . res://scenes/costume_preview.tscn
 ##   Renders all 9 houses' full sets in a grid (per-house rows + a legacy
 ##   FROST/EMBER row), saves one screenshot per house plus an all-houses
-##   overview to test_e2e/artifacts/module-previews/costumes/, then quits.
+##   overview, a mounted-knight beauty shot and the pawn-helm parade
+##   (pawn_helms.png + pawn_helm_hero.png) to
+##   test_e2e/artifacts/module-previews/costumes/, then quits.
 ##   Each house shot has its KNIGHT selected so the glyph-ring brighten
 ##   shows next to at-rest rings.
 ##
@@ -73,6 +75,7 @@ static func validate_piece(pv: PieceView, piece_type: int, house_id: String) -> 
 	var has_crest := pv.find_child("Crest", true, false) != null
 	if want_crest != has_crest:
 		errs.append("%s: crest %s, expected %s" % [tag, has_crest, want_crest])
+	errs.append_array(_validate_helm(pv, piece_type, house_id, tag))
 	# TYPE: king wears crown + cape; nobody else wears a node named Crown
 	# (the e2e board-truth scenario greps for exactly that).
 	var crowned := not pv.find_children("Crown", "", true, false).is_empty()
@@ -135,6 +138,59 @@ static func validate_piece(pv: PieceView, piece_type: int, house_id: String) -> 
 		var pennant := pv.find_child("Pennant", true, false) as MeshInstance3D
 		if pennant != null and not pennant.material_override is ShaderMaterial:
 			errs.append("%s: pennant lacks the flutter ShaderMaterial" % tag)
+	return errs
+
+
+## HOUSE: the per-house PAWN half-helm (ISSUES.md #3) — pawns of a real house
+## wear one and NOBODY else does; it hangs off the head bone so the height law
+## can't feel it; its rim/motif surface wears the house color while the iron
+## shell is left plain; and the Barbarian's bear hood is off, because a helm
+## under that hood is a helm nobody will ever see.
+static func _validate_helm(pv: PieceView, piece_type: int, house_id: String,
+		tag: String) -> Array[String]:
+	var errs: Array[String] = []
+	var want_helm: bool = PieceAssets.wants_helm(piece_type) \
+			and PieceAssets.pawn_helm_scene(house_id) != null
+	var helm := pv.find_child("Helm", true, false) as Node3D
+	if want_helm != (helm != null):
+		errs.append("%s: helm %s, expected %s" % [tag, helm != null, want_helm])
+		return errs
+	if helm == null:
+		# No helm expected: the pawn body must still be wearing its own hood.
+		for mi: MeshInstance3D in pv.find_children(
+				PieceAssets.BEAR_HOOD_PATTERN, "MeshInstance3D", true, false):
+			if not mi.visible:
+				errs.append("%s: bear hood doffed with no helm to replace it" % tag)
+		return errs
+	var att := helm.get_parent() as BoneAttachment3D
+	if att == null or att.bone_name != "head":
+		errs.append("%s: helm not mounted on the head bone" % tag)
+	if not helm.position.is_equal_approx(PieceView.HELM_MOUNT_POS):
+		errs.append("%s: helm mounted at %v, expected %v"
+				% [tag, helm.position, PieceView.HELM_MOUNT_POS])
+	var accent_dressed := false
+	var iron_untouched := true
+	for mi: MeshInstance3D in helm.find_children("*", "MeshInstance3D", true, false):
+		for s in mi.mesh.get_surface_count():
+			var base := mi.mesh.surface_get_material(s)
+			if base == null:
+				continue
+			var mat_name := str(base.resource_name)
+			if mat_name.begins_with(PieceAssets.HELM_ACCENT_MATERIAL) \
+					and mi.get_surface_override_material(s) != null:
+				accent_dressed = true
+			if mat_name.begins_with(PieceAssets.HELM_IRON_MATERIAL) \
+					and mi.get_surface_override_material(s) != null:
+				iron_untouched = false
+	if not accent_dressed:
+		errs.append("%s: helm rim/motif not wearing the house color" % tag)
+	if not iron_untouched:
+		errs.append("%s: helm iron overridden — the shell stays plain" % tag)
+	# The bear hood must be HIDDEN (never freed — see PieceView._doff_bear_hood).
+	for mi: MeshInstance3D in pv.find_children(
+			PieceAssets.BEAR_HOOD_PATTERN, "MeshInstance3D", true, false):
+		if mi.visible:
+			errs.append("%s: bear hood still worn over the helm" % tag)
 	return errs
 
 
@@ -288,8 +344,80 @@ func _run_windowed_shots() -> void:
 		pv.visible = true
 	for other in _row_roots:
 		(_row_roots[other] as Node3D).visible = true
-	print("costume preview: wrote %d screenshots to %s" % [houses.size() + 2, dir])
+	await _shoot_pawn_helms(dir)
+	print("costume preview: wrote %d screenshots to %s" % [houses.size() + 5, dir])
 	get_tree().quit(0)
+
+
+## The PAWN-HELM parade (ISSUES.md #3): every house's pawn pulled out of its
+## row into one formation and shot three times — the nine-house contact sheet
+## (the "can I tell the houses apart?" gate), a living-house hero, and the
+## Drowned Legion's charred twin on the skeleton cast. Positions/visibility and
+## the camera's projection are restored afterwards so nothing downstream
+## inherits the parade layout.
+##
+## The contact sheet is ORTHOGRAPHIC and STAGGERED (5 front, 4 behind) for one
+## reason: nine figures across a single 16:9 frame is width-bound — in one line
+## each pawn gets 1/9 of the width and ends up too small for its motif to
+## survive. Two staggered ranks double the width per pawn, and orthographic
+## projection stops the outer houses from shrinking and turning away from the
+## camera, so all nine are judged on equal terms.
+const PARADE_COLS := 5
+const PARADE_X_STEP := 0.50
+const PARADE_Z_STEP := 1.00
+const PARADE_ORTHO_SIZE := 1.62
+const PARADE_PITCH_DEG := 26.0
+
+func _shoot_pawn_helms(dir: String) -> void:
+	var pawn_col := TYPE_ORDER.find(PieceView.Type.PAWN)
+	var houses := HouseRegistry.house_ids()
+	var saved: Dictionary = {}
+	var pawns: Array[PieceView] = []
+	for other in _row_roots:
+		(_row_roots[other] as Node3D).visible = not str(other).is_empty()
+	for i in houses.size():
+		var hid: String = houses[i]
+		var pawn: PieceView = _rows[hid][pawn_col]
+		for pv: PieceView in _rows[hid]:
+			pv.visible = pv == pawn
+		saved[pawn] = pawn.position
+		# The camera looks +Z, so world +X is screen-LEFT: count columns down
+		# from the right so the houses read left-to-right in registry order.
+		var rank := i / PARADE_COLS
+		var file := i % PARADE_COLS
+		pawn.position = Vector3(
+			float(PARADE_COLS - 1 - file) * PARADE_X_STEP + rank * PARADE_X_STEP * 0.5,
+			0.0, rank * PARADE_Z_STEP)
+		pawns.append(pawn)
+	var mid := (PARADE_COLS - 1) * PARADE_X_STEP * 0.5 + PARADE_X_STEP * 0.25
+	var focus := Vector3(mid, 0.42, PARADE_Z_STEP * 0.5)
+	var pitch := deg_to_rad(PARADE_PITCH_DEG)
+	_cam.projection = Camera3D.PROJECTION_ORTHOGONAL
+	_cam.size = PARADE_ORTHO_SIZE
+	_cam.position = focus + Vector3(0.0, sin(pitch), -cos(pitch)) * 6.0
+	_cam.look_at(focus)
+	await _settle()
+	await _shot("%s/pawn_helms.png" % dir)
+	_cam.projection = Camera3D.PROJECTION_PERSPECTIVE
+	# Two close 3/4 heroes: a living house, then the Drowned Legion's charred
+	# twin on the skeleton cast — the two castings a helm has to sit on.
+	for shot in [["winterfang", "pawn_helm_hero"],
+			[PieceAssets.SKELETON_HOUSE, "pawn_helm_drowned"]]:
+		var hero: PieceView = _rows[shot[0]][pawn_col]
+		for pawn: PieceView in pawns:
+			pawn.visible = pawn == hero
+		var hp := hero.global_position
+		_cam.position = hp + Vector3(0.34, 0.80, -0.58)
+		_cam.look_at(hp + Vector3(0.0, 0.50, 0.0))
+		await _settle()
+		await _shot("%s/%s.png" % [dir, shot[1]])
+	for pawn: PieceView in pawns:
+		pawn.position = saved[pawn]
+	for hid in houses:
+		for pv: PieceView in _rows[hid]:
+			pv.visible = true
+	for other in _row_roots:
+		(_row_roots[other] as Node3D).visible = true
 
 
 func _settle() -> void:
