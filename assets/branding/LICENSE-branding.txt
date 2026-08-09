@@ -1,0 +1,72 @@
+app-icon-*.png, GreatHouses.icns/.ico, wordmark-great-houses*.png — license + provenance
+=========================================================================================
+
+These assets are ORIGINAL procedural raster art generated for the "Great
+Houses" battle-chess project on 2026-08-09 by the committed scripts in
+tools/branding/ (Python 3 + Pillow, deterministic seeded RNG, SEED = 1077):
+
+  app-icon-{32,64,128,256,512,1024}.png  <- tools/branding/gen_app_icon.py
+  GreatHouses.icns  (macOS, 16..1024)     <- tools/branding/make_icns.py
+  GreatHouses.ico   (Windows, 16..256)   <- tools/branding/make_icns.py
+  wordmark-great-houses.png              <- tools/branding/gen_wordmark.py
+  wordmark-great-houses-flat.png         <- tools/branding/gen_wordmark.py
+
+Rebuild all three, from the project root:
+
+  python3 tools/branding/gen_app_icon.py --out assets/branding --stem app-icon
+  python3 tools/branding/make_icns.py
+  python3 tools/branding/gen_wordmark.py
+
+No third-party images, scans, textures, stock art or generative-model output
+were used. Every pixel is drawn from primitives — polygons, gradients, blurs
+and seeded noise — by the scripts above. The scripts ARE the source of truth:
+the PNGs are build products and any change must be made in the generator and
+re-run, never retouched by hand.
+
+WHAT THE MARK IS
+----------------
+A heater shield party per pale — crimson dexter, steel sinister, the two
+armies of the board — charged overall with a gold chess king. The heater
+silhouette is deliberately the same one the in-game house sigils already use
+(assets/sigils/), so the app icon is continuous with the product rather than
+decoration bolted on top.
+
+The palette is lifted from src/houses/houses.json and is not independently
+invented:
+  crimson  <- Goldclaw primary #8e1f2c / Ashwyrm secondary #b3282d
+  gold     <- Goldclaw secondary #d9a441 + accent #f0c96a, Hartcrown #cfa63b
+  steel    <- Silverbrook primary #2c4d7c, Winterfang accent #7fb0d4
+...then value-separated (see "greyscale" below), so the shipped hexes differ
+from the house hexes on purpose.
+
+DETAIL TIERS — why the sizes are not downsamples of each other
+--------------------------------------------------------------
+Every size is DRAWN at its own tier (gen_app_icon.tier_of): full (>=256),
+mid (128), mini (64), small (32/16). Members the tier cannot afford are
+dropped rather than downsampled to mud — at 32px the knop, bell and collar do
+not exist; the charge is rebuilt as four flat members on whole-pixel
+boundaries (the charge is centred on x = 16.0 exactly). make_icns.py renders
+each .iconset member natively at its own pixel size for the same reason; it
+never sips a 1024 master down to 16.
+
+TWO SELF-CHECKS RUN ON EVERY BUILD (they print PASS/FAIL)
+---------------------------------------------------------
+* greyscale split. The two tinctures must differ in VALUE, not only hue, or
+  the per-pale division dies under deuteranopia and reads as one dark mass on
+  a dark dock. The 32px tile is desaturated and the two halves' means are
+  compared; the floor is 15 grey levels. Current build: 71.1 / 48.6, delta
+  22.5. (The pre-fix palette measured 3.7 — crimson L* 35.2 vs steel L* 38.1.)
+* perimeter luminance. Mean sRGB relative luminance of the outer rim band,
+  the number that decides whether the tile has an edge on a dark dock. Floor
+  0.12. Current build: 0.155 at 32px, 0.144 at 64px. Measured the same way,
+  the two rejected concepts scored 0.017 and 0.063 against a 0.008 dock
+  ground. The gold perimeter is what buys that margin, which is why the
+  forged-iron rim material is applied only at 128px and up.
+
+Font: the wordmark sets "GREAT HOUSES" in Luminari, a system face shipped
+with macOS. Font OUTLINES are used as raster input only — no font file is
+copied, embedded or redistributed. Fallbacks (Herculanum, Trattatello,
+Copperplate, Baskerville) are likewise system faces used as outlines only.
+
+License: these assets belong to the Great Houses project (Bertrand Nepveu).
+Internal project use; relicense as the project owner sees fit.
