@@ -2,10 +2,16 @@ class_name GreatHall
 extends Node3D
 ## Builds the torch-lit great hall around the chess board: stone floor and
 ## perimeter walls (MultiMesh — 1 draw call each), corner pillars, two feast
-## tables, eight flickering torches (src/env/torch.gd), NINE wall banners
-## (src/env/banner.gd) awaiting the Great Hauses' colors, and the Throne of
+## tables, eight flickering torches (src/env/torch.gd), TWENTY-TWO banner
+## stations (src/env/banner.gd) awaiting the Great Hauses' colors, a further
+## 26 sigil-less panels of cloth carried on two MultiMeshes, and the Throne of
 ## Blades (custom prop) against the far wall. `summon_champion_dragon()` /
 ## `dragon_wink()` stage the championship dragon above it — no extra lights.
+##
+## Cost of the whole dressing, measured against the same tree with the hall
+## cut back to its original nine stations (1080p perf harness, both runs
+## COTENANT count=0): draws 859 -> 885, primitives 466,346 -> 469,529 — +26
+## draw calls and +0.68 % primitives for 9 -> 48 panels of cloth.
 ##
 ## Everything is KayKit Dungeon Remastered (CC0), copied with its license to
 ## res://assets/kaykit-dungeon/. Board center is world origin; the hall
@@ -14,14 +20,24 @@ extends Node3D
 ## Integrator API (banners):
 ##   dress_for_match(player, rival)         THE DRESSING — colours AND sigils
 ##   dress_for_champion(house)              the throne shot: the hall falls
-##   get_banner(i) -> HallBanner            i = 0..8
+##   get_banner(i) -> HallBanner            i = 0..STATIONS.size()-1
 ##   set_banner_colors(colors)              dyes banners 0..n in index order
 ##                                          (colour only — sigils stay put)
 ##   banners                                the Array[HallBanner] itself
-## Banner index map (world positions, camera default looks toward +Z):
-##   0,1,2  far wall   (z=+12) at x = -4, 0, +4   (2 is screen-left)
-##   3,4,5  west wall  (x=-12) at z = -4, 0, +4   (screen-right side)
-##   6,7,8  east wall  (x=+12) at z = -4, 0, +4   (screen-left side)
+##
+## THE INDEX MAP IS APPEND-ONLY. 0..8 are the original nine and MUST keep
+## their meaning: the e2e boot scenario reads banner 3 (west wall centre =
+## the player's primary) and the tournament scenario reads banner 6 (east
+## wall centre = the rival's primary) every round. New stations are appended
+## at 9+; nothing is ever renumbered.
+##   0,1,2   far wall   (z=+12) at x = -4, 0, +4   (2 is screen-left)
+##   3,4,5   west wall  (x=-12) at z = -4, 0, +4   (screen-right side)
+##   6,7,8   east wall  (x=+12) at z = -4, 0, +4   (screen-left side)
+##   9,10    far wall, the pair framing the throne, x = -2, +2
+##   11,12   the FAR pillars' camera-facing shoulders  <- the gameplay heroes
+##   13,14   the NEAR pillars' camera-facing shoulders (the black-side view)
+##   15..18  side walls, far quarter, small low pennants (z = +6.3, +8.6)
+##   19,20,21 near wall, behind the player's own army, x = -6.5, 0, +6.5
 ##
 ## THE HALL WEARS THE MATCHUP (ISSUES.md P12, 2026-08-09): the hall dresses
 ## ITSELF from Session at _ready — the player's house claims the west wall
@@ -31,6 +47,30 @@ extends Node3D
 ## Winterfang-vs-Goldclaw frame hung red and cream cloth and the room the war
 ## is actually fought in was the only place in the game that never said who
 ## was fighting.
+##
+## ── DRESSED WHERE THE PLAYER ACTUALLY LOOKS (2026-08-09) ───────────────────
+## The nine original stations were hung for a camera nobody plays from. The
+## gameplay rig is pitch -0.85 / distance 11.5 off a pivot at y 0.4, i.e. the
+## eye sits at (0, 9.04, -7.59) and looks 48.7 deg DOWN; with a 50 deg
+## vertical fov the top of the frame drops through the room as
+##     y_top(z) = 9.04 - 0.439 * (z + 7.59)
+## so at the far wall (z = 11.31, the cloth's front face) the frame stops at
+## y = 0.74 — the far-wall banners hang from 0.23 to 3.43 and the player sees
+## a 20 px hem of them, mostly behind the HUD title. Sideways it is worse:
+## |x| <= 0.829 * depth, so the side walls do not enter the frame at all
+## until z ~ +4, which is why exactly ONE of the nine (station 8) clipped the
+## screen edge in 02_boot_lineup.png and the hall read as bare stone.
+##
+## What the gameplay camera CAN see of the room's dressing is the far pillars
+## and the far quarter of the side walls, so that is where the new heroes go:
+## stations 11/12 hang on the pillars' camera-facing shoulders at 0.75 scale
+## (whole banner inside the frame, ~43 px sigil, top-left and top-right of
+## every frame) and 15..18 are small low pennants on the side walls' far
+## quarter (~36 px sigils in the corner wedges). The full-height wall stations
+## stay full height because the wide/showcase/orbit/throne cameras — which do
+## see the walls — are the ones they were tuned on.
+## tests/test_cinematics.gd::_test_hall_banner_frame reproduces this
+## projection against the REAL camera and fails if the heroes leave the frame.
 ##
 ## FPS probe (env verification, no game-code hooks): launch with user arg
 ## "--env-fps" to print one "ENV_FPS second=<n> fps=<v>" line per second for
@@ -42,6 +82,12 @@ const PILLAR_SCENE: PackedScene = preload("res://assets/kaykit-dungeon/pillar.gl
 const TABLE_SCENE: PackedScene = preload("res://assets/kaykit-dungeon/table_long.gltf")
 const CANDLE_SCENE: PackedScene = preload("res://assets/kaykit-dungeon/candle_triple.gltf")
 const THRONE_SCENE: PackedScene = preload("res://assets/custom-props/throne.glb")
+## The drape shapes the sigil-less dressing is cut from — same CC0 pack, same
+## dungeon_texture.png, so they cost no new texture memory. banner_thin is one
+## 1.1 u drop (83 tris); banner_triple is a 3.7 u three-panel swag in a SINGLE
+## mesh (263 tris), which is why the corners are cheap.
+const DRAPE_THIN_SCENE: PackedScene = preload("res://assets/kaykit-dungeon/banner_thin_white.gltf")
+const DRAPE_TRIPLE_SCENE: PackedScene = preload("res://assets/kaykit-dungeon/banner_triple_white.gltf")
 
 const TorchScript := preload("res://src/env/torch.gd")
 const BannerScript := preload("res://src/env/banner.gd")
@@ -73,7 +119,115 @@ const DRAGON_HOVER := Vector3(0.0, 4.04, 9.9)
 ## both the scale and DRAGON_HOVER stay in sync with the spectator.)
 const DRAGON_SCALE := 1.6
 
+## Which house a piece of cloth belongs to. THE SEAM IS x = 0: everything on
+## the player's side of the hall (x < 0, the west) flies the player, the
+## rival owns the east, and the two meet over the throne — the far wall runs
+## player, player, SEAM, rival, rival across the Throne of Blades.
+const HOUSE_SELF := 0
+const HOUSE_RIVAL := 1
+
+## Pillar face (+-6.75 from the pillar's 1.5 u box at z = +-7.5) plus the
+## drape's own 0.378 back offset at 0.75 scale — so the cloth kisses the stone.
+const PILLAR_BANNER_Z := 7.0335
+
+## THE BANNER STATIONS — the sigil-bearing banners, one HallBanner each.
+## [position, yaw, scale, side, tone]. APPEND-ONLY (see the index map up top):
+## row 3 must stay the player's primary and row 6 the rival's primary or the
+## boot and tournament e2e scenarios go red.
+##
+## Scale is per-station because the gameplay camera's frame is a wedge, not a
+## room: a full-height banner reads on the walls the wide/orbit cameras see,
+## while the pillar and side-wall stations are cut down so their whole cloth —
+## sigil included — lands inside the -0.85 pitch frame.
+const STATIONS := [
+	# ── the original nine (0..8): do not renumber, do not re-tone ──────────
+	[Vector3(-4.0, FLOOR_Y, WALL_HALF), PI, 1.0, HOUSE_SELF, "primary"],
+	[Vector3(0.0, FLOOR_Y, WALL_HALF), PI, 1.0, HOUSE_SELF, "accent"],
+	[Vector3(4.0, FLOOR_Y, WALL_HALF), PI, 1.0, HOUSE_RIVAL, "primary"],
+	[Vector3(-WALL_HALF, FLOOR_Y, -4.0), PI * 0.5, 1.0, HOUSE_SELF, "primary"],
+	[Vector3(-WALL_HALF, FLOOR_Y, 0.0), PI * 0.5, 1.0, HOUSE_SELF, "secondary"],
+	[Vector3(-WALL_HALF, FLOOR_Y, 4.0), PI * 0.5, 1.0, HOUSE_SELF, "accent"],
+	[Vector3(WALL_HALF, FLOOR_Y, -4.0), -PI * 0.5, 1.0, HOUSE_RIVAL, "primary"],
+	[Vector3(WALL_HALF, FLOOR_Y, 0.0), -PI * 0.5, 1.0, HOUSE_RIVAL, "secondary"],
+	[Vector3(WALL_HALF, FLOOR_Y, 4.0), -PI * 0.5, 1.0, HOUSE_RIVAL, "accent"],
+	# ── 9,10: the pair framing the Throne of Blades ────────────────────────
+	[Vector3(-2.0, FLOOR_Y, WALL_HALF), PI, 1.0, HOUSE_SELF, "secondary"],
+	[Vector3(2.0, FLOOR_Y, WALL_HALF), PI, 1.0, HOUSE_RIVAL, "secondary"],
+	# ── 11..14: the pillars' camera-facing shoulders ───────────────────────
+	# The pillar is 1.5 u square, its face at z = +-6.75; the drape's back
+	# vertex sits at local z 0.378, so the node stands 0.378 * scale proud of
+	# the face and the cloth lies flat on the stone. 11/12 are THE banners the
+	# gameplay camera sees (top-right / top-left of every frame); 13/14 are
+	# their twins for the black-side camera, which yaws 180 deg.
+	[Vector3(-7.5, FLOOR_Y, PILLAR_BANNER_Z), PI, 0.75, HOUSE_SELF, "primary"],
+	[Vector3(7.5, FLOOR_Y, PILLAR_BANNER_Z), PI, 0.75, HOUSE_RIVAL, "primary"],
+	[Vector3(-7.5, FLOOR_Y, -PILLAR_BANNER_Z), 0.0, 0.75, HOUSE_SELF, "accent"],
+	[Vector3(7.5, FLOOR_Y, -PILLAR_BANNER_Z), 0.0, 0.75, HOUSE_RIVAL, "accent"],
+	# ── 15..18: side walls, far quarter — small pennants hung LOW, the only
+	# height the gameplay camera keeps in frame out at the corner wedges ────
+	[Vector3(-WALL_HALF, FLOOR_Y, 6.3), PI * 0.5, 0.64, HOUSE_SELF, "secondary"],
+	[Vector3(WALL_HALF, FLOOR_Y, 6.3), -PI * 0.5, 0.64, HOUSE_RIVAL, "secondary"],
+	[Vector3(-WALL_HALF, FLOOR_Y, 8.6), PI * 0.5, 0.64, HOUSE_SELF, "accent"],
+	[Vector3(WALL_HALF, FLOOR_Y, 8.6), -PI * 0.5, 0.64, HOUSE_RIVAL, "accent"],
+	# ── 19..21: the near wall, behind the player's own army (was bare) ─────
+	# Clear of the near-wall torch pair at x = +-4.
+	[Vector3(-6.5, FLOOR_Y, -WALL_HALF), 0.0, 1.0, HOUSE_SELF, "primary"],
+	[Vector3(0.0, FLOOR_Y, -WALL_HALF), 0.0, 1.0, HOUSE_SELF, "accent"],
+	[Vector3(6.5, FLOOR_Y, -WALL_HALF), 0.0, 1.0, HOUSE_RIVAL, "primary"],
+]
+
+## THE SIGIL-LESS DRESSING. Every remaining stretch of wall, carried on two
+## MultiMeshes (one per shape) so 26 more panels of cloth cost TWO draw calls
+## instead of 26 — measured, not assumed: the perf harness reads 883 -> 885
+## draws and +1425 primitives for the whole set (test_e2e/artifacts/perf/
+## 20260809-144527 vs -144408, both COTENANT count=0). No sigils: at these
+## positions a 256 px charge would be a smear, and the heraldry is already
+## carried by the stations. Per-instance MultiMesh colors let the same two
+## meshes fly both hauses.
+## [position, yaw, side, tone]
+const DRAPES_THIN := [
+	# far wall, inboard of the corner swags and clear of the x = +-8 torches
+	[Vector3(-6.0, FLOOR_Y, WALL_HALF), PI, HOUSE_SELF, "secondary"],
+	[Vector3(6.0, FLOOR_Y, WALL_HALF), PI, HOUSE_RIVAL, "secondary"],
+	# near wall, between the player's stations and the x = +-4 torches
+	[Vector3(-2.0, FLOOR_Y, -WALL_HALF), 0.0, HOUSE_SELF, "secondary"],
+	[Vector3(2.0, FLOOR_Y, -WALL_HALF), 0.0, HOUSE_RIVAL, "secondary"],
+	# west wall (the player's), filling the gaps between the stations
+	[Vector3(-WALL_HALF, FLOOR_Y, -10.4), PI * 0.5, HOUSE_SELF, "accent"],
+	[Vector3(-WALL_HALF, FLOOR_Y, -7.0), PI * 0.5, HOUSE_SELF, "secondary"],
+	[Vector3(-WALL_HALF, FLOOR_Y, -2.0), PI * 0.5, HOUSE_SELF, "accent"],
+	[Vector3(-WALL_HALF, FLOOR_Y, 2.0), PI * 0.5, HOUSE_SELF, "secondary"],
+	[Vector3(-WALL_HALF, FLOOR_Y, 10.4), PI * 0.5, HOUSE_SELF, "accent"],
+	# east wall (the rival's), mirrored
+	[Vector3(WALL_HALF, FLOOR_Y, -10.4), -PI * 0.5, HOUSE_RIVAL, "accent"],
+	[Vector3(WALL_HALF, FLOOR_Y, -7.0), -PI * 0.5, HOUSE_RIVAL, "secondary"],
+	[Vector3(WALL_HALF, FLOOR_Y, -2.0), -PI * 0.5, HOUSE_RIVAL, "accent"],
+	[Vector3(WALL_HALF, FLOOR_Y, 2.0), -PI * 0.5, HOUSE_RIVAL, "secondary"],
+	[Vector3(WALL_HALF, FLOOR_Y, 10.4), -PI * 0.5, HOUSE_RIVAL, "accent"],
+]
+
+## The three-panel swags: one in each corner of the room, on the near and far
+## walls where a 3.7 u run fits outboard of every torch. Their x span
+## (+-8.15 .. +-11.85) is why no side-wall drape may sit past |z| = 10.6 —
+## the two would intersect in the corner.
+const DRAPES_TRIPLE := [
+	[Vector3(-10.0, FLOOR_Y, WALL_HALF), PI, HOUSE_SELF, "primary"],
+	[Vector3(10.0, FLOOR_Y, WALL_HALF), PI, HOUSE_RIVAL, "primary"],
+	[Vector3(-10.0, FLOOR_Y, -WALL_HALF), 0.0, HOUSE_SELF, "primary"],
+	[Vector3(10.0, FLOOR_Y, -WALL_HALF), 0.0, HOUSE_RIVAL, "primary"],
+]
+
 var banners: Array[HallBanner] = []
+## The sigil-less drapes: one entry per MultiMesh, {mm, tints, colors}. `tints`
+## is the parallel [side, tone] list the re-dye walks; `colors` is what the
+## re-dye last WROTE. Cloth only — the API above never hands these out,
+## because there is nothing per-banner to hand out.
+##
+## `colors` is not bookkeeping for its own sake: MultiMesh instance data lives
+## in the RenderingServer, and under `--headless` (the dummy server) both
+## get_instance_color and get_instance_transform read back empty. Without this
+## record a headless test of the dressing can only ever assert black.
+var _drapes: Array = []
 var throne: Node3D = null
 var dragon: Node3D = null              # summoned for the championship only
 var _dragon_anim: AnimationPlayer = null
@@ -90,6 +244,7 @@ func _ready() -> void:
 	_build_tables()
 	_build_torches()
 	_build_banners()
+	_build_banner_drapes()
 	_build_throne()
 	_build_fill_lights()
 	_dress_from_session()
@@ -100,7 +255,9 @@ func _ready() -> void:
 	if args.has("--env-banner-test"):
 		# Nine original Great Haus colors (wolf/lion/stag/dragon/kraken/
 		# rose/sun/falcon/trout archetypes) — proves per-banner recolor.
-		set_banner_colors([
+		# Cycled across every station, so the probe frame shows the whole
+		# hall repainted and not just the first nine of it.
+		var wheel := [
 			Color(0.75, 0.78, 0.82),  # House Winterhowl — grey wolf
 			Color(0.72, 0.15, 0.12),  # House Goldmane — crimson lion
 			Color(0.85, 0.65, 0.1),   # House Hartcrown — golden stag
@@ -110,7 +267,11 @@ func _ready() -> void:
 			Color(0.9, 0.45, 0.1),    # House Dawnspear — burning sun
 			Color(0.35, 0.55, 0.8),   # House Skyperch — falcon sky
 			Color(0.5, 0.55, 0.65),   # House Silverleap — trout silver
-		])
+		]
+		var wheeled: Array = []
+		for i in banners.size():
+			wheeled.append(wheel[i % wheel.size()])
+		set_banner_colors(wheeled)
 
 
 # -- integrator hooks ------------------------------------------------------
@@ -128,46 +289,55 @@ func set_banner_colors(colors: Array) -> void:
 		banners[i].set_house_color(colors[i])
 
 
-## THE DRESSING. Hang the nine banners for the match actually being played:
-## the player's house on the west wall plus the two far-wall stations it
-## faces, the rival's on the east wall plus the far-wall station opposite.
-## Each banner flies its house's SIGIL over its house's cloth.
+## THE DRESSING. Hang the whole hall for the match actually being played: the
+## player's house takes everything west of the throne, the rival everything
+## east of it, and the two meet on the far wall over the Throne of Blades.
+## Each STATION flies its house's SIGIL over its house's cloth; the drapes
+## between them fly the cloth alone.
 ##
-## Which of a house's three heraldic colours each station flies is deliberate:
-## stations 3 and 6 (the wall centres the e2e board-truth asserts read) fly
-## the PRIMARY exactly, and the rest alternate through secondary/accent so a
-## near-black primary (Hartcrown #1d1a17, Ashwyrm #171214) never leaves a
-## whole wall invisible in a torch-lit room.
+## Which of a house's three heraldic colours each station flies is deliberate
+## and lives in the STATIONS table: stations 3 and 6 (the wall centres the
+## e2e asserts read) fly the PRIMARY exactly, and the rest alternate through
+## secondary/accent so a near-black primary (Hartcrown #1d1a17, Ashwyrm
+## #171214) never leaves a whole wall invisible in a torch-lit room.
 func dress_for_match(player_house: String, rival_house: String) -> void:
 	if player_house.is_empty() or banners.is_empty():
 		return
 	var rival := rival_house if not rival_house.is_empty() else player_house
-	var pc := HouseRegistry.get_colors(player_house)
-	var rc := HouseRegistry.get_colors(rival)
-	var plan := [
-		[player_house, pc["primary"]],   # 0 far wall, player's flank
-		[player_house, pc["accent"]],    # 1 far wall centre
-		[rival, rc["primary"]],          # 2 far wall, rival's flank
-		[player_house, pc["primary"]],   # 3 west wall — the player's
-		[player_house, pc["secondary"]], # 4
-		[player_house, pc["accent"]],    # 5
-		[rival, rc["primary"]],          # 6 east wall — the rival's
-		[rival, rc["secondary"]],        # 7
-		[rival, rc["accent"]],           # 8
-	]
-	for i in mini(plan.size(), banners.size()):
-		banners[i].set_house(str(plan[i][0]), plan[i][1] as Color)
+	var ids := [player_house, rival]
+	var cols := [HouseRegistry.get_colors(player_house), HouseRegistry.get_colors(rival)]
+	for i in mini(STATIONS.size(), banners.size()):
+		var st: Array = STATIONS[i]
+		var side := int(st[3])
+		banners[i].set_house(str(ids[side]), (cols[side] as Dictionary)[st[4]] as Color)
+	_dye_drapes(cols)
 
 
 ## THE THRONE SHOT: every banner in the hall falls to the champion — the
-## whole room, sigils included, becomes one house. Alternates primary/accent
-## so nine identical rectangles do not read as wallpaper.
+## whole room, sigils and drapes included, becomes one house. Alternates
+## primary/accent so a wall of identical rectangles does not read as wallpaper.
 func dress_for_champion(house: String) -> void:
 	if house.is_empty() or banners.is_empty():
 		return
 	var c := HouseRegistry.get_colors(house)
 	for i in banners.size():
 		banners[i].set_house(house, (c["primary"] if i % 2 == 0 else c["accent"]) as Color)
+	_dye_drapes([c, c])
+
+
+## Repaint the sigil-less cloth. `cols` is [player_colors, rival_colors] — the
+## same pair the stations were dressed from, so a drape can never end up
+## flying a house its neighbouring station is not.
+func _dye_drapes(cols: Array) -> void:
+	for group in _drapes:
+		var mm: MultiMesh = group["mm"]
+		var tints: Array = group["tints"]
+		var record: PackedColorArray = group["colors"]
+		for i in tints.size():
+			var t: Array = tints[i]
+			var c := (cols[int(t[0])] as Dictionary)[t[1]] as Color
+			mm.set_instance_color(i, c)
+			record[i] = c
 
 
 ## Self-dressing: the hall reads the matchup off Session (statics survive
@@ -313,25 +483,65 @@ func _build_torches() -> void:
 
 
 func _build_banners() -> void:
-	## Nine stations for the nine Great Hauses — see the index map up top.
-	var specs := [
-		[Vector3(-4.0, FLOOR_Y, WALL_HALF), PI],        # 0 far wall
-		[Vector3(0.0, FLOOR_Y, WALL_HALF), PI],         # 1 far wall center
-		[Vector3(4.0, FLOOR_Y, WALL_HALF), PI],         # 2 far wall
-		[Vector3(-WALL_HALF, FLOOR_Y, -4.0), PI * 0.5],  # 3 west
-		[Vector3(-WALL_HALF, FLOOR_Y, 0.0), PI * 0.5],   # 4 west
-		[Vector3(-WALL_HALF, FLOOR_Y, 4.0), PI * 0.5],   # 5 west
-		[Vector3(WALL_HALF, FLOOR_Y, -4.0), -PI * 0.5],  # 6 east
-		[Vector3(WALL_HALF, FLOOR_Y, 0.0), -PI * 0.5],   # 7 east
-		[Vector3(WALL_HALF, FLOOR_Y, 4.0), -PI * 0.5],   # 8 east
-	]
-	for i in specs.size():
+	## One HallBanner per row of STATIONS — see the index map up top.
+	for i in STATIONS.size():
+		var st: Array = STATIONS[i]
 		var banner: HallBanner = BannerScript.new()
 		banner.name = "Banner%d" % i
-		banner.position = specs[i][0]
-		banner.rotation.y = specs[i][1]
+		banner.position = st[0] as Vector3
+		banner.rotation.y = st[1] as float
+		var s := st[2] as float
+		if not is_equal_approx(s, 1.0):
+			banner.scale = Vector3.ONE * s
 		add_child(banner)
 		banners.append(banner)
+
+
+func _build_banner_drapes() -> void:
+	## The rest of the cloth. Two MultiMeshes, per-instance colors, no sigils,
+	## NO SHADOWS: every one of these hangs flat on a wall, so its shadow falls
+	## on the stone it is already touching — pure submission cost for nothing.
+	_drapes.append(_drape_group("DrapesThin", DRAPE_THIN_SCENE, DRAPES_THIN))
+	_drapes.append(_drape_group("DrapesTriple", DRAPE_TRIPLE_SCENE, DRAPES_TRIPLE))
+
+
+func _drape_group(node_name: String, scene: PackedScene, specs: Array) -> Dictionary:
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	# use_colors MUST be set before instance_count: the buffer format is fixed
+	# the moment the count is assigned.
+	mm.use_colors = true
+	mm.mesh = _vertex_dyed_mesh(_extract_mesh(scene))
+	mm.instance_count = specs.size()
+	var tints: Array = []
+	var colors := PackedColorArray()
+	for i in specs.size():
+		var spec: Array = specs[i]
+		mm.set_instance_transform(i, Transform3D(
+			Basis(Vector3.UP, spec[1] as float), spec[0] as Vector3))
+		mm.set_instance_color(i, HallBanner.NEUTRAL)
+		tints.append([spec[2], spec[3]])
+		colors.append(HallBanner.NEUTRAL)
+	var mmi := MultiMeshInstance3D.new()
+	mmi.name = node_name
+	mmi.multimesh = mm
+	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(mmi)
+	return {"mm": mm, "tints": tints, "colors": colors}
+
+
+static func _vertex_dyed_mesh(mesh: Mesh) -> Mesh:
+	## A duplicate whose material takes its albedo from the MultiMesh instance
+	## color, so one mesh + one material can fly both hauses' colours in a
+	## single draw call. Duplicates keep the shared imported resource clean.
+	var copy := mesh.duplicate() as Mesh
+	for s in copy.get_surface_count():
+		var mat := copy.surface_get_material(s).duplicate() as StandardMaterial3D
+		mat.albedo_color = Color.WHITE
+		mat.vertex_color_use_as_albedo = true
+		mat.roughness = 1.0
+		copy.surface_set_material(s, mat)
+	return copy
 
 
 func _build_throne() -> void:

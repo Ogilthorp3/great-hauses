@@ -26,7 +26,7 @@ var checks_run := 0
 ## A hard-erroring test function aborts silently at the error and its await
 ## resumes as if it finished — so "no FAIL lines" is NOT proof the suite ran.
 ## This floor turns silently-aborted tests into a loud failure.
-const MIN_EXPECTED_CHECKS := 68
+const MIN_EXPECTED_CHECKS := 95
 
 
 class Duck:
@@ -60,6 +60,9 @@ func _main() -> void:
 	check("dracarys: no Light3D added by the fire on any path",
 			lights_before, _light_count())
 	_test_heraldic_tincture()
+	_test_hall_banner_stations()
+	await _test_hall_banner_frame()
+	await _test_hall_dressing()
 	await _test_caption_clears_its_subject()
 	check("final: time_scale is 1.0", true, is_equal_approx(Engine.time_scale, 1.0))
 	check("final: no test silently aborted (checks >= %d)" % MIN_EXPECTED_CHECKS,
@@ -508,6 +511,237 @@ func _test_heraldic_tincture() -> void:
 			absf(Banner.contrast_ratio(pale, pale) - 1.0) < 0.001)
 	check("contrast_ratio: black on white is the 21:1 maximum", true,
 			absf(Banner.contrast_ratio(Color.BLACK, Color.WHITE) - 21.0) < 0.1)
+
+
+## ── THE HALL'S BANNER STATIONS (src/env/great_hall.gd) ────────────────────
+## THE INDEX MAP IS A CONTRACT, NOT A CONVENIENCE. The e2e boot scenario reads
+## banner 3 as "the west wall centre flies the player's PRIMARY" and the
+## tournament scenario reads banner 6 as the rival's primary, every round. The
+## table may be appended to; rows 0..8 may never move. This is the literal
+## guard on that, kept here rather than in the e2e so a renumber fails in
+## two headless seconds instead of a windowed suite.
+func _test_hall_banner_stations() -> void:
+	const Hall := preload("res://src/env/great_hall.gd")
+	var st: Array = Hall.STATIONS
+	check("stations: the table is append-only (>= the original nine)", true,
+			st.size() >= 9)
+	# Rows 0..8, spelled out. If a future edit renumbers them this is the line
+	# that goes red — not a screenshot three scenarios later.
+	var original := [
+		[Vector3(-4.0, -0.3, 12.0), PI, Hall.HOUSE_SELF, "primary"],
+		[Vector3(0.0, -0.3, 12.0), PI, Hall.HOUSE_SELF, "accent"],
+		[Vector3(4.0, -0.3, 12.0), PI, Hall.HOUSE_RIVAL, "primary"],
+		[Vector3(-12.0, -0.3, -4.0), PI * 0.5, Hall.HOUSE_SELF, "primary"],
+		[Vector3(-12.0, -0.3, 0.0), PI * 0.5, Hall.HOUSE_SELF, "secondary"],
+		[Vector3(-12.0, -0.3, 4.0), PI * 0.5, Hall.HOUSE_SELF, "accent"],
+		[Vector3(12.0, -0.3, -4.0), -PI * 0.5, Hall.HOUSE_RIVAL, "primary"],
+		[Vector3(12.0, -0.3, 0.0), -PI * 0.5, Hall.HOUSE_RIVAL, "secondary"],
+		[Vector3(12.0, -0.3, 4.0), -PI * 0.5, Hall.HOUSE_RIVAL, "accent"],
+	]
+	var moved := ""
+	for i in original.size():
+		var a: Array = original[i]
+		var b: Array = st[i]
+		if not ((a[0] as Vector3).is_equal_approx(b[0] as Vector3) \
+				and is_equal_approx(a[1] as float, b[1] as float) \
+				and is_equal_approx(b[2] as float, 1.0) \
+				and int(a[2]) == int(b[3]) and str(a[3]) == str(b[4])):
+			moved += " %d" % i
+	check("stations: the original nine are exactly where they were", "", moved)
+	check("stations: 3 is the player's PRIMARY (the boot e2e reads it)", true,
+			int(st[3][3]) == Hall.HOUSE_SELF and str(st[3][4]) == "primary")
+	check("stations: 6 is the rival's PRIMARY (the tournament e2e reads it)", true,
+			int(st[6][3]) == Hall.HOUSE_RIVAL and str(st[6][4]) == "primary")
+	# THE SEAM IS x = 0. Cloth west of the throne is the player's, east of it
+	# the rival's; only the two centre stations sit on the line itself.
+	var wrong_side := ""
+	var tables: Array = [st, Hall.DRAPES_THIN, Hall.DRAPES_TRIPLE]
+	var side_at: Array = [3, 2, 2]
+	for t in tables.size():
+		var rows: Array = tables[t]
+		for i in rows.size():
+			var row: Array = rows[i]
+			var x: float = (row[0] as Vector3).x
+			var side := int(row[side_at[t]])
+			if absf(x) > 0.01 and (x < 0.0) != (side == Hall.HOUSE_SELF):
+				wrong_side += " t%d:%d" % [t, i]
+	check("stations: every banner is on its own house's side of the seam",
+			"", wrong_side)
+	var bad_tone := ""
+	for t in tables.size():
+		var rows: Array = tables[t]
+		for i in rows.size():
+			if not str((rows[i] as Array)[side_at[t] + 1]) in \
+					["primary", "secondary", "accent"]:
+				bad_tone += " t%d:%d" % [t, i]
+	check("stations: every row names a real heraldic tone", "", bad_tone)
+
+
+## ── THE HALL IS DRESSED WHERE THE PLAYER LOOKS ────────────────────────────
+## Owner's report, 2026-08-09: "make sure that we see the banners all over the
+## dungeon". The nine original stations were hung for a camera nobody plays
+## from — reproduced below with the REAL gameplay rig (pivot y 0.4, pitch
+## -0.85, distance 11.5, fov 50), exactly none of their nine sigils projected
+## inside the frame, which is why 02_boot_lineup.png read as bare stone.
+##
+## This is that measurement, run in two headless seconds against
+## Camera3D.unproject_position instead of against a screenshot. It fails if a
+## future re-hang pushes the pillar heroes back out of the player's frame.
+func _test_hall_banner_frame() -> void:
+	const Hall := preload("res://src/env/great_hall.gd")
+	const Banner := preload("res://src/env/banner.gd")
+	# A SubViewport at the SHIPPED resolution, never `root`: headless gives the
+	# root window a SQUARE 1920x1920 rect, and on a square frame the horizontal
+	# half-angle collapses from 39.6 to 25 degrees — every side-wall banner
+	# falls out of a frustum it is comfortably inside on a real 16:9 display.
+	var vp := SubViewport.new()
+	vp.size = Vector2i(1920, 1080)
+	root.add_child(vp)
+	var rig := Node3D.new()
+	vp.add_child(rig)
+	rig.position = Vector3(0.0, 0.4, 0.0)      # game.tscn CameraRig
+	rig.rotation = Vector3(-0.85, PI, 0.0)     # orbit_camera.gd defaults
+	var cam := Camera3D.new()
+	rig.add_child(cam)
+	cam.position = Vector3(0.0, 0.0, 11.5)
+	cam.fov = 50.0
+	cam.current = true
+	await process_frame
+	var size := Vector2(vp.size)
+	check("frame: the probe camera really is the shipped 16:9 frame", true,
+			absf(size.x / size.y - 16.0 / 9.0) < 0.001)
+	var in_frame: Array = []
+	for i in Hall.STATIONS.size():
+		var st: Array = Hall.STATIONS[i]
+		var s := st[2] as float
+		# The sigil quad's own local offset, yawed onto the wall it hangs on.
+		var local := Vector3(0.0, Banner.SIGIL_CENTER_Y * s, Banner.SIGIL_Z * s)
+		var world: Vector3 = (st[0] as Vector3) \
+				+ Basis(Vector3.UP, st[1] as float) * local
+		if not cam.is_position_in_frustum(world):
+			continue
+		var p: Vector2 = cam.unproject_position(world)
+		# Half a sigil of margin: a centre one pixel inside the edge is not a
+		# banner the player can see.
+		var margin: float = 0.5 * Banner.SIGIL_SIZE * s / (2.0 \
+				* tan(deg_to_rad(cam.fov) * 0.5) \
+				* cam.global_position.distance_to(world)) * size.y
+		if p.x >= margin and p.x <= size.x - margin \
+				and p.y >= margin and p.y <= size.y - margin:
+			in_frame.append(i)
+	print("    [banner-frame] stations whose whole sigil clears the gameplay "
+			+ "frame: %s (of %d)" % [str(in_frame), Hall.STATIONS.size()])
+	check("frame: the west pillar hero (11) is in the player's frame", true,
+			in_frame.has(11))
+	check("frame: the east pillar hero (12) is in the player's frame", true,
+			in_frame.has(12))
+	check("frame: the side-wall pennants (15,16) are in the player's frame",
+			true, in_frame.has(15) and in_frame.has(16))
+	check("frame: the hall shows the player at least four sigils", true,
+			in_frame.size() >= 4)
+	# The original nine were hung for a camera nobody plays from. Kept as a
+	# measurement, not a wish: if a re-hang ever brings them into the gameplay
+	# frame that is a WIN, and this line is the one to delete.
+	var old_nine := 0
+	for i in in_frame:
+		if int(i) < 9:
+			old_nine += 1
+	print("    [banner-frame] of the original nine, %d are in the gameplay frame"
+			% old_nine)
+	vp.queue_free()
+	await process_frame
+
+
+## ── THE WHOLE HALL WEARS THE MATCHUP (live GreatHall) ─────────────────────
+## Builds the real hall headless and dresses it, so the API the integrator
+## calls is exercised end to end: stations get sigils AND cloth, the
+## sigil-less drapes get the same two palettes, and — the hard one — the
+## torch-lit hall still holds exactly EIGHT omni lights. The Mobile renderer
+## caps a mesh at 8 omnis; a banner that ever "sells" itself with a Light3D
+## silently drops a torch off the far wall instead.
+func _test_hall_dressing() -> void:
+	const Hall := preload("res://src/env/great_hall.gd")
+	var hall = Hall.new()
+	root.add_child(hall)
+	await process_frame
+	check("hall: one banner per station", Hall.STATIONS.size(), hall.banners.size())
+	check("hall: the drapes are carried on 2 MultiMeshes, not 24 nodes", 2,
+			_multimesh_drape_count(hall))
+	check("hall: the hall's own Light3D census is 8 torches + 2 fills", 10,
+			hall.find_children("*", "Light3D", true, false).size())
+	check("hall: exactly 8 omni lights (the Mobile renderer's whole budget)",
+			8, _omni_count(hall))
+	hall.dress_for_match("winterfang", "goldclaw")
+	var pc: Dictionary = HouseRegistry.get_colors("winterfang")
+	var rc: Dictionary = HouseRegistry.get_colors("goldclaw")
+	check("hall: banner 3 flies the player's primary (the boot e2e assert)",
+			true, hall.get_banner(3).house_color.is_equal_approx(pc["primary"]))
+	check("hall: banner 6 flies the rival's primary (the tournament assert)",
+			true, hall.get_banner(6).house_color.is_equal_approx(rc["primary"]))
+	check("hall: banner 3 flies the player's SIGIL too", "winterfang",
+			hall.get_banner(3).house_id)
+	check("hall: banner 6 flies the rival's SIGIL too", "goldclaw",
+			hall.get_banner(6).house_id)
+	var sigil_less := 0
+	for b in hall.banners:
+		if not b.has_sigil():
+			sigil_less += 1
+	check("hall: every station hangs a sigil after the dressing", 0, sigil_less)
+	# The drapes are cloth-only, but they must wear the same two hauses.
+	# Read from the hall's own record, NOT from MultiMesh.get_instance_color:
+	# instance data lives in the RenderingServer and the headless dummy server
+	# hands back an empty buffer — colours AND transforms alike — so an assert
+	# taken off the MultiMesh here would be measuring the renderer's absence.
+	var undyed := 0
+	var seen := {}
+	var drape_n := 0
+	for group in hall.get("_drapes"):
+		for c in (group["colors"] as PackedColorArray):
+			drape_n += 1
+			if c.is_equal_approx(HallBanner.NEUTRAL):
+				undyed += 1
+			seen[c.to_html(false)] = true
+	check("hall: the dressing reaches every drape", 18, drape_n)
+	check("hall: no drape is left undyed by the dressing", 0, undyed)
+	check("hall: the drapes fly BOTH hauses, not one", true, seen.size() >= 2)
+	# The throne shot: the whole room falls to one house, drapes included.
+	hall.dress_for_champion("goldclaw")
+	var not_champion := 0
+	for b in hall.banners:
+		if b.house_id != "goldclaw":
+			not_champion += 1
+	check("champion: every station falls to the champion", 0, not_champion)
+	var champ_only := true
+	for group in hall.get("_drapes"):
+		for c in (group["colors"] as PackedColorArray):
+			if not (c.is_equal_approx(rc["primary"]) \
+					or c.is_equal_approx(rc["secondary"]) \
+					or c.is_equal_approx(rc["accent"])):
+				champ_only = false
+	check("champion: every drape falls to the champion too", true, champ_only)
+	# set_banner_colors is COLOUR ONLY — a re-dye may never strike a sigil.
+	hall.set_banner_colors([Color.RED, Color.GREEN, Color.BLUE])
+	check("set_banner_colors: dyes in index order", true,
+			hall.get_banner(1).house_color.is_equal_approx(Color.GREEN))
+	check("set_banner_colors: leaves the sigil flying", true,
+			hall.get_banner(1).has_sigil() and hall.get_banner(1).house_id == "goldclaw")
+	hall.queue_free()
+	await process_frame
+
+
+func _multimesh_drape_count(hall: Node) -> int:
+	var n := 0
+	for child in hall.get_children():
+		if child is MultiMeshInstance3D and str(child.name).begins_with("Drapes"):
+			n += 1
+	return n
+
+
+func _omni_count(node: Node) -> int:
+	var n := 1 if node is OmniLight3D else 0
+	for child in node.get_children():
+		n += _omni_count(child)
+	return n
 
 
 ## ── THE CAPTION CLEARS ITS SUBJECT (src/cinematics/cine_caption.gd) ───────
