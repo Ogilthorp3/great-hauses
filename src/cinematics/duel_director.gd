@@ -95,6 +95,7 @@ var _last_tick := 0
 
 var _caption_layer: CanvasLayer
 var _caption: Label
+var _caption_fade := 0        # generation token for the wall-clock fades
 var _lines: Dictionary = {}
 var _canon: Dictionary = {}   # lowercase id/name/archetype -> house info dict
 var _champion_house := ""     # remembered by play_checkmate for the tableau captions
@@ -513,6 +514,7 @@ func _restore_presentation() -> void:
 	Engine.time_scale = _prev_time_scale
 	_audio_restore()
 	if _caption_layer != null:
+		_caption_fade += 1   # kill any in-flight fade; the hard reset wins
 		_caption_layer.visible = false
 	_shake_target = 0.0
 	_shake = 0.0
@@ -783,20 +785,51 @@ func _build_caption() -> void:
 	_caption.add_theme_constant_override("shadow_offset_x", 1)
 	_caption.add_theme_constant_override("shadow_offset_y", 2)
 	_caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	# A styled backing plate: the kill line lands over torchlit armor as
+	# often as over dark stone, and a bare glyph shadow was not enough to
+	# carry it. Hugs the text (the label sizes to content), so it never
+	# becomes a slab across the frame.
+	_caption.add_theme_stylebox_override("normal", caption_backing())
 	_caption.anchor_left = 0.5
 	_caption.anchor_right = 0.5
 	_caption.anchor_top = 1.0
 	_caption.anchor_bottom = 1.0
-	_caption.offset_top = -170.0
-	_caption.offset_bottom = -118.0
+	# Bottom sixth of the frame — the fight happens in the middle third and
+	# the caption may never sit in it (ISSUES.md #4).
+	_caption.offset_top = -160.0
+	_caption.offset_bottom = -96.0
 	_caption.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	_caption.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	_caption_layer.add_child(_caption)
 
 
+## The caption backing plate — public so CineCaption and the HUD's own
+## captions dress in the same clothes (one voice, one look).
+static func caption_backing() -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.035, 0.028, 0.032, 0.62)
+	sb.set_corner_radius_all(7)
+	sb.content_margin_left = 26.0
+	sb.content_margin_right = 26.0
+	sb.content_margin_top = 6.0
+	sb.content_margin_bottom = 10.0
+	sb.border_color = Color(0.72, 0.58, 0.32, 0.4)
+	sb.border_width_top = 1
+	sb.border_width_bottom = 1
+	return sb
+
+
+## True while a cinematic caption is on screen. The HUD's own captions
+## (rival banter, Oracle reason) hold off while this is true so two voices
+## never share one frame (ISSUES.md #4).
+func caption_visible() -> bool:
+	return _caption_layer != null and _caption_layer.visible
+
+
 func _show_caption(text: String, seq: int) -> void:
 	if _caption == null:
 		return
+	_caption_fade += 1   # any in-flight fade-out loses the layer
 	_caption.text = text
 	_caption.modulate = Color(1, 1, 1, 0)
 	_caption_layer.visible = true
@@ -805,9 +838,28 @@ func _show_caption(text: String, seq: int) -> void:
 	_wall_lerp(seq, setter, 0.0, 1.0, 0.25)   # concurrent fade-in
 
 
-func _hide_caption() -> void:
-	if _caption_layer != null:
+func _hide_caption(fade_sec: float = 0.3) -> void:
+	## Fade OUT (wall clock, slow-mo immune) — a caption that snapped off
+	## mid-frame read as a debug panel being toggled. `restore()` still kills
+	## the layer instantly; this is the graceful path.
+	if _caption_layer == null or not _caption_layer.visible:
+		return
+	_caption_fade += 1
+	var my := _caption_fade
+	if fade_sec <= 0.0 or _caption == null:
 		_caption_layer.visible = false
+		return
+	var t0 := Time.get_ticks_msec()
+	while _caption_layer != null and _caption_layer.visible and _caption_fade == my:
+		var u := clampf(float(Time.get_ticks_msec() - t0) / (fade_sec * 1000.0), 0.0, 1.0)
+		_caption.modulate = Color(1, 1, 1, 1.0 - u)
+		if u >= 1.0:
+			_caption_layer.visible = false
+			return
+		var tree := get_tree()
+		if tree == null:
+			return
+		await tree.process_frame
 
 
 # ── flourish props (promotion) ─────────────────────────────────────────────

@@ -30,12 +30,15 @@ func _ready() -> void:
 	_label.add_theme_constant_override("shadow_offset_x", 1)
 	_label.add_theme_constant_override("shadow_offset_y", 2)
 	_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	# Same backing plate + same bottom-sixth anchor as DuelDirector's caption
+	# (ISSUES.md #4) — the cinematic voice looks identical wherever it speaks.
+	_label.add_theme_stylebox_override("normal", DuelDirector.caption_backing())
 	_label.anchor_left = 0.5
 	_label.anchor_right = 0.5
 	_label.anchor_top = 1.0
 	_label.anchor_bottom = 1.0
-	_label.offset_top = -170.0
-	_label.offset_bottom = -118.0
+	_label.offset_top = -160.0
+	_label.offset_bottom = -96.0
 	_label.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	_label.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	add_child(_label)
@@ -61,6 +64,23 @@ func show_line(text: String, fade_sec: float = 0.25) -> void:
 		await tree.process_frame
 
 
-func hide_line() -> void:
+func hide_line(fade_sec: float = 0.3) -> void:
+	## Fades OUT by default (wall clock, slow-mo immune); pass 0.0 for the
+	## hard cut a teardown needs.
 	_fade_id += 1
-	visible = false
+	if fade_sec <= 0.0 or _label == null or not visible:
+		visible = false
+		return
+	var my := _fade_id
+	var t0 := Time.get_ticks_msec()
+	while visible and _fade_id == my:
+		var u := clampf(float(Time.get_ticks_msec() - t0) / (fade_sec * 1000.0), 0.0, 1.0)
+		_label.modulate = Color(1, 1, 1, 1.0 - u)
+		if u >= 1.0:
+			visible = false
+			return
+		var tree := get_tree()
+		if tree == null:
+			visible = false
+			return
+		await tree.process_frame

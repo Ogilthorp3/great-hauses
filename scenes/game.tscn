@@ -5,19 +5,26 @@
 [ext_resource type="Script" path="res://src/camera/orbit_camera.gd" id="3_cam"]
 [ext_resource type="Script" path="res://src/env/great_hall.gd" id="4_hall"]
 
+; Readability pass (ISSUES.md #15). The far half of the board used to sit
+; 2-3 stops under the near half and the checker died through the middle. The
+; culprit was mostly FOG: density 0.013 against a near-black fog color blends
+; distant stone toward black and crushes the light/dark split with it. Fog
+; halved and lifted off black, ambient + exposure raised to keep both back
+; ranks legible. Still torchlit and moody — the walls and the empty aisles
+; stay dark; it is the BOARD that must read.
 [sub_resource type="Environment" id="Environment_gh"]
 background_mode = 1
 background_color = Color(0.027, 0.024, 0.031, 1)
 ambient_light_source = 2
-ambient_light_color = Color(0.24, 0.23, 0.28, 1)
-ambient_light_energy = 0.52
+ambient_light_color = Color(0.3, 0.275, 0.265, 1)
+ambient_light_energy = 0.66
 tonemap_mode = 2
-tonemap_exposure = 1.08
+tonemap_exposure = 1.12
 glow_enabled = true
 glow_intensity = 0.35
 fog_enabled = true
-fog_light_color = Color(0.055, 0.05, 0.065, 1)
-fog_density = 0.013
+fog_light_color = Color(0.1, 0.093, 0.115, 1)
+fog_density = 0.006
 
 [node name="Game" type="Node3D"]
 script = ExtResource("1_game")
@@ -37,11 +44,20 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 11.5)
 current = true
 fov = 50.0
 
+; The hall's one shadow caster. Its shadow was painted to full black and
+; hard-edged, so every piece sat in a punched hole (ISSUES.md #17). The RAKE
+; is unchanged (43 deg — lowering it only smears longer streaks across the
+; tiles); what changed is that the shadow is now a shadow and not a hole:
+; opacity 0.55, an angular penumbra, and blur. The ambient lift in the
+; Environment above does the rest of the work under each piece.
 [node name="Sun" type="DirectionalLight3D" parent="."]
 transform = Transform3D(-0.7738, 0.5645, -0.2866, 0, 0.4525, 0.8917, 0.6331, 0.69, -0.3503, 0, 8, 0)
-light_color = Color(0.62, 0.68, 0.8, 1)
-light_energy = 0.55
+light_color = Color(0.64, 0.7, 0.82, 1)
+light_energy = 0.72
 shadow_enabled = true
+shadow_opacity = 0.55
+shadow_blur = 1.6
+light_angular_distance = 2.2
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="."]
 environment = SubResource("Environment_gh")

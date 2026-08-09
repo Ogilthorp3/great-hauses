@@ -14,6 +14,18 @@ const DuelDirectorScript := preload("res://src/cinematics/duel_director.gd")
 
 const SHOT_FACING := "res://test_e2e/artifacts/module-previews/facing.png"
 
+## The mock fighters carry no house id, so DuelDirector used to fall back to
+## the LEGACY FROST/EMBER table and the saved facing.png read "So falls the
+## queen of House Ember" — a house that is not one of the shipped Nine
+## (ISSUES.md #16). The fixture now names two real houses, and every frame it
+## saves is stamped FIXTURE so a capsule stand-in can never be mistaken for a
+## shipped gameplay frame.
+const FIXTURE_HOUSES := {
+	"attacker_house": "winterfang",
+	"victim_house": "goldclaw",
+}
+const FIXTURE_STAMP := "MODULE TEST FIXTURE — DuelDirector stage\ncapsule stand-ins, not gameplay art"
+
 var _director: DuelDirector
 var _fails := 0
 var _victory_house := ""
@@ -101,8 +113,8 @@ func _run_acts() -> void:
 	# Act I — the capture duel, full cam takeover, ≤5.5 s wall clock.
 	# Both mocks spawn facing +Z (NOT facing each other) — the director's
 	# face-off must have them eye-to-eye by the time the strike lands.
-	var attacker := _spawn_mock(2, 0, Vector3(-0.8, 0.0, 0.0))   # Frost knight
-	var victim := _spawn_mock(4, 1, Vector3(0.8, 0.0, 0.2))      # Ember queen
+	var attacker := _spawn_mock(2, 0, Vector3(-0.8, 0.0, 0.0))   # knight
+	var victim := _spawn_mock(4, 1, Vector3(0.8, 0.0, 0.2))      # queen
 	var t0 := Time.get_ticks_msec()
 	if not _facing_shot_taken and DisplayServer.get_name() != "headless":
 		_schedule_facing_shot(1.5)   # mid slow-mo hold: the faced-off frame
@@ -113,7 +125,7 @@ func _run_acts() -> void:
 		_check("duel-face-to-face-at-strike",
 			fa.dot(fv) < -0.95 and fa.dot(dir) > 0.95)
 		await attacker.mock_strike(victim)
-	await _director.play_duel(attacker, victim, {}, strike)
+	await _director.play_duel(attacker, victim, FIXTURE_HOUSES, strike)
 	var wall := float(Time.get_ticks_msec() - t0) / 1000.0
 	_check("duel-restores-timescale", is_equal_approx(Engine.time_scale, 1.0))
 	_check("duel-victim-died", victim.died_flag)
@@ -132,12 +144,16 @@ func _run_acts() -> void:
 	await _pause(0.4)
 
 	# Act III — checkmate: slow orbit of the losing king, victory hook.
-	var king := _spawn_mock(5, 1, Vector3(0.2, 0.0, -0.6))       # Ember king
+	var king := _spawn_mock(5, 1, Vector3(0.2, 0.0, -0.6))       # king
 	var death := func() -> void:
 		await king.mock_die()
-	await _director.play_checkmate(king, "FROST", death)
+	# Real house key, deliberately (ISSUES.md #16): the fixture used the
+	# legacy "FROST" fallback, so its captions advertised houses that do not
+	# ship. The expected name below moved WITH it — the check still proves
+	# the victory hook fires with the director's resolved house name.
+	await _director.play_checkmate(king, "winterfang", death)
 	_check("checkmate-restores-timescale", is_equal_approx(Engine.time_scale, 1.0))
-	_check("checkmate-victory-hook", _victory_house == "House Frost")
+	_check("checkmate-victory-hook", _victory_house == "House Winterfang")
 	_check("checkmate-king-died", king.died_flag)
 	_check("checkmate-inactive-after", not _director.is_active())
 
@@ -217,6 +233,32 @@ func _build_stage() -> void:
 	add_child(cam)
 	cam.look_at(Vector3(0.0, 0.3, 0.0))
 	cam.current = true
+
+	_build_fixture_stamp()
+
+
+func _build_fixture_stamp() -> void:
+	## Every frame this stage renders — including the saved facing.png — is
+	## stamped as a fixture. The capsules are a deliberate internal stand-in;
+	## the stamp is what keeps them from reading as shipped art (ISSUES.md #16).
+	var layer := CanvasLayer.new()
+	layer.name = "FixtureStamp"
+	layer.layer = 95
+	add_child(layer)
+	var l := Label.new()
+	l.name = "Stamp"
+	l.text = FIXTURE_STAMP
+	l.add_theme_font_size_override("font_size", 15)
+	l.add_theme_color_override("font_color", Color(0.95, 0.72, 0.35, 0.95))
+	l.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+	l.add_theme_constant_override("outline_size", 5)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	l.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	l.offset_left = -460
+	l.offset_top = 14
+	l.offset_right = -18
+	l.offset_bottom = 62
+	layer.add_child(l)
 
 
 func _show_hint(text: String) -> void:

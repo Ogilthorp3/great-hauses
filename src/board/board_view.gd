@@ -27,18 +27,38 @@ const TILE_HEIGHT := 0.22
 ## per frame-ish is plenty.
 const HOVER_THROTTLE_MS := 30
 
-# Torch-lit great hall: desaturated, moody stone.
-const DARK_STONE := Color(0.13, 0.12, 0.115)
-const LIGHT_STONE := Color(0.36, 0.33, 0.3)
+# Torch-lit great hall: desaturated, moody stone. The light/dark SPLIT is
+# wide on purpose (ISSUES.md #15): the hall is dim and distance-fogged, so a
+# narrow albedo split collapses into one grey mush through the empty middle
+# of the board. Lighting multiplies both stones equally — only the ratio
+# survives the gloom, so the ratio carries the checker.
+const DARK_STONE := Color(0.105, 0.098, 0.094)
+const LIGHT_STONE := Color(0.5, 0.468, 0.425)
 const PLINTH_STONE := Color(0.07, 0.065, 0.06)
-const SELECT_COLOR := Color(0.85, 0.55, 0.2)   # ember amber
-const MARKER_COLOR := Color(0.45, 0.62, 0.66)  # cold steel
+const SELECT_COLOR := Color(0.95, 0.62, 0.22)   # ember amber
+const MARKER_COLOR := Color(0.58, 0.79, 0.86)   # cold steel
+const CAPTURE_COLOR := Color(0.94, 0.36, 0.24)  # blood on the stone
+
+## Highlight geometry. The move dot is small and centered; the capture
+## reticle is a ring inscribed in the tile, so it frames the victim standing
+## on it instead of hiding under him.
+const MARKER_SIZE := 0.42
+const CAPTURE_SIZE := 0.94
+const SELECT_SIZE := 0.96
+## Marker/selection art is drawn into small runtime textures once — a
+## RECOGNISABLE shape (rune dot, target ring, tile frame) instead of the flat
+## untextured squares that read as missing-texture nameplates (ISSUES.md #5).
+const HL_TEX_SIZE := 96
 
 var _select_quad: MeshInstance3D
 var _markers_root: Node3D
 var _marker_pool: Array[MeshInstance3D] = []
 var _hover_sq: Variant = null       # Vector2i or null — last emitted hover
 var _last_hover_pick_ms := 0
+var _move_mesh: PlaneMesh
+var _capture_mesh: PlaneMesh
+var _move_mat: StandardMaterial3D
+var _capture_mat: StandardMaterial3D
 
 
 func _ready() -> void:
@@ -116,17 +136,28 @@ func set_selected(sq: Variant) -> void:
 	_select_quad.visible = true
 
 
-func show_legal_moves(squares: Array[Vector2i]) -> void:
+func show_legal_moves(squares: Array[Vector2i], captures: Array[Vector2i] = []) -> void:
+	## `captures` is the subset of `squares` that would take an enemy piece —
+	## those get the red target ring, the quiet moves get the steel rune dot.
+	## The two must be visually different: telling "I may step here" from "I
+	## may kill here" is the whole point of the highlight layer.
 	for m in _markers_root.get_children():
 		m.visible = false
 	while _marker_pool.size() < squares.size():
-		var q := _flat_quad(Vector2(0.34, 0.34), MARKER_COLOR, 0.5)
+		var q := MeshInstance3D.new()
+		q.name = "MoveMarker%d" % _marker_pool.size()
+		q.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		_marker_pool.append(q)
 		_markers_root.add_child(q)
 	for i in squares.size():
 		var q := _marker_pool[i]
+		var is_capture := captures.has(squares[i])
+		q.mesh = _capture_mesh if is_capture else _move_mesh
+		q.material_override = _capture_mat if is_capture else _move_mat
 		var pos := square_to_world(squares[i])
-		q.position = Vector3(pos.x, TILE_HEIGHT + 0.012, pos.z)
+		# The capture ring rides lower — it wraps a piece's feet, the dot sits
+		# on empty stone.
+		q.position = Vector3(pos.x, TILE_HEIGHT + (0.008 if is_capture else 0.014), pos.z)
 		q.visible = true
 
 
@@ -171,8 +202,21 @@ func _build_board() -> void:
 
 
 func _build_highlights() -> void:
-	_select_quad = _flat_quad(Vector2(0.96, 0.96), SELECT_COLOR, 0.55)
+	_move_mesh = PlaneMesh.new()
+	_move_mesh.size = Vector2(MARKER_SIZE, MARKER_SIZE)
+	_capture_mesh = PlaneMesh.new()
+	_capture_mesh.size = Vector2(CAPTURE_SIZE, CAPTURE_SIZE)
+	_move_mat = _highlight_material(MARKER_COLOR, 0.95, _move_dot_texture())
+	_capture_mat = _highlight_material(CAPTURE_COLOR, 0.95, _capture_ring_texture())
+
+	var select_mesh := PlaneMesh.new()
+	select_mesh.size = Vector2(SELECT_SIZE, SELECT_SIZE)
+	_select_quad = MeshInstance3D.new()
 	_select_quad.name = "SelectionQuad"
+	_select_quad.mesh = select_mesh
+	_select_quad.material_override = _highlight_material(
+		SELECT_COLOR, 0.95, _select_frame_texture())
+	_select_quad.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_select_quad.visible = false
 	add_child(_select_quad)
 	_markers_root = Node3D.new()
@@ -188,17 +232,87 @@ func _stone_material(albedo: Color) -> StandardMaterial3D:
 	return m
 
 
-func _flat_quad(size: Vector2, color: Color, alpha: float) -> MeshInstance3D:
-	var mi := MeshInstance3D.new()
-	var mesh := PlaneMesh.new()
-	mesh.size = size
-	mi.mesh = mesh
+func _highlight_material(color: Color, alpha: float, tex: Texture2D) -> StandardMaterial3D:
+	## UNSHADED on purpose: the highlight layer is UI drawn in world space. It
+	## must not take the pieces' cast shadow — a black shadow ellipse punched
+	## through a bright selection tile was the worst instance of ISSUES.md #17.
 	var m := StandardMaterial3D.new()
 	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	m.albedo_color = Color(color.r, color.g, color.b, alpha)
-	m.emission_enabled = true
-	m.emission = color
-	m.emission_energy_multiplier = 1.4
-	mi.material_override = m
-	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	return mi
+	m.albedo_texture = tex
+	m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	return m
+
+
+# -- highlight art (procedural, built once at boot) -------------------------
+
+
+static func _band(d: float, lo: float, hi: float, feather: float) -> float:
+	## 1.0 inside [lo, hi], feathered to 0 outside — one soft-edged ring band.
+	return minf(smoothstep(lo - feather, lo, d), 1.0 - smoothstep(hi, hi + feather, d))
+
+
+static func _alpha_texture(alphas: PackedFloat32Array) -> ImageTexture:
+	var img := Image.create(HL_TEX_SIZE, HL_TEX_SIZE, true, Image.FORMAT_RGBA8)
+	for y in HL_TEX_SIZE:
+		for x in HL_TEX_SIZE:
+			img.set_pixel(x, y, Color(1.0, 1.0, 1.0,
+				clampf(alphas[y * HL_TEX_SIZE + x], 0.0, 1.0)))
+	img.generate_mipmaps()
+	return ImageTexture.create_from_image(img)
+
+
+static func _move_dot_texture() -> ImageTexture:
+	## Quiet move: a filled rune dot inside a crisp ring — small, centered,
+	## unmistakably an indicator rather than a blank nameplate.
+	var a := PackedFloat32Array()
+	a.resize(HL_TEX_SIZE * HL_TEX_SIZE)
+	for y in HL_TEX_SIZE:
+		for x in HL_TEX_SIZE:
+			var u := (float(x) + 0.5) / HL_TEX_SIZE - 0.5
+			var v := (float(y) + 0.5) / HL_TEX_SIZE - 0.5
+			var r := sqrt(u * u + v * v) * 2.0        # 1.0 at the quad edge
+			var ring := _band(r, 0.60, 0.80, 0.09) * 0.95
+			var core := (1.0 - smoothstep(0.30, 0.44, r)) * 0.85
+			a[y * HL_TEX_SIZE + x] = maxf(ring, core)
+	return _alpha_texture(a)
+
+
+static func _capture_ring_texture() -> ImageTexture:
+	## Capture: a target ring inscribed in the tile — it FRAMES the enemy
+	## standing there (a dot would vanish under his feet), with a faint wash
+	## inside so the doomed square reads at a glance.
+	var a := PackedFloat32Array()
+	a.resize(HL_TEX_SIZE * HL_TEX_SIZE)
+	for y in HL_TEX_SIZE:
+		for x in HL_TEX_SIZE:
+			var u := (float(x) + 0.5) / HL_TEX_SIZE - 0.5
+			var v := (float(y) + 0.5) / HL_TEX_SIZE - 0.5
+			var r := sqrt(u * u + v * v) * 2.0
+			var ring := _band(r, 0.76, 0.90, 0.05) * 0.95
+			# four crosshair ticks on the axes — reads as a reticle, not a halo
+			var tick_x := _band(r, 0.62, 0.76, 0.03) \
+				* (1.0 - smoothstep(0.02, 0.06, absf(v))) * 0.8
+			var tick_y := _band(r, 0.62, 0.76, 0.03) \
+				* (1.0 - smoothstep(0.02, 0.06, absf(u))) * 0.8
+			var wash := (1.0 - smoothstep(0.55, 0.80, r)) * 0.16
+			a[y * HL_TEX_SIZE + x] = maxf(maxf(ring, wash), maxf(tick_x, tick_y))
+	return _alpha_texture(a)
+
+
+static func _select_frame_texture() -> ImageTexture:
+	## Selection: a squircle frame hugging the tile with a soft inner wash —
+	## a deliberate rune tile instead of a flat slab of paint.
+	var a := PackedFloat32Array()
+	a.resize(HL_TEX_SIZE * HL_TEX_SIZE)
+	for y in HL_TEX_SIZE:
+		for x in HL_TEX_SIZE:
+			var u := absf((float(x) + 0.5) / HL_TEX_SIZE - 0.5) * 2.0
+			var v := absf((float(y) + 0.5) / HL_TEX_SIZE - 0.5) * 2.0
+			# p-norm squircle: square-ish frame with rounded corners
+			var m: float = pow(pow(u, 6.0) + pow(v, 6.0), 1.0 / 6.0)
+			var border := _band(m, 0.84, 0.95, 0.035) * 0.95
+			var wash := (1.0 - smoothstep(0.70, 0.92, m)) * 0.34
+			a[y * HL_TEX_SIZE + x] = maxf(border, wash)
+	return _alpha_texture(a)

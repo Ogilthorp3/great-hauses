@@ -356,16 +356,23 @@ func _build_fill_lights() -> void:
 	## Cool fill from the camera side lifts House Frost's back rank; a rim
 	## from beyond the far wall silhouettes House Ember against the dark.
 	## Both shadowless — the Sun stays the only shadow caster.
+	##
+	## ISSUES.md #15: the FAR army reads as mud because it faces the camera
+	## (-Z) while the Sun rakes from the near-left and the torches are wall
+	## fixtures. CoolFill is the only light that hits a far fighter's FACE,
+	## and at 0.24 it barely did — more than doubled. Adding a light is not
+	## an option (the Mobile renderer's 8-omni budget is full with the hall
+	## torches), so the two existing fill directionals carry it.
 	var fill := DirectionalLight3D.new()
 	fill.name = "CoolFill"
-	fill.light_color = Color(0.55, 0.65, 0.85)
-	fill.light_energy = 0.24
+	fill.light_color = Color(0.6, 0.68, 0.86)
+	fill.light_energy = 0.5
 	fill.basis = Basis.looking_at(Vector3(-0.45, -0.7, 0.55).normalized())
 	add_child(fill)
 	var rim := DirectionalLight3D.new()
 	rim.name = "Rim"
 	rim.light_color = Color(0.7, 0.75, 0.9)
-	rim.light_energy = 0.45
+	rim.light_energy = 0.55
 	rim.basis = Basis.looking_at(Vector3(0.1, -0.5, -1.0).normalized())
 	add_child(rim)
 

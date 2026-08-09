@@ -90,6 +90,12 @@ var _move_list: RichTextLabel
 var _oracle_flash: Label
 var _oracle_caption: Label
 var _banter_caption: Label
+## Generation token for the banter caption: a newer taunt abandons the older
+## one's fade / yield loop instead of racing it.
+var _banter_token := 0
+## How long a taunt will wait for the cinematic caption to clear before it
+## gives up and speaks anyway (a caption must never be lost outright).
+const BANTER_YIELD_MAX_SEC := 6.0
 
 # shared blunder probe (one shallow Stockfish sample feeds banter + dragon)
 var _blunder_engine: UciEngine = null
@@ -195,6 +201,13 @@ func _on_cinematic_started(kind: String) -> void:
 	Music.duck()
 	if kind == "duel":
 		Music.sting_duel()
+	# Drop any hover-revealed glyph medallion before the camera takes over —
+	# no new hover event arrives while the pointer sits still on the duel
+	# square, so the ring would otherwise burn through the whole cinematic
+	# as a black disc under the fighters (ISSUES.md #17).
+	if _hovered_view != null and is_instance_valid(_hovered_view):
+		_hovered_view.set_hovered(false)
+	_hovered_view = null
 
 
 # -- identity / hall dressing ----------------------------------------------
@@ -338,11 +351,18 @@ func _select(sq: Vector2i) -> void:
 	board.set_selected(sq)
 	_set_selected_glow(true)
 	var targets: Array[Vector2i] = []
+	var captures: Array[Vector2i] = []
 	var from_idx := idx_of(sq)
 	for m in _turn_moves:
-		if m.from_square == from_idx and not targets.has(sq_of(m.to_square)):
-			targets.append(sq_of(m.to_square))
-	board.show_legal_moves(targets)
+		if m.from_square != from_idx:
+			continue
+		var to_sq := sq_of(m.to_square)
+		if not targets.has(to_sq):
+			targets.append(to_sq)
+		if m.is_capture() and not captures.has(to_sq):
+			captures.append(to_sq)
+	# Captures wear the red target ring, quiet moves the steel rune dot.
+	board.show_legal_moves(targets, captures)
 
 
 func _clear_selection() -> void:
@@ -365,8 +385,17 @@ func _on_square_hovered(sq: Variant) -> void:
 	## the piece standing on the hovered square — BOTH armies reveal, knowing
 	## the rival's piece types matters too. Selection keeps its own ring lit
 	## via set_selected; leaving the square fades a non-selected ring out.
+	##
+	## NOT during a cinematic (ISSUES.md #17): the glyph medallion is a dark
+	## disc, and from the duel camera — inches off the floor — the ring under
+	## a fighter read as a black hole punched in the stone. A mouse-hover
+	## affordance has no business on screen while the camera is taken over,
+	## and the pointer is parked on the duel square for the whole fight.
 	var pv: PieceView = null
-	if sq != null:
+	if duel_director != null and is_instance_valid(duel_director) \
+			and duel_director.is_active():
+		pv = null
+	elif sq != null:
 		pv = views.get(sq)
 	if pv != null and not is_instance_valid(pv):
 		pv = null
@@ -937,16 +966,54 @@ func _on_banter_line(house_id: String, text: String, _beat: String) -> void:
 	## The rival's taunt: bottom-LEFT caption in the rival's accent color,
 	## mirroring _oracle_caption (bottom-right) so the two voices never
 	## overlap. Show-for-6s + only-hide-if-unchanged, per _on_oracle_reason.
+	##
+	## TWO captions may never share one frame (ISSUES.md #4): if the duel
+	## director's kill line is on screen, the taunt WAITS for it — spatial
+	## separation (different rows) plus temporal separation (this wait).
 	if _banter_caption == null:
 		return
+	_banter_token += 1
+	var my := _banter_token
+	var waited := 0.0
+	while duel_director != null and is_instance_valid(duel_director) \
+			and duel_director.caption_visible() and waited < BANTER_YIELD_MAX_SEC:
+		await get_tree().create_timer(0.2, true, false, true).timeout
+		waited += 0.2
+		if my != _banter_token or not is_instance_valid(_banter_caption):
+			return   # a newer line (or teardown) superseded this one
 	var accent: Color = HouseRegistry.get_colors(house_id)["accent"]
 	_banter_caption.add_theme_color_override("font_color", accent)
 	_banter_caption.text = "%s: “%s”" % [_house_name(house_id), text]
+	_banter_caption.modulate = Color(1, 1, 1, 0)
 	_banter_caption.visible = true
+	_fade_control(_banter_caption, 1.0, 0.25, my, func() -> int: return _banter_token)
 	get_tree().create_timer(6.0).timeout.connect(func() -> void:
 		if is_instance_valid(_banter_caption) \
-				and _banter_caption.text.ends_with("“%s”" % text):
-			_banter_caption.visible = false)
+				and _banter_caption.text.ends_with("“%s”" % text) \
+				and my == _banter_token:
+			await _fade_control(_banter_caption, 0.0, 0.4, my,
+				func() -> int: return _banter_token)
+			if is_instance_valid(_banter_caption) and my == _banter_token:
+				_banter_caption.visible = false)
+
+
+func _fade_control(ctrl: Control, to_alpha: float, sec: float, token: int,
+		token_now: Callable) -> void:
+	## Wall-clock alpha fade (immune to Engine.time_scale — captions play
+	## inside slow-mo), abandoned the moment a newer line takes the slot.
+	if ctrl == null or not is_instance_valid(ctrl):
+		return
+	var from_alpha: float = ctrl.modulate.a
+	var t0 := Time.get_ticks_msec()
+	while is_instance_valid(ctrl) and int(token_now.call()) == token:
+		var u := clampf(float(Time.get_ticks_msec() - t0) / (sec * 1000.0), 0.0, 1.0)
+		ctrl.modulate.a = lerpf(from_alpha, to_alpha, u)
+		if u >= 1.0:
+			return
+		var tree := get_tree()
+		if tree == null:
+			return
+		await tree.process_frame
 
 
 func _flash_oracle(text: String, sec: float) -> void:
@@ -1101,12 +1168,20 @@ func _build_hud() -> void:
 	_banter_caption = Label.new()
 	_banter_caption.name = "BanterCaption"
 	_banter_caption.visible = false
-	_banter_caption.add_theme_font_size_override("font_size", 14)
+	_banter_caption.add_theme_font_size_override("font_size", 16)
+	# A hard black outline instead of a backing slab: the rival's taunt lives
+	# in the bottom-left corner over moving torchlight, and a filled panel
+	# there would be one more rectangle on the frame (ISSUES.md #4).
+	_banter_caption.add_theme_color_override(
+		"font_outline_color", Color(0.0, 0.0, 0.0, 0.85))
+	_banter_caption.add_theme_constant_override("outline_size", 5)
 	_banter_caption.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_banter_caption.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
 	_banter_caption.offset_left = 16
+	# Bottom row, BELOW the cinematic caption's band (which occupies 96..160
+	# px off the bottom edge) — the two voices can never share a screen row.
 	_banter_caption.offset_top = -64
-	_banter_caption.offset_right = 420
+	_banter_caption.offset_right = 440
 	_banter_caption.offset_bottom = -10
 	hud.add_child(_banter_caption)
 
@@ -1191,24 +1266,58 @@ func _build_debug_coords() -> void:
 	# Floating type labels over the 4 royal squares, as the engine believes
 	# them. Under a correct mapping "Qd1" floats over the 4th-from-left near
 	# square and the model beneath it is the uncrowned queen.
-	for royal in [["Qd1", "d1"], ["Ke1", "e1"], ["Qd8", "d8"], ["Ke8", "e8"]]:
+	#
+	# d and e are ADJACENT files, so two same-height 3-glyph labels one world
+	# unit apart collided into unreadable mush ("QdKe1", ISSUES.md #16). The
+	# overlay is our permanent human-audit instrument, so legibility is a
+	# hard requirement: the queen's plate rides high, the king's low, both
+	# smaller, and each drops a leader stem to the head of the piece it
+	# names — no two plates can share a screen row again.
+	for royal in [["Qd1", "d1", 3.25], ["Ke1", "e1", 2.15],
+			["Qd8", "d8", 3.25], ["Ke8", "e8", 2.15]]:
 		var pos := board.square_to_world(
 			sq_of(ChessState.square_index_from_name(str(royal[1]))))
-		_debug_label(root, str(royal[0]), Vector3(pos.x, 2.4, pos.z),
+		var y := float(royal[2])
+		_debug_label(root, str(royal[0]), Vector3(pos.x, y, pos.z),
+			Color(1.0, 0.45, 0.9), 104)
+		_debug_stem(root, Vector3(pos.x, 0.0, pos.z), 1.65, y - 0.22,
 			Color(1.0, 0.45, 0.9))
 
 
-func _debug_label(parent: Node3D, text: String, pos: Vector3, color: Color) -> void:
+func _debug_label(parent: Node3D, text: String, pos: Vector3, color: Color,
+		size: int = 150) -> void:
 	var l := Label3D.new()
 	l.text = text
 	l.position = pos
-	l.font_size = 150
+	l.font_size = size
 	l.modulate = color
-	l.outline_size = 30
+	l.outline_size = int(size * 0.2)
 	l.outline_modulate = Color(0, 0, 0, 1)
 	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	l.no_depth_test = true
 	parent.add_child(l)
+
+
+func _debug_stem(parent: Node3D, base: Vector3, y0: float, y1: float,
+		color: Color) -> void:
+	## Leader line from a floating royal plate down to the head of the piece
+	## it names — starts above the tallest crest so it never veils a model.
+	if y1 <= y0:
+		return
+	var stem := MeshInstance3D.new()
+	stem.name = "Stem"
+	var box := BoxMesh.new()
+	box.size = Vector3(0.035, y1 - y0, 0.035)
+	stem.mesh = box
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.albedo_color = Color(color.r, color.g, color.b, 0.75)
+	m.no_depth_test = true
+	stem.material_override = m
+	stem.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	stem.position = Vector3(base.x, (y0 + y1) * 0.5, base.z)
+	parent.add_child(stem)
 
 
 func _smoke() -> void:
