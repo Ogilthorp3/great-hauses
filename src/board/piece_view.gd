@@ -1,20 +1,35 @@
 class_name PieceView
 extends Node3D
-## A Great Houses combatant on the board — a real KayKit character (or the
-## banner watchtower for the rook), tinted per house, animated from the
-## shared Rig_Medium animation libraries, and COSTUMED in two layers:
+## A Great Houses combatant on the board — a real KayKit character (the
+## banner watchtower for the rook, a MOUNTED horse+rider ensemble for the
+## knight — ISSUES.md #1), tinted per house, animated from the shared
+## Rig_Medium animation libraries (the mount carries no rig at all — it is
+## driven procedurally, see below), and COSTUMED in two layers:
 ##
 ##   TYPE layer (identical across houses — instant readability):
 ##     strict height grading (PieceAssets.TYPE_HEIGHT) · signature gear
-##     (pawn sword+round shield · knight sword+kite shield · bishop
-##     staff+tome · queen tiara+bow+quiver · king crown+cape+sword) · an
-##     engraved type-glyph ring under every piece — HIDDEN at rest, fading
-##     in on mouse hover (set_hovered), staying lit while selected
+##     (pawn sword+round shield · knight ON HORSEBACK, sword+kite shield ·
+##     bishop staff+tome · queen tiara+bow+quiver · king crown+cape+sword)
+##     · an engraved type-glyph ring under every piece — HIDDEN at rest,
+##     fading in on mouse hover (set_hovered), staying lit while selected
 ##     (set_selected also brightens the glyph to beacon energy). ISSUES.md #2.
 ##   HOUSE layer (flourish — never changes the type silhouette):
 ##     palette tints · helmet crests on knight/queen/king · sigil decals
-##     on shields · the rook's banner + fluttering pennant · Tidegrip
-##     fields the skeleton cast (same rig, same anims).
+##     on shields · the rook's banner + fluttering pennant · the knight's
+##     caparison dressed in the house banner cloth (sigil on the flank) ·
+##     Tidegrip fields the skeleton cast (same rig, same anims) on a
+##     charred-dark horse.
+##
+## MOUNTED KNIGHT (ISSUES.md #1): the KayKit Knight sits a Quaternius CC0
+## horse (fixed transform on the horse root, statically seat-posed — bend
+## poses read fine at this poly scale). The horse is a STATIC standing mesh
+## (its FBX-lineage rig corrupts in-engine at piece scale — see
+## PieceAssets.HORSE) animated procedurally, banner-rook style: idle sway
+## on the ensemble, a canter bob on moves (the rider sits still), a horse
+## step-in under the rider's Throw for the capture duel, and on death the
+## rider slides off through Death_A while the horse keels over sideways.
+## Face-to-face duel rotation applies to this PieceView root, so the whole
+## ensemble turns as one.
 ##
 ## Model-agnostic API (callers touch nothing else):
 ##   setup(type, side, house_id="") · move_to(world_pos, walk_time) ·
@@ -52,6 +67,32 @@ const ANIM_HIT := "Hit_A"
 const ANIM_DEATH := "Death_A"
 const ANIM_SPAWN := "Spawn_Ground"
 
+## Ensemble proportions, tuned BY EYE against the rendered beauty shot (the
+## KayKit cast is chibi — big head, wide shoulders — so a horse scaled to
+## "anatomically right" reads as a pony under a giant). Horse-ensemble-local
+## units, pre-normalization:
+##   HORSE_SCALE  the mount's size against the rider's native size. It is a
+##                straight trade: the ensemble is normalized to the type's
+##                design height, so a bigger mount buys silhouette by
+##                shrinking the rider. 0.58 was picked off rendered A/Bs
+##                (0.52 · 0.58 · 0.62 · 0.68 · 0.85) — the horse owns the
+##                shape while the helm and crest still read.
+##   RIDER_POS    the seat: hips sink onto the saddle slab top
+##                (3.675·HORSE_SCALE − hips-height 0.39) over the seat
+##                center (0.55·HORSE_SCALE) — no float, no gap.
+##   MODEL_YAW    stance. A chess piece is read head-on, and head-on a horse
+##                is a narrow shape hiding behind its rider. Reining the
+##                ensemble a quarter-turn presents head, barrel and the
+##                caparison's full drape to the camera — THE cavalry read.
+##                Applied to the Model, never the root, so duel face-offs
+##                (which turn the root) still put the knight on his victim.
+const KNIGHT_HORSE_SCALE := 0.58
+const KNIGHT_RIDER_POS := Vector3(0.0, 1.74, 0.32)
+const KNIGHT_MODEL_YAW := 30.0
+## How far the rider tumbles off the saddle when the knight falls
+## (ensemble-local; the slide runs while Death_A plays).
+const KNIGHT_FALL_OFFSET := Vector3(1.6, -1.55, -0.2)
+
 ## Head-bone mount for house crests (crown-attach pattern): sits above the
 ## crown line so king crest + crown coexist.
 const CREST_MOUNT_POS := Vector3(0.0, 1.04, 0.0)
@@ -66,7 +107,10 @@ var house_id := ""
 var death_anim := ""
 
 var _model: Node3D
-var _anim: AnimationPlayer  # null for the rook (static tower)
+var _anim: AnimationPlayer  # null for the rook (static tower); the RIDER's for the knight
+var _horse: Node3D          # knight only: the mount instance (static mesh)
+var _rider: Node3D          # knight only: the seated character instance
+var _sway_tween: Tween      # knight only: the procedural idle sway loop
 var _home_yaw := 0.0
 var _glyph_ring: Node3D
 var _glyph_mat: StandardMaterial3D  # per-piece duplicate; brightened on select
@@ -85,6 +129,11 @@ func setup(new_type: Type, new_side: House, new_house_id: String = "") -> void:
 	for child in get_children():
 		child.queue_free()
 	_anim = null
+	_horse = null
+	_rider = null
+	if _sway_tween != null:
+		_sway_tween.kill()
+		_sway_tween = null
 	_glyph_ring = null
 	_glyph_mat = null
 	_ring_meshes = []
@@ -93,6 +142,8 @@ func setup(new_type: Type, new_side: House, new_house_id: String = "") -> void:
 	_is_selected = false
 	if piece_type == Type.ROOK:
 		_build_tower()
+	elif piece_type == Type.KNIGHT:
+		_build_knight()
 	else:
 		_build_character()
 	_build_glyph_ring()
@@ -177,7 +228,7 @@ func move_to(world_pos: Vector3, walk_time: float = 0.4) -> void:
 		return
 	var dir := world_pos - start
 	await _face(Vector3(dir.x, 0.0, dir.z))
-	if _anim != null:
+	if piece_type != Type.KNIGHT and _anim != null:
 		_anim.play(ANIM_WALK, 0.2)
 	var tw := create_tween()
 	if piece_type == Type.ROOK:
@@ -188,11 +239,26 @@ func move_to(world_pos: Vector3, walk_time: float = 0.4) -> void:
 				+ Vector3.UP * absf(sin(t * PI * bobs)) * 0.05
 		tw.tween_method(glide, 0.0, 1.0, walk_time) \
 			.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	elif piece_type == Type.KNIGHT:
+		# CANTER: the static horse's procedural walk — the ensemble glides
+		# under a stride bob with a gentle rocking pitch; the rider rides
+		# the rhythm without moving a muscle.
+		var strides := maxf(1.0, roundf(dir.length()))
+		var canter := func(t: float) -> void:
+			position = start.lerp(world_pos, t) \
+				+ Vector3.UP * absf(sin(t * PI * strides * 2.0)) * 0.03
+			if _model != null:
+				_model.rotation.x = sin(t * PI * strides * 4.0) * 0.05
+		tw.tween_method(canter, 0.0, 1.0, walk_time) \
+			.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	else:
 		tw.tween_property(self, "position", world_pos, walk_time) \
 			.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	await tw.finished
-	if _anim != null:
+	if piece_type == Type.KNIGHT:
+		if _model != null:
+			_model.rotation.x = 0.0
+	elif _anim != null:
 		_anim.play(ANIM_IDLE, 0.25)
 	_face_home()
 	move_finished.emit()
@@ -202,10 +268,13 @@ func play_capture(victim: PieceView) -> void:
 	## The capture duel: face the victim, strike (Throw — the free rig's
 	## best attack read — sold with a weapon-trail flash), victim takes the
 	## hit and dies. When the await returns the victim is dead and freed.
+	## Mounted strike (knight): the horse steps in under the rider's Throw.
 	var to_victim := victim.position - position
 	await _face(Vector3(to_victim.x, 0.0, to_victim.z))
 	victim.face_attacker(position)
 	if _anim != null:
+		if piece_type == Type.KNIGHT:
+			_horse_step(to_victim)   # concurrent step-in while the rider strikes
 		_anim.play(ANIM_THROW, 0.1)
 		_anim.speed_scale = 1.3
 		await get_tree().create_timer(0.5 / 1.3).timeout  # strike release beat
@@ -215,12 +284,17 @@ func play_capture(victim: PieceView) -> void:
 	await victim.die()
 	if _anim != null:
 		_anim.speed_scale = 1.0
-		_anim.play(ANIM_IDLE, 0.3)
+		if piece_type == Type.KNIGHT:
+			_reseat_rider()   # back to the still saddle pose, horse idles on
+		else:
+			_anim.play(ANIM_IDLE, 0.3)
 
 
 func die() -> void:
 	## Hit reaction, death animation, then the corpse sinks into the stone.
-	## Emits died (with death_anim set) before freeing.
+	## Emits died (with death_anim set) before freeing. Mounted death
+	## (knight): the rider plays Death_A and tumbles out of the saddle while
+	## the horse collapses through its own Death clip — same wall budget.
 	if _anim != null:
 		_anim.play(ANIM_HIT, 0.1)
 		_anim.speed_scale = 1.2
@@ -228,6 +302,8 @@ func die() -> void:
 		_anim.speed_scale = 1.0
 		_anim.play(ANIM_DEATH, 0.1)
 		death_anim = ANIM_DEATH
+		if piece_type == Type.KNIGHT:
+			_mounted_fall(PieceAssets.anim_length(ANIM_DEATH))   # concurrent
 		await get_tree().create_timer(PieceAssets.anim_length(ANIM_DEATH)).timeout
 	else:
 		death_anim = "Tower_Crumble"
@@ -245,8 +321,16 @@ func die() -> void:
 
 
 func spawn_flourish() -> void:
-	## Promotion arrival: Spawn_Ground plus an amber light burst.
-	if _anim != null:
+	## Promotion arrival: Spawn_Ground plus an amber light burst. The
+	## mounted knight's rider stays seated — the ensemble gives a hop.
+	if piece_type == Type.KNIGHT:
+		if _model != null:
+			var hop := create_tween()
+			hop.tween_property(_model, "position:y", 0.06, 0.16) \
+				.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+			hop.tween_property(_model, "position:y", 0.0, 0.22) \
+				.set_trans(Tween.TRANS_BOUNCE).set_ease(Tween.EASE_OUT)
+	elif _anim != null:
 		_anim.play(ANIM_SPAWN, 0.05)
 	var burst := OmniLight3D.new()
 	burst.light_color = Color(1.0, 0.72, 0.35)
@@ -260,7 +344,7 @@ func spawn_flourish() -> void:
 	tw.tween_property(burst, "light_energy", 0.0, 0.75) \
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 	tw.tween_callback(burst.queue_free)
-	if _anim != null:
+	if piece_type != Type.KNIGHT and _anim != null:
 		await get_tree().create_timer(PieceAssets.anim_length(ANIM_SPAWN)).timeout
 		_anim.play(ANIM_IDLE, 0.3)
 
@@ -290,6 +374,97 @@ func _face_home() -> void:
 		return
 	var tw := create_tween()
 	tw.tween_property(self, "rotation:y", _home_yaw, 0.18).set_trans(Tween.TRANS_SINE)
+
+
+func _horse_step(to_victim: Vector3) -> void:
+	## Mounted strike: the horse steps into the blow while the rider throws
+	## — the whole ensemble advances and settles back. Fire-and-forget; the
+	## step-back plays out under the victim's death.
+	var dir := Vector3(to_victim.x, 0.0, to_victim.z).normalized()
+	var start := position
+	var tw := create_tween()
+	tw.tween_property(self, "position", start + dir * 0.2, 0.24) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN_OUT)
+	tw.tween_property(self, "position", start, 0.3) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+
+
+func _mounted_fall(window: float) -> void:
+	## The knight's death, run concurrently with the rider's Death_A: the
+	## rider tumbles out of the saddle to the ground on one side while the
+	## horse keels over to the other, saddle and caparison riding it down
+	## (they live inside the horse scene). The whole-piece sink in die()
+	## then swallows the wreck.
+	if _sway_tween != null:
+		_sway_tween.kill()
+		_sway_tween = null
+	if _rider != null:
+		var tw := create_tween().set_parallel(true)
+		tw.tween_property(_rider, "position",
+				KNIGHT_RIDER_POS + KNIGHT_FALL_OFFSET, window * 0.55) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+		tw.tween_property(_rider, "rotation:z", -0.4, window * 0.55) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	if _horse != null:
+		var htw := create_tween().set_parallel(true)
+		htw.tween_property(_horse, "rotation:z", 1.35, window * 0.7) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+		htw.tween_property(_horse, "position",
+				_horse.position + Vector3(-0.35, 0.0, 0.0), window * 0.7) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+
+
+func _reseat_rider() -> void:
+	## After a mounted strike the rider settles back into the still saddle
+	## pose: blend to a neutral idle frame, freeze it, re-bend the seat.
+	if _anim == null:
+		return
+	_anim.play(ANIM_IDLE, 0.25)
+	var tree := get_tree()
+	if tree != null:
+		await tree.create_timer(0.35).timeout
+	if _anim == null or not is_inside_tree():
+		return
+	_anim.pause()
+	_apply_seat_pose()
+
+
+## The static seat, calibrated against measured bone positions (rider-local,
+## hips at y 0.39): knees forward and level with the hips, shins hanging
+## down-back with the heels under the knee, thighs splayed outward over the
+## barrel, arms down at the reins line.
+##   SEAT_THIGH  local-X on upperleg.*  — negative swings the knee forward/up
+##   SEAT_SHIN   local-X on lowerleg.*  — positive drops the heel back down
+##   SEAT_SPLAY  local-Z on upperleg.*  — NEGATIVE opens the legs outward
+## Manual bone poses persist because the rider's player is PAUSED while
+## mounted — duel clips (Throw/Hit/Death) override them for exactly as long
+## as they play, and _reseat_rider re-applies the seat afterwards.
+const SEAT_THIGH := -45.0
+const SEAT_SHIN := 50.0
+const SEAT_SPLAY := -40.0
+const SEAT_UPPERARM := 64.0
+const SEAT_LOWERARM := -30.0
+
+
+func _apply_seat_pose() -> void:
+	var skel := _skeleton()
+	if skel == null:
+		return
+	for side_key in ["l", "r"]:
+		var flip := 1.0 if side_key == "l" else -1.0
+		var seat := {
+			"upperleg." + side_key: Quaternion(Vector3.RIGHT, deg_to_rad(SEAT_THIGH))
+				* Quaternion(Vector3.BACK, deg_to_rad(SEAT_SPLAY * flip)),
+			"lowerleg." + side_key: Quaternion(Vector3.RIGHT, deg_to_rad(SEAT_SHIN)),
+			"upperarm." + side_key: Quaternion(Vector3.BACK, deg_to_rad(SEAT_UPPERARM * flip)),
+			"lowerarm." + side_key: Quaternion(Vector3.RIGHT, deg_to_rad(SEAT_LOWERARM)),
+		}
+		for bone_name in seat:
+			var idx := skel.find_bone(bone_name)
+			if idx != -1:
+				skel.set_bone_pose_rotation(idx,
+						skel.get_bone_rest(idx).basis.get_rotation_quaternion()
+						* seat[bone_name])
 
 
 func _tower_lunge(to_victim: Vector3) -> void:
@@ -363,6 +538,92 @@ func _build_character() -> void:
 	_anim.speed_scale = randf_range(0.94, 1.06)
 
 
+func _build_knight() -> void:
+	## The MOUNTED knight (ISSUES.md #1): a horse+rider ensemble under one
+	## Model root. The Quaternius horse is a static standing mesh animated
+	## procedurally (see the class doc); the KayKit rider (adventurer or
+	## Tidegrip skeleton — same casting table) sits a fixed transform in the
+	## authored saddle, statically seat-posed. The Model carries the
+	## quarter-turn reined stance (KNIGHT_MODEL_YAW) so the ensemble reads
+	## as cavalry from the head-on gameplay camera while the ROOT still
+	## points at the enemy line (and at duel victims). Height grading
+	## normalizes the ENSEMBLE: the rider's helm is the reference point
+	## (his crest, like the rook's pennant, is an accent above it).
+	_model = Node3D.new()
+	_model.name = "Model"
+	_model.rotation.y = deg_to_rad(KNIGHT_MODEL_YAW)   # the reined-in stance
+	add_child(_model)
+	_horse = PieceAssets.HORSE.instantiate()
+	_horse.name = "Horse"
+	_horse.scale = Vector3.ONE * KNIGHT_HORSE_SCALE
+	_model.add_child(_horse)
+	_rider = PieceAssets.character_scene(piece_type, house_id).instantiate()
+	_rider.name = "Rider"
+	_rider.position = KNIGHT_RIDER_POS
+	_model.add_child(_rider)
+	var raw_h := KNIGHT_RIDER_POS.y + _raw_model_height(_rider)
+	_model.scale = Vector3.ONE * (PieceAssets.piece_height(piece_type) / maxf(raw_h, 0.01))
+	_anim = AnimationPlayer.new()
+	_anim.name = "Anim"
+	_rider.add_child(_anim)  # root_node ".." = the rider scene root
+	_anim.add_animation_library("", PieceAssets.shared_anims())
+	# Palette: rider tinted like any character; the horse joins the army
+	# tint too (charred near-dark under the Drowned Legion), the tack never
+	# — the caparison is dressed in the house banner cloth below and the
+	# saddle keeps its leather.
+	var sat := _saturation_for()
+	_tint_meshes(_rider, _tint_for("piece"), sat)
+	var horse_tint := _tint_for("piece")
+	if house_id == PieceAssets.SKELETON_HOUSE:
+		horse_tint = horse_tint.darkened(0.32)   # charred, but still a horse
+	_tint_meshes(_horse, horse_tint, sat, ["Caparison", "Saddle"])
+	_dress_caparison()
+	# Gear/crest attach AFTER the tints so they keep their own colors.
+	_attach_gear()
+	if PieceAssets.wants_crest(piece_type):
+		_attach_crest()
+	# The mount breathes (procedural sway, desynced); the rider sits STILL
+	# — his player parks on a neutral frame and the seat pose bends him in.
+	_start_idle_sway()
+	_anim.play(ANIM_IDLE)
+	_anim.advance(0.0)
+	_anim.pause()
+	_apply_seat_pose()
+
+
+## The static horse's idle: a slow weight-shift sway on the ensemble root,
+## randomized per piece so the armies never breathe in lockstep.
+func _start_idle_sway() -> void:
+	if _sway_tween != null:
+		_sway_tween.kill()
+	var amp := randf_range(0.010, 0.016)
+	var half := randf_range(1.3, 1.8)
+	_sway_tween = create_tween().set_loops()
+	_sway_tween.tween_property(_model, "rotation:z", amp, half) \
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	_sway_tween.tween_property(_model, "rotation:z", -amp, half) \
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+
+
+## HOUSE flourish: the knight's caparison wears the house banner cloth —
+## primary-dyed, accent hem, the sigil reading on the horse's flank (the
+## same composited texture the rook's banner flies; v=0 is the cloth TOP,
+## matching the caparison's UVs). Legacy sides get plain dyed cloth.
+func _dress_caparison() -> void:
+	var cap := _model.find_child("Caparison", true, false) as MeshInstance3D
+	if cap == null:
+		return
+	var mat := StandardMaterial3D.new()
+	if HouseRegistry.has_house(house_id):
+		mat.albedo_texture = PieceAssets.banner_texture(house_id)
+	else:
+		mat.albedo_color = HOUSE_TINT[side].darkened(0.12)
+	mat.roughness = 0.92
+	mat.metallic = 0.0
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	cap.material_override = mat
+
+
 ## Raw (unscaled) model height: top of the skinned meshes parented directly
 ## to the Skeleton3D. BoneAttachment3D accessories (hats, hoods) are
 ## excluded — their mesh AABBs live in bone space, not model space.
@@ -376,7 +637,10 @@ func _raw_model_height(model: Node3D) -> float:
 
 
 func _skeleton() -> Skeleton3D:
-	var skels := _model.find_children("*", "Skeleton3D", true, false)
+	## The CHARACTER's rig — for the mounted knight that is the RIDER's
+	## skeleton (the horse has its own; gear/crest/pose never touch it).
+	var host: Node3D = _rider if _rider != null else _model
+	var skels := host.find_children("*", "Skeleton3D", true, false)
 	return null if skels.is_empty() else skels[0]
 
 

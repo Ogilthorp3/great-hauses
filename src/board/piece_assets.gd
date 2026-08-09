@@ -2,7 +2,8 @@ extends Node
 ## Autoload "PieceAssets" — shared runtime caches for PieceView: the merged
 ## Rig_Medium animation library, per-house tinted materials, and the
 ## HOUSE-COSTUMES registry (type heights, signature gear, house crests,
-## type-glyph rings, the banner watchtower, the Tidegrip drowned legion).
+## type-glyph rings, the banner watchtower, the knight's horse, the
+## Tidegrip drowned legion).
 ##
 ## Deliberately an autoload NODE rather than `static var`s on PieceView:
 ## script statics holding Resources crash Godot during engine shutdown
@@ -22,6 +23,16 @@ extends Node
 const ANIM_GENERAL := preload("res://assets/kaykit-adventurers/Rig_Medium_General.glb")
 const ANIM_MOVEMENT := preload("res://assets/kaykit-adventurers/Rig_Medium_MovementBasic.glb")
 
+## The knight's mount (ISSUES.md #1): Quaternius CC0 horse (poly.pizza
+## qvTrSG9pZF) run through tools/props/convert_horse.py — a STATIC standing
+## pose plus the authored war-tack: "Saddle" and the house-dressable
+## "Caparison" cloth. Deliberately unskinned: Godot corrupts this rig's
+## skinned mesh at chess-piece instance scales (front half vanishes,
+## camera-angle-dependently — Metal, Mobile and Forward+ alike), while
+## static meshes render flawlessly. PieceView drives idle-sway, canter-bob
+## and the death collapse procedurally — the banner-rook's proven pattern.
+const HORSE := preload("res://assets/quaternius-animals/horse.glb")
+
 const CROWN_GOLD := preload("res://assets/custom-props/crown.glb")
 const CROWN_FROST := preload("res://assets/custom-props/crown_frost.glb")
 const CAPE := preload("res://assets/custom-props/cape.glb")
@@ -32,13 +43,16 @@ const LOOPED_ANIMS := ["Idle_A", "Idle_B", "Walking_A", "Walking_B", "Walking_C"
 		"Running_A", "Running_B"]
 
 ## TYPE layer — strict height grading (world units, tallest body point).
-## pawn < knight < bishop < rook < queen < king, tuned so a full army reads
+## pawn < bishop < knight < rook < queen < king, tuned so a full army reads
 ## at a glance from the default gameplay camera. The rook's reference is its
 ## TowerBody stone (the pennant pole is an accent allowed to poke above).
+## The MOUNTED knight (ISSUES.md #1) moved up a slot — a rider on horseback
+## reads taller than a foot bishop; his reference is the rider's helm (the
+## crest, like the pennant, is an accent above it).
 const TYPE_HEIGHT := {
 	0: 0.78,   # PAWN
 	1: 1.02,   # ROOK (TowerBody stone height)
-	2: 0.86,   # KNIGHT
+	2: 0.98,   # KNIGHT (mounted: rider's helm atop the horse)
 	3: 0.94,   # BISHOP
 	4: 1.14,   # QUEEN
 	5: 1.26,   # KING
@@ -51,7 +65,7 @@ const TYPE_HEIGHT := {
 ## sword), queen = Rogue_Hooded (tiara + bow + quiver).
 const CHARACTER_SCENES := {
 	0: preload("res://assets/kaykit-adventurers/Barbarian.glb"),     # PAWN
-	2: preload("res://assets/kaykit-adventurers/Knight.glb"),        # KNIGHT
+	2: preload("res://assets/kaykit-adventurers/Knight.glb"),        # KNIGHT (the RIDER — mounted on HORSE)
 	3: preload("res://assets/kaykit-adventurers/Mage.glb"),          # BISHOP
 	4: preload("res://assets/kaykit-adventurers/Rogue_Hooded.glb"),  # QUEEN
 	5: preload("res://assets/kaykit-adventurers/Ranger.glb"),        # KING

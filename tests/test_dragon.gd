@@ -71,6 +71,7 @@ func _main() -> void:
 	await _test_ashfall_free_restore()
 	await _test_skeleton_swap()
 	await _test_tidegrip_chars_in_place()
+	await _test_ashfall_mounted_knight()
 	await _test_skip_every_phase()
 	await _test_championship_tier()
 	await _test_match_defaults_budget()
@@ -355,6 +356,59 @@ func _test_tidegrip_chars_in_place() -> void:
 	check("tidegrip: time_scale restored", true, is_equal_approx(Engine.time_scale, 1.0))
 	s.free()
 	await process_frame
+
+
+## ASHFALL vs the MOUNTED knight (ISSUES.md #1). The mounted knight is ONE
+## PieceView carrying a whole ensemble (horse + tack + rider), so the burn
+## has a failure mode no duck can expose: the rider is swapped for a foot
+## warrior and his horse is left standing in the ashes. Asserted on REAL
+## PieceViews, at the moment the charred bones stand AND after the sweep.
+func _test_ashfall_mounted_knight() -> void:
+	# piece_view.gd names the PieceAssets autoload, which a -s run never
+	# instances — shim it under /root first, then load the scene.
+	var assets: Node = (load("res://src/board/piece_assets.gd") as GDScript).new()
+	assets.name = "PieceAssets"
+	root.add_child(assets)
+	var piece_scene: PackedScene = load("res://scenes/piece_view.tscn")
+	var s := _fast_spectator()
+	s.ash_smolder_wall = 0.6   # widen the standing-bones window for the probe
+	await process_frame
+	var losers: Array = []
+	# a mounted knight, a foot pawn, and the Drowned Legion's mounted knight
+	# (the already-bones path, which chars the ensemble in place instead)
+	for spec: Array in [[2, "goldclaw"], [0, "goldclaw"], [2, "tidegrip"]]:
+		var pv: Node3D = piece_scene.instantiate()
+		root.add_child(pv)
+		pv.setup(int(spec[0]), 1, str(spec[1]))
+		pv.position = Vector3(-1.2 + losers.size() * 1.2, 0.0, 1.6)
+		losers.append(pv)
+	check("mounted burn: both knights ride in mounted", 2, _mount_count())
+	var runner := func() -> void:
+		await s.play_ashfall(1, "House Goldclaw", losers)
+	runner.call()
+	var seen: bool = await _wait_until(func() -> bool: return s.remains_count() > 0, 6.0)
+	check("mounted burn: charred bones stand in mid-sequence", true, seen)
+	var mounted_remains := 0
+	for shell: Node in root.find_children("AshRemains", "", true, false):
+		mounted_remains += shell.find_children("Horse", "MeshInstance3D", true, false).size()
+	check("mounted burn: the charred stand-in walks on foot", 0, mounted_remains)
+	var done: bool = await _wait_until(func() -> bool: return not s.is_ashfall_active(), 14.0)
+	check("mounted burn: ceremony completed", true, done)
+	await process_frame
+	await process_frame
+	check("mounted burn: all losers removed", 0, _alive(losers))
+	check("mounted burn: NO orphan horse left in the ashes", 0, _mount_count())
+	check("mounted burn: no AshRemains left in the tree", 0,
+			root.find_children("AshRemains", "", true, false).size())
+	check("mounted burn: time_scale restored", true, is_equal_approx(Engine.time_scale, 1.0))
+	s.free()
+	assets.free()
+	await process_frame
+
+
+## Horses standing anywhere in the tree (the hide mesh — one per mount).
+func _mount_count() -> int:
+	return root.find_children("Horse", "MeshInstance3D", true, false).size()
 
 
 func _test_skip_every_phase() -> void:

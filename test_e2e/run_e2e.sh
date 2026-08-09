@@ -7,7 +7,8 @@
 #   tests       ALL headless suites — engine (79), tournament, cinematics
 #               time-restore, DS4 opponent (mock+live, 3 modes),
 #               UciEngine/stockfish client, music (104), banter (93),
-#               dragon spectator/ASHFALL, costumes (84)          — Gate A
+#               dragon spectator/ASHFALL, duel face-off, costumes
+#               (165, mounted knights included)                   — Gate A
 #   boot        windowed: select flows to game, 32 pieces, banners+HUD dyed
 #   orientation windowed: --debug-coords labeled overlay from the default
 #               player camera, saved as labeled.png — the permanent
@@ -243,6 +244,7 @@ for step in "${STEPS[@]}"; do
       run_suite music-suite res://tests/test_music.gd || SUITE_RC=1
       run_suite banter-suite res://tests/test_banter.gd || SUITE_RC=1
       run_suite dragon-suite res://tests/test_dragon.gd || SUITE_RC=1
+      run_suite duel-facing-suite res://tests/test_duel_facing.gd || SUITE_RC=1
       run_suite costumes-suite res://tests/test_costumes.gd || SUITE_RC=1
       ;;
     boot)      run_scenario boot || SUITE_RC=1 ;;

@@ -22,8 +22,9 @@ const PieceScene := preload("res://scenes/piece_view.tscn")
 
 const SHOT_DIR := "res://test_e2e/artifacts/module-previews/costumes"
 ## Display order: reading order of the height grading, not enum order.
+## The MOUNTED knight (ISSUES.md #1) sits between bishop and rook.
 const TYPE_ORDER: Array[int] = [
-	PieceView.Type.PAWN, PieceView.Type.KNIGHT, PieceView.Type.BISHOP,
+	PieceView.Type.PAWN, PieceView.Type.BISHOP, PieceView.Type.KNIGHT,
 	PieceView.Type.ROOK, PieceView.Type.QUEEN, PieceView.Type.KING,
 ]
 const COL_STEP := 1.35
@@ -85,6 +86,30 @@ static func validate_piece(pv: PieceView, piece_type: int, house_id: String) -> 
 	var tiaraed := pv.find_child("Tiara", true, false) != null
 	if (piece_type == PieceView.Type.QUEEN) != tiaraed:
 		errs.append("%s: tiara presence wrong (%s)" % [tag, tiaraed])
+	# TYPE: the knight is MOUNTED (ISSUES.md #1) — horse under him, saddle
+	# and house-dressed caparison on the horse, rider seated above the saddle.
+	# The mount is deliberately a STATIC unskinned mesh (see PieceAssets.HORSE)
+	# animated procedurally, so what must be live is the idle-sway tween — not
+	# an AnimationPlayer.
+	if piece_type == PieceView.Type.KNIGHT:
+		for part in ["Horse", "Saddle", "Caparison", "Rider"]:
+			if pv.find_child(part, true, false) == null:
+				errs.append("%s: mounted knight missing %s" % [tag, part])
+		var cap := pv.find_child("Caparison", true, false) as MeshInstance3D
+		if cap != null and cap.material_override == null:
+			errs.append("%s: caparison not dressed" % tag)
+		if pv._horse != null:
+			if not pv._horse.find_children("*", "Skeleton3D", true, false).is_empty():
+				errs.append("%s: horse must ship unskinned/static" % tag)
+			var hide_mesh := pv._horse.find_child("Horse", true, false) as MeshInstance3D
+			if hide_mesh == null:
+				errs.append("%s: horse hide mesh missing" % tag)
+			elif hide_mesh.get_surface_override_material(0) == null:
+				errs.append("%s: horse hide not wearing the house tint" % tag)
+		if pv._sway_tween == null or not pv._sway_tween.is_running():
+			errs.append("%s: mount's idle sway not running" % tag)
+		if pv._rider != null and pv._rider.position.y < 0.5:
+			errs.append("%s: rider not seated above the mount" % tag)
 	# HOUSE: Tidegrip fields skeletons; everyone else fields adventurers.
 	if piece_type != PieceView.Type.ROOK:
 		var skeletal := false
@@ -122,6 +147,9 @@ static func measured_height(pv: PieceView) -> float:
 		var body := pv._model.find_child("TowerBody", true, false) as MeshInstance3D
 		if body != null:
 			raw = body.mesh.get_aabb().end.y
+	elif pv.piece_type == PieceView.Type.KNIGHT:
+		# the mounted ensemble's reference: the seated rider's helm
+		raw = pv._rider.position.y + pv._raw_model_height(pv._rider)
 	else:
 		raw = pv._raw_model_height(pv._model)
 	return raw * pv._model.scale.y
@@ -230,7 +258,7 @@ func _run_windowed_shots() -> void:
 		for other in _row_roots:
 			(_row_roots[other] as Node3D).visible = other == hid
 		# knight selected: shows the glyph-ring brighten in every house shot
-		var knight: PieceView = _rows[hid][1]
+		var knight: PieceView = _rows[hid][TYPE_ORDER.find(PieceView.Type.KNIGHT)]
 		knight.set_selected(true)
 		_cam.position = Vector3(x_mid, 2.7, z - 2.9)
 		_cam.look_at(Vector3(x_mid, 0.45, z))
@@ -243,7 +271,24 @@ func _run_windowed_shots() -> void:
 	_cam.look_at(Vector3(x_mid, 0.4, (houses.size() - 1) * ROW_STEP * 0.45))
 	await _settle()
 	await _shot("%s/overview.png" % dir)
-	print("costume preview: wrote %d screenshots to %s" % [houses.size() + 1, dir])
+	# The mounted-knight beauty shot (ISSUES.md #1): one house's knight,
+	# framed close and low from the 3/4 front — the cavalry silhouette check.
+	var hero_hid := "goldclaw"
+	for other in _row_roots:
+		(_row_roots[other] as Node3D).visible = other == hero_hid
+	var hero: PieceView = _rows[hero_hid][TYPE_ORDER.find(PieceView.Type.KNIGHT)]
+	for pv: PieceView in _rows[hero_hid]:
+		pv.visible = pv == hero   # the knight alone in frame
+	var hp := hero.global_position
+	_cam.position = hp + Vector3(0.60, 0.52, -0.80)
+	_cam.look_at(hp + Vector3(0.0, 0.40, 0.0))
+	await _settle()
+	await _shot("%s/mounted_knight.png" % dir)
+	for pv: PieceView in _rows[hero_hid]:
+		pv.visible = true
+	for other in _row_roots:
+		(_row_roots[other] as Node3D).visible = true
+	print("costume preview: wrote %d screenshots to %s" % [houses.size() + 2, dir])
 	get_tree().quit(0)
 
 

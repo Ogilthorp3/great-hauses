@@ -1,10 +1,12 @@
 extends SceneTree
 
 # Headless suite for the HOUSE COSTUMES + PIECE READABILITY + BANNER-ROOK
-# module: assembly correctness (right gear per type, right crest per house,
-# skeleton cast only for Tidegrip, glyph ring present), strict height-grading
+# + MOUNTED-KNIGHT module: assembly correctness (right gear per type, right
+# crest per house, skeleton cast only for Tidegrip, glyph ring present,
+# horse+saddle+caparison under every knight), strict height-grading
 # monotonicity, rig retarget compatibility for the skeleton cast, glyph-ring
-# selection feedback, and the banner-rook crumble path.
+# selection feedback, the banner-rook crumble path, and the mounted knight's
+# duel choreography (step-in capture, rider-falls death, face-to-face turn).
 # Run: /Applications/Godot.app/Contents/MacOS/Godot --headless --path <project> -s res://tests/test_costumes.gd
 # Exit code 0 = all green, 1 = failures.
 #
@@ -20,7 +22,7 @@ var checks_run := 0
 ## A hard-erroring test function aborts silently at the error and its await
 ## resumes as if it finished — so "no FAIL lines" is NOT proof the suite ran.
 ## This floor turns silently-aborted tests into a loud failure.
-const MIN_EXPECTED_CHECKS := 70
+const MIN_EXPECTED_CHECKS := 140
 
 # PieceView.Type values (int-mirrored: PAWN ROOK KNIGHT BISHOP QUEEN KING).
 const T_PAWN := 0
@@ -30,8 +32,9 @@ const T_BISHOP := 3
 const T_QUEEN := 4
 const T_KING := 5
 const TYPE_NAMES := ["PAWN", "ROOK", "KNIGHT", "BISHOP", "QUEEN", "KING"]
-## Height-grading display order (not enum order).
-const GRADE_ORDER := [T_PAWN, T_KNIGHT, T_BISHOP, T_ROOK, T_QUEEN, T_KING]
+## Height-grading display order (not enum order). The MOUNTED knight
+## (ISSUES.md #1) sits between bishop and rook.
+const GRADE_ORDER := [T_PAWN, T_BISHOP, T_KNIGHT, T_ROOK, T_QUEEN, T_KING]
 const FROST := 0
 const EMBER := 1
 
@@ -62,8 +65,12 @@ func _main() -> void:
 	_test_shield_types()
 	_test_height_grading()
 	_test_glyph_orientation()
+	_test_mounted_knight()
 	await _test_selection_feedback()
 	await _test_rook_crumble()
+	await _test_knight_death()
+	await _test_knight_capture()
+	await _test_knight_duel_facing()
 	print("---")
 	check("final: no test silently aborted (checks >= %d)" % MIN_EXPECTED_CHECKS,
 			true, checks_run >= MIN_EXPECTED_CHECKS)
@@ -212,6 +219,231 @@ func _test_glyph_orientation() -> void:
 	check("ember glyph ring counter-yaw", true,
 			absf((ember.get_node("GlyphRing") as Node3D).rotation.y + PI) < 0.001)
 	ember.free()
+
+
+## The MOUNTED knight (ISSUES.md #1): horse+rider ensemble per house — the
+## horse under him with saddle and house-dressed caparison, the rider (the
+## house's cast: adventurer, or Tidegrip skeleton on the charred horse)
+## seated STILL in the saddle with his signature gear and his house crest,
+## the mount breathing on the procedural idle sway.
+##
+## The mount ships as a STATIC unskinned mesh (PieceAssets.HORSE documents
+## why: Godot corrupts this FBX-lineage rig at chess-piece scale), so the
+## contract asserted here is "no rig, sway tween live", NOT an animation
+## player — the banner-rook's proven procedural pattern.
+func _test_mounted_knight() -> void:
+	for hid in ["goldclaw", "tidegrip", ""]:
+		var label: String = hid if not str(hid).is_empty() else "legacy"
+		var pv := _spawn(T_KNIGHT, FROST, hid)
+		for part in ["Horse", "Saddle", "Caparison", "Rider"]:
+			check("mounted %s: has %s" % [label, part], true,
+					pv.find_child(part, true, false) != null)
+		var cap := pv.find_child("Caparison", true, false) as MeshInstance3D
+		check("mounted %s: caparison dressed" % label, true,
+				cap != null and cap.material_override != null)
+		if registry.has_house(hid):
+			# The SAME composited cloth the house's rook flies (identity, not
+			# a lookalike) — house colors, hem stripe, sigil on the flank.
+			var rook := _spawn(T_ROOK, FROST, hid)
+			var flag := rook.find_child("BannerCloth", true, false) as MeshInstance3D
+			check("mounted %s: caparison wears the house banner cloth" % label,
+					true, cap.material_override.albedo_texture != null
+					and cap.material_override.albedo_texture
+							== flag.material_override.albedo_texture)
+			rook.free()
+		else:
+			check("mounted %s: caparison dyed in the side's cloth" % label, true,
+					cap.material_override.albedo_texture == null
+					and cap.material_override.albedo_color != Color.WHITE)
+		# STATIC mount, procedurally animated (the documented decision).
+		check("mounted %s: mount is unskinned/static" % label, true,
+				pv._horse.find_children("*", "Skeleton3D", true, false).is_empty()
+				and pv._horse.find_children("*", "AnimationPlayer", true, false).is_empty())
+		check("mounted %s: mount breathes on the idle sway" % label, true,
+				pv._sway_tween != null and pv._sway_tween.is_running())
+		# HOUSE palette dresses the MOUNT too, not just the rider.
+		var hide_mesh := pv._horse.find_child("Horse", true, false) as MeshInstance3D
+		check("mounted %s: horse hide wears the house tint" % label, true,
+				hide_mesh != null and hide_mesh.get_surface_override_material(0) != null)
+		check("mounted %s: saddle keeps its leather" % label, true,
+				(pv.find_child("Saddle", true, false) as MeshInstance3D)
+						.get_surface_override_material(0) == null)
+		# Seating: the rider rides ON the saddle — hips inside the seat slab,
+		# never floating above it or sunk through the horse's back.
+		var rider: Node3D = pv.find_child("Rider", true, false)
+		var belly_y: float = _model_space_box(pv, "Caparison").position.y
+		check("mounted %s: rider seated above the mount's belly line" % label, true,
+				rider.position.y > belly_y)
+		var saddle_top: float = _model_space_box(pv, "Saddle").end.y
+		var hips_y: float = rider.position.y \
+				+ _bone_y(pv, "hips")
+		check("mounted %s: hips land in the saddle (%.2f vs seat %.2f)"
+				% [label, hips_y, saddle_top], true,
+				absf(hips_y - saddle_top) < 0.35)
+		check("mounted %s: rider sits STILL (player parked)" % label, false,
+				(pv._anim as AnimationPlayer).is_playing())
+		check("mounted %s: seat pose bends the legs" % label, true,
+				_bone_bent(pv, "upperleg.l") and _bone_bent(pv, "lowerleg.l"))
+		check("mounted %s: sword rides with the RIDER" % label, true,
+				rider != null and rider.find_child("Gear_sword", true, false) != null)
+		check("mounted %s: house crest rides on the RIDER's head" % label,
+				registry.has_house(hid),
+				rider != null and rider.find_child("Crest", true, false) != null)
+		var skeletal := false
+		for mi: MeshInstance3D in pv.find_children("*", "MeshInstance3D", true, false):
+			if str(mi.name).begins_with("Skeleton_"):
+				skeletal = true
+		check("mounted %s: skeletal rider iff Drowned Legion" % label,
+				hid == "tidegrip", skeletal)
+		pv.free()
+	# The mount is HOUSE-COLORED, not one grey horse for everyone: two houses
+	# must dress their caparison in visibly different cloth, and the Drowned
+	# Legion's charger is charred darker than a living house's.
+	var gold := _spawn(T_KNIGHT, FROST, "goldclaw")
+	var winter := _spawn(T_KNIGHT, FROST, "winterfang")
+	var tide := _spawn(T_KNIGHT, FROST, "tidegrip")
+	check("mount palette: caparisons differ between houses", true,
+			(gold.find_child("Caparison", true, false) as MeshInstance3D)
+					.material_override.albedo_texture
+			!= (winter.find_child("Caparison", true, false) as MeshInstance3D)
+					.material_override.albedo_texture)
+	check("mount palette: hides differ between houses", true,
+			_hide_albedo(gold) != _hide_albedo(winter))
+	check("mount palette: Drowned Legion's charger is charred darker", true,
+			_hide_albedo(tide).v < _hide_albedo(gold).v)
+	gold.free()
+	winter.free()
+	tide.free()
+
+
+## Model-space AABB of a named mesh under the ensemble (mounted-knight rig).
+func _model_space_box(pv: Node, mesh_name: String) -> AABB:
+	var mi := pv.find_child(mesh_name, true, false) as MeshInstance3D
+	var horse: Node3D = pv._horse
+	return (horse.transform * mi.transform) * mi.mesh.get_aabb()
+
+
+## Rider-local Y of a posed bone on the seated rider.
+func _bone_y(pv: Node, bone: String) -> float:
+	var skel: Skeleton3D = pv._skeleton()
+	return skel.get_bone_global_pose(skel.find_bone(bone)).origin.y
+
+
+## True when the seat pose actually moved this bone off its rest rotation.
+func _bone_bent(pv: Node, bone: String) -> bool:
+	var skel: Skeleton3D = pv._skeleton()
+	var i := skel.find_bone(bone)
+	if i == -1:
+		return false
+	return skel.get_bone_pose_rotation(i).angle_to(
+			skel.get_bone_rest(i).basis.get_rotation_quaternion()) > 0.2
+
+
+## The house tint actually painted on the horse's hide.
+func _hide_albedo(pv: Node) -> Color:
+	var hide_mesh := (pv._horse as Node3D).find_child("Horse", true, false) as MeshInstance3D
+	return (hide_mesh.get_surface_override_material(0) as StandardMaterial3D).albedo_color
+
+
+## Mounted death: the rider plays Death_A and tumbles out of the saddle
+## while the horse keels over sideways (procedural — the mount is static);
+## died fires with death_anim=Death_A (the duel/e2e contract is unchanged)
+## and the idle sway is killed so nothing keeps breathing under the wreck.
+func _test_knight_death() -> void:
+	var pv := _spawn(T_KNIGHT, FROST, "winterfang")
+	var rider: Node3D = pv.find_child("Rider", true, false)
+	var horse: Node3D = pv._horse
+	# [died, death_anim, rider slide x at death, horse keel-over at death]
+	var died_flag: Array = [false, "", 0.0, 0.0]
+	pv.died.connect(func() -> void:
+		died_flag[0] = true
+		died_flag[1] = pv.death_anim
+		if is_instance_valid(rider):
+			died_flag[2] = rider.position.x
+		if is_instance_valid(horse):
+			died_flag[3] = horse.rotation.z)
+	check("knight death: rider starts in the saddle", true,
+			rider != null and absf(rider.position.x) < 0.01)
+	check("knight death: horse starts upright", true, absf(horse.rotation.z) < 0.01)
+	pv.die()   # fire and forget; probe the stages
+	await create_timer(1.2).timeout
+	check("knight death: horse keeling over", true, horse.rotation.z > 0.2)
+	check("knight death: rider tipping out of the saddle", true, rider.position.x > 0.2)
+	check("knight death: idle sway stopped", true,
+			pv._sway_tween == null or not pv._sway_tween.is_running())
+	var deadline := Time.get_ticks_msec() + 8000
+	while not died_flag[0] and Time.get_ticks_msec() < deadline:
+		await process_frame
+	check("knight death: died emitted", true, died_flag[0])
+	check("knight death: death anim", "Death_A", died_flag[1])
+	check("knight death: rider slid off the saddle", true, float(died_flag[2]) > 1.0)
+	check("knight death: horse ended on its side", true, float(died_flag[3]) > 1.0)
+
+
+## Mounted strike: play_capture fells the victim (horse step-in + rider
+## Throw), the victim dies through the standard Death_A contract, and the
+## knight settles back — ensemble returned to its square, mount still
+## breathing, rider re-seated and parked still again.
+func _test_knight_capture() -> void:
+	var pv := _spawn(T_KNIGHT, FROST, "goldclaw")
+	var victim := _spawn(T_PAWN, EMBER, "ashwyrm")
+	pv.position = Vector3.ZERO
+	victim.position = Vector3(0.0, 0.0, 1.2)
+	var victim_death: Array = [""]
+	victim.died.connect(func() -> void: victim_death[0] = victim.death_anim)
+	await pv.play_capture(victim)
+	check("knight capture: victim fell through Death_A", "Death_A", victim_death[0])
+	check("knight capture: victim consumed", true,
+			not is_instance_valid(victim) or victim.is_queued_for_deletion())
+	check("knight capture: ensemble stepped back onto its square", true,
+			pv.position.distance_to(Vector3.ZERO) < 0.02)
+	check("knight capture: mount still breathing", true,
+			pv._sway_tween != null and pv._sway_tween.is_running())
+	await create_timer(0.6).timeout   # _reseat_rider settles
+	check("knight capture: rider parked still again", false,
+			(pv._anim as AnimationPlayer).is_playing())
+	check("knight capture: rider re-seated in the saddle", true,
+			_bone_bent(pv, "upperleg.l") and _bone_bent(pv, "lowerleg.l"))
+	pv.free()
+
+
+## Face-to-face doctrine on REAL mounted pieces: the tower exemption must
+## NOT exempt knights — the whole ensemble root turns to meet the victim.
+func _test_knight_duel_facing() -> void:
+	var dd_script: GDScript = load("res://src/cinematics/duel_director.gd")
+	var d: Node3D = dd_script.new()
+	d.swoop_wall = 0.05
+	d.return_wall = 0.05
+	d.duel_ramp_down_wall = 0.05
+	d.duel_slow_hold_wall = 0.15
+	d.duel_ramp_up_wall = 0.05
+	d.duel_tail_wall = 0.05
+	d.face_off_wall = 0.1
+	d.face_rest_wall = 0.1
+	d.failsafe_wall_sec = 5.0
+	root.add_child(d)
+	var knight := _spawn(T_KNIGHT, FROST, "goldclaw")
+	var victim := _spawn(T_PAWN, EMBER, "duskfire")
+	knight.position = Vector3(-0.8, 0.0, 0.0)
+	victim.position = Vector3(0.8, 0.0, 0.2)
+	knight.rotation.y = 0.0
+	victim.rotation.y = 0.0
+	var probe := {"knight_on_victim": false}
+	var strike := func() -> void:
+		var dir: Vector3 = (victim.global_position - knight.global_position).normalized()
+		var fwd: Vector3 = knight.global_transform.basis.z.normalized()
+		probe["knight_on_victim"] = fwd.dot(dir) > 0.9
+		await create_timer(0.1).timeout
+	await d.play_duel(knight, victim, {}, strike)
+	check("knight facing: ensemble root turned onto the victim", true,
+			probe["knight_on_victim"])
+	check("knight facing: knight back at resting yaw", true,
+			absf(wrapf(knight.rotation.y - 0.0, -PI, PI)) < 0.06)
+	check("knight facing: time_scale restored", true,
+			is_equal_approx(Engine.time_scale, 1.0))
+	d.free()
+	knight.free()
+	victim.free()
 
 
 ## Hover-only glyph rings (ISSUES.md #2): the ring is HIDDEN at rest, fades

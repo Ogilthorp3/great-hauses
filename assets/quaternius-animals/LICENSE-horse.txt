@@ -1,0 +1,51 @@
+horse.glb — license and provenance
+==================================
+
+Model:    "Horse" from the Quaternius "Ultimate Animated Animals" pack
+          (the rigged, animated horse; Idle / Walk / Gallop / Death takes).
+Author:   Quaternius (https://quaternius.com)
+
+License:  CC0 1.0 Universal (Public Domain Dedication)
+          https://creativecommons.org/publicdomain/zero/1.0/
+          No attribution required; free for personal and commercial use.
+
+License verification (checked 2026-08-08):
+- poly.pizza lists this exact model as "Public Domain (CC0)" by Quaternius:
+  https://poly.pizza/m/qvTrSG9pZF  (Ultimate Animated Animals bundle).
+- The quaternius.com pack page for Ultimate Animated Animals states the pack
+  is CC0 and links https://creativecommons.org/publicdomain/zero/1.0/ — the
+  same dedication as the Ultimate Monsters pack this project's dragon comes
+  from (see ../custom-props/LICENSE-dragon.txt).
+
+Download source used:
+  poly.pizza model qvTrSG9pZF, glTF-binary download. A verbatim copy of the
+  untouched source is kept OUTSIDE this repo, beside the other packs, at
+  great-houses-assets/quaternius-animals/source-horse/Horse.glb, so the
+  conversion below is reproducible offline.
+
+Conversion: source GLB -> game-ready static GLB via headless Blender 4.0.2,
+  script tools/props/convert_horse.py:
+    /Applications/Blender.app/Contents/MacOS/Blender -b --python \
+        tools/props/convert_horse.py -- \
+        <great-houses-assets>/quaternius-animals/source-horse/Horse.glb \
+        assets/quaternius-animals/horse.glb
+
+  The pipeline freezes the source's Idle frame 0 into a STATIC standing pose
+  (vertex groups stripped, rig and actions dropped) and adds original
+  war-tack authored in this project's art style: "Saddle" (leather seat with
+  pommel + cantle) and "Caparison" (two draped flank panels, UV-mapped so the
+  runtime can drop the house banner cloth straight on). 2506 tris total.
+
+  WHY STATIC — the source rig is FBX lineage (armature node scale 100, tiny
+  bone-space data). Godot renders its skinned mesh correctly at scale ~1 but
+  CORRUPTS it at chess-piece instance scales (~0.13): vertices bound to half
+  the bones fly off, the horse's front half disappears camera-angle-
+  dependently, on Metal under Mobile AND Forward+. Static meshes at the same
+  scale render flawlessly, so the mount ships static and PieceView animates
+  it procedurally (idle sway, canter bob, death keel-over) — the same pattern
+  the banner-rook already uses. See src/board/piece_assets.gd (HORSE).
+
+Only Quaternius' original geometry/materials come from the pack; the saddle
+and caparison are this project's own work. CC0 places no restrictions on
+this redistribution or on use in the game. Quaternius accepts support at
+https://www.patreon.com/quaternius.
