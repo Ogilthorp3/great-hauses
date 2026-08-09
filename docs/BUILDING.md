@@ -175,18 +175,41 @@ It costs an extra ASTC variant per texture at import time; the Windows preset se
 
 **Trap 4 — the icon must exist or the export dies.**
 `application/icon` pointing at a missing file fails the whole export with
-`Invalid icon path.` — not a warning. The preset therefore ships `application/icon=""`.
-When `assets/branding/icon.ico` lands, change that one line to:
+`Invalid icon path.` — a hard error, not a warning. So the preset can only name an icon
+that is actually on disk; while the branding assets were still in flight this shipped as
+`application/icon=""`, and it must go back to `""` if the files are ever renamed.
+
+Both are now wired to the branding agent's assets:
 
 ```ini
-application/icon="res://assets/branding/icon.ico"
+[preset.0.options]  application/icon="res://assets/branding/GreatHouses.ico"    # Windows
+[preset.1.options]  application/icon="res://assets/branding/GreatHouses.icns"   # macOS
 ```
 
-…and note it *still* won't be embedded until **rcedit** is configured
-(*Editor Settings → Export → Windows → rcedit*). Without rcedit, Godot prints an
-informational message and exports fine, but the `.exe` keeps the default Godot icon and
-no version metadata. `build.sh` tells you when the icon file appears but the preset
-hasn't been pointed at it. Icon and version metadata are **not currently embedded**.
+Contrary to a lot of older advice, **rcedit is not required.** Godot 4.7 stamps the
+Windows icon and version metadata into the PE itself. Verified by diffing the exported
+`.exe` against the stock template: the `.ico`'s bytes and the UTF-16 string
+`Great Houses` are present in the exported PE image and absent from the template
+(which carries `Godot Engine` instead). The macOS `.icns` is copied to
+`Contents/Resources/icon.icns` byte-for-byte — SHA-256 verified against the source.
+
+The `.ico`/`.icns` are *packaging inputs*, not runtime assets, so `exclude_filter` keeps
+them out of the pck (they are read from disk at export time). That saves ~1.8 MiB in
+every shipped build.
+
+**Trap 5 — never export while the e2e suite is running.**
+`test_e2e/artifacts/` lives inside `res://`, and `run_scenario` does `rm -rf` on a
+scenario's directory before refilling it. Godot applies `exclude_filter` by **walking the
+live filesystem**, so a directory being deleted out from under that walk can escape the
+filter entirely. A build run during a suite shipped three banter screenshots into the
+pck — one of them 0 bytes, caught mid-write — even though `test_e2e/artifacts/*` is in
+`exclude_filter` and the other several thousand screenshots were correctly excluded.
+
+`build.sh` refuses to export when it sees a live `--e2e=` scenario process or writes
+under `test_e2e/artifacts/` in the last 20 seconds (`ALLOW_CONCURRENT_E2E=1` overrides).
+The pck assertions are the backstop that caught it in the first place. The permanent fix
+is to move the artifacts directory outside `res://`, which belongs to whoever owns
+`run_e2e.sh`.
 
 ---
 
@@ -286,6 +309,8 @@ Honest list, because "it builds" is not "it runs":
   (including the `stockfish.exe` filename and the beside-the-executable directories), but
   no `stockfish.exe` has actually been spawned. Note that `OS.execute_with_pipe` may flash
   a console window on Windows when it spawns the engine — unconfirmed either way.
-- **Icon and version metadata are absent** from the `.exe` (no rcedit, no icon file yet).
+- **The icon has been proven present in the PE image, not proven to render.** The `.ico`
+  bytes and the version string are in the exported binary (see Trap 4), but nobody has
+  seen Explorer or the taskbar draw it.
 - The macOS `.app` is ad-hoc signed only — **not** notarized, so other Macs will need
   right-click → Open.

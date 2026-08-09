@@ -80,15 +80,69 @@ check_toolchain() {
     return 1
   fi
   note "template version.txt matches the editor ($stamped)"
-  # The icon is another agent's deliverable; report its status, never block.
-  if [ -f "$PROJ/assets/branding/icon.ico" ]; then
+  # Icons are another agent's deliverable; report status, never block.
+  # macOS embeds its .icns directly. Windows needs BOTH a .ico AND rcedit,
+  # so a .ico appearing on its own is still not enough.
+  if [ -f "$PROJ/assets/branding/GreatHouses.icns" ]; then
+    note "icon(mac) : GreatHouses.icns present — embedded in the .app"
+  else
+    note "icon(mac) : no .icns — bundle keeps the default Godot icon"
+  fi
+  # Godot 4.7 stamps the PE icon + version info natively — no rcedit needed.
+  if [ -f "$PROJ/assets/branding/GreatHouses.ico" ]; then
     if grep -q '^application/icon=""' "$PROJ/export_presets.cfg"; then
-      note "NOTE: assets/branding/icon.ico now EXISTS but export_presets.cfg still"
-      note "      has application/icon=\"\" — set it to res://assets/branding/icon.ico"
-      note "      (and configure rcedit) to actually stamp it into the .exe."
+      note "NOTE: assets/branding/GreatHouses.ico EXISTS but a preset still has"
+      note "      application/icon=\"\" — point it at res://assets/branding/GreatHouses.ico"
+    else
+      note "icon(win) : GreatHouses.ico present — stamped into the .exe"
     fi
   else
-    note "icon      : assets/branding/icon.ico absent — building without a custom icon"
+    note "icon(win) : no .ico — .exe keeps the default Godot icon (see BUILDING.md)"
+  fi
+  return 0
+}
+
+# The e2e suite writes screenshots into test_e2e/artifacts/ — INSIDE res:// — and
+# run_scenario `rm -rf`s each scenario's directory before refilling it. Godot's
+# exclude_filter is applied by walking the live filesystem, so a directory that is
+# being deleted out from under that walk can escape the filter entirely: a build run
+# during a suite shipped 3 banter screenshots, one of them 0 bytes (caught mid-write).
+# The pck assertions catch it after the fact; this refuses before wasting the export.
+e2e_running() {
+  # Recent writes under the artifacts tree. The window only has to cover the
+  # ~1 s gap BETWEEN scenarios (when no --e2e process exists yet the suite is
+  # still going); the process check below is the authoritative signal. Keep it
+  # short or every build in the minute after a suite gets refused for nothing.
+  if find "$PROJ/test_e2e/artifacts" -newermt '-20 seconds' -type f -print -quit \
+       2>/dev/null | grep -q .; then
+    return 0
+  fi
+  # A windowed scenario launch (run_scenario passes "--e2e=<name>" after --).
+  # Built by concatenation so this grep's own argv can't self-match, and grep -v grep
+  # drops the pipeline's own processes.
+  # NOTE: -e is REQUIRED. The marker starts with "--", so a bare `grep -F "$marker"`
+  # is parsed as an option and the check silently dies (exit 2 -> "not running").
+  # This box's `grep` is ugrep, which rejects it loudly; GNU grep would too.
+  local marker="--e2e"; marker="${marker}="
+  if ps -axo command 2>/dev/null | grep -F -e "$marker" | grep -F -e "$PROJ" \
+       | grep -v -e grep >/dev/null 2>&1; then
+    return 0
+  fi
+  return 1
+}
+
+guard_concurrent_e2e() {
+  if [ "${ALLOW_CONCURRENT_E2E:-0}" = "1" ]; then
+    note "WARNING: concurrent-e2e guard disabled by ALLOW_CONCURRENT_E2E=1"
+    return 0
+  fi
+  if e2e_running; then
+    fail "the e2e suite appears to be RUNNING (recent writes under test_e2e/artifacts,
+       or a live --e2e scenario). Exporting now can leak test screenshots into the
+       shipped pck, because Godot applies exclude_filter by walking a directory the
+       suite is deleting and recreating. Wait for it to finish and re-run.
+       Override with ALLOW_CONCURRENT_E2E=1 (the pck assertions still backstop you)."
+    return 1
   fi
   return 0
 }
@@ -203,10 +257,10 @@ check_toolchain || { note "toolchain unusable — stopping"; exit 1; }
 
 for t in "${TARGETS[@]}"; do
   case "$t" in
-    windows) do_import && build_windows ;;
-    macos)   do_import && build_macos ;;
+    windows) guard_concurrent_e2e && do_import && build_windows ;;
+    macos)   guard_concurrent_e2e && do_import && build_macos ;;
     degrade) run_degrade ;;
-    all)     do_import && { build_windows; build_macos; run_degrade; } ;;
+    all)     guard_concurrent_e2e && do_import && { build_windows; build_macos; run_degrade; } ;;
   esac
 done
 
