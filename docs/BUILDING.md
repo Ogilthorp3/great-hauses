@@ -46,9 +46,16 @@ to a friend — who would have run a build with no heraldry in it.
 
 An export is a photograph. `verify_freshness` asserts the shutter fired **after** the last
 edit to anything the photograph should contain, and it now runs automatically at the end
-of both exports. It compares `src/`, `scenes/`, `assets/`, `project.godot` and
-`export_presets.cfg` against the artifact's mtime, skipping `*.md`/`*.py`/`*.sh` because
-those mirror `exclude_filter` and are never shipped.
+of both exports. It compares `src/`, `scenes/`, `assets/`, `houses/`, `project.godot` and
+`export_presets.cfg` against the artifact's mtime, skipping `*.md`/`*.py`/`*.sh` and the
+`houses/_template/` + `houses/_examples/` subtrees because those mirror `exclude_filter`
+and are never shipped.
+
+> **Second catch, same day.** `houses/` was **not** in that root list when a Great House
+> became a folder — so the entire nine-house roster, twenty files of shipped game content,
+> could change without the gate noticing. A gate that watches four of the five directories
+> it ships is a gate that says GREEN over a stale artifact. Whenever a new *top-level*
+> directory starts shipping, it must be added to `verify_freshness` in the same commit.
 
 On failure it names the offending files and exits 1:
 
@@ -185,8 +192,11 @@ file ../great-houses-dist/windows/GreatHouses.exe
 # -> PE32+ executable (GUI) x86-64 ..., for MS Windows
 
 python3 tools/build/pck_list.py ../great-houses-dist/windows/GreatHouses.exe \
-    --count-only --assert-present src/houses/houses.json \
-                 --assert-absent  test_e2e/artifacts
+    --count-only --assert-present houses/index.json \
+                 --assert-present houses/winterfang/house.json \
+                 --assert-present src/houses/coats.json \
+                 --assert-absent  test_e2e/artifacts \
+                 --assert-absent  houses/_examples/
 ```
 
 `pck_list.py` parses the real Godot PCK index out of the shipped artifact (standalone
@@ -202,7 +212,7 @@ Both presets share these filters:
 ```ini
 export_filter="all_resources"
 include_filter="*.json,*.txt,*LICENSE*"
-exclude_filter="test_e2e/*,tests/*,tools/*,*.md,*.py,*.sh,assets/branding/*.ico,assets/branding/*.icns"
+exclude_filter="test_e2e/*,tests/*,tools/*,houses/_template/*,houses/_examples/*,*.md,*.py,*.sh,assets/branding/*.ico,assets/branding/*.icns"
 ```
 
 > `test_e2e/*` (not just `test_e2e/artifacts/*`) since 2026-08-09: the E2E harness used to
@@ -216,11 +226,17 @@ Each clause is load-bearing. All four of these were found by building and inspec
 not by reading docs:
 
 **Trap 1 — the `.json` files are invisible to `all_resources`.**
-`houses.json`, `banter_lines.json` and `kill_lines.json` are read with
+`houses/index.json`, each pack's `houses/<id>/house.json`, `src/houses/coats.json`,
+`banter_lines.json` and `kill_lines.json` are read with
 `FileAccess.open()`, not `load()`, and have no `.import` sidecar, so Godot does not
 consider them resources. Without `*.json` in `include_filter` they are **silently
 omitted** and the shipped game has no houses at all. Verified by asserting them
 present in the pck on every build.
+
+> This trap got *wider* on 2026-08-09, when a Great House became a folder. The roster
+> used to be one file (`src/houses/houses.json`, now deleted); it is now
+> `houses/index.json` plus one `house.json` per pack, discovered at runtime. Ten
+> FileAccess-read files where there was one — all riding on the same `*.json` clause.
 
 **Trap 2 — `test_e2e/` used to be un-excludable (FIXED 2026-08-09).**
 `project.godot` autoloaded the E2E driver:

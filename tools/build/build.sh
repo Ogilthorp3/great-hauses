@@ -33,11 +33,21 @@ RC=0
 note() { printf '[build] %s\n' "$*"; }
 fail() { printf '[build] FAIL: %s\n' "$*"; RC=1; }
 
-# Files that MUST be in the shipped pck. The three .json data files are read
-# with FileAccess (not load()), so they only ship because export_presets.cfg
-# lists them in include_filter — assert them every single build.
+# Files that MUST be in the shipped pck. Every .json below is read with
+# FileAccess (not load()), so it only ships because export_presets.cfg lists
+# it in include_filter — a file with no .import sidecar is invisible to
+# export_filter="all_resources". Assert them every single build.
+#
+# 2026-08-09: `src/houses/houses.json` USED to be here and is now deleted — a
+# Great House became a FOLDER under res://houses/. The roster is discovered at
+# runtime from houses/index.json, and each pack's own house.json is read the
+# same FileAccess way, so the same trap applies to all ten files. winterfang is
+# asserted as the representative pack (it is index.json's first seed); coats.json
+# is the shared material table that survived the refactor.
 ASSERT_PRESENT=(
-  "src/houses/houses.json"
+  "houses/index.json"
+  "houses/winterfang/house.json"
+  "src/houses/coats.json"
   "src/banter/banter_lines.json"
   "src/cinematics/kill_lines.json"
   "scenes/main.tscn"
@@ -48,7 +58,13 @@ ASSERT_PRESENT=(
 # it was autoloaded from project.godot until 2026-08-09, so a 90 KB .gdc of
 # test code shipped inside the Windows pck. It is registered at runtime now
 # (src/main.gd::_install_e2e_harness) and excluded from every export.
-ASSERT_ABSENT=( "test_e2e/" "res://tests/" "res://tools/" ".md" )
+#
+# houses/_template/ and houses/_examples/ are the MODDER's scaffolding — a blank
+# house.json and the Ravenmark demo pack with its own .glb/.png art. They are
+# documentation, not content: shipping _examples would hang a tenth banner in
+# every player's Hall. export_presets.cfg excludes both; this proves it did.
+ASSERT_ABSENT=( "test_e2e/" "res://tests/" "res://tools/" ".md"
+                "houses/_template/" "houses/_examples/" )
 
 # macOS ships bash 3.2, which has no `mapfile` — build the argv in a global.
 PCK_ARGS=()
@@ -172,13 +188,24 @@ do_import() {
 # below MIRRORS export_presets.cfg's exclude_filter on purpose: a file the
 # export never ships cannot make the artifact stale, and treating it as if it
 # could would make this gate cry wolf every time a doc or a test changed.
+#
+# 2026-08-09, the second staleness catch: res://houses/ was NOT in this find's
+# root list when a Great House became a folder, so twenty files of shipped game
+# content — the entire nine-house roster — could change without the gate
+# noticing. A gate that watches four of the five directories it ships is a gate
+# that says GREEN over a stale artifact. houses/ is a root now; its _template/
+# and _examples/ subtrees are pruned because export_presets.cfg excludes them
+# (same mirror rule as the -name exclusions below).
 verify_freshness() {
   local artifact="$1" newer
   if [ ! -e "$artifact" ]; then fail "freshness: no artifact at $artifact"; return 1; fi
-  newer="$(find "$PROJ/src" "$PROJ/scenes" "$PROJ/assets" \
+  newer="$(find "$PROJ/src" "$PROJ/scenes" "$PROJ/assets" "$PROJ/houses" \
                 "$PROJ/project.godot" "$PROJ/export_presets.cfg" \
+             \( -path "$PROJ/houses/_template/*" \
+                -o -path "$PROJ/houses/_examples/*" \) -prune -o \
              -type f -newer "$artifact" \
              -not -name '*.md' -not -name '*.py' -not -name '*.sh' \
+             -print \
              2>/dev/null)"
   if [ -n "$newer" ]; then
     fail "STALE ARTIFACT — these exported sources are NEWER than the artifact:
