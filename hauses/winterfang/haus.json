@@ -6,17 +6,17 @@
   "seat": "Frosthollow",
   "motto": "The wolf remembers.",
   "colors": {
-    "primary": "#8d99a6",
+    "primary": "#5b7a92",
     "secondary": "#eef2f5",
-    "accent": "#7fb0d4"
+    "accent": "#8bc4ee"
   },
   "tints": {
-    "piece": "#9fb4cc",
-    "tower": "#8ca1b8",
-    "kit": "#6f9fc9",
+    "piece": "#a7cee8",
+    "tower": "#8db3cc",
+    "kit": "#8bc4ee",
     "saturation": 0.25
   },
-  "coat": "white_grey",
+  "coat": "black",
   "sigil": "res://assets/sigils/winterfang.png",
   "crest": "res://assets/custom-props/crests/crest_winterfang.glb",
   "pawn_helm": "res://assets/custom-props/pawn-helms/pawn_helm_winterfang.glb"

@@ -271,14 +271,36 @@ func _mark_wolf(ink: Color) -> Array:
 	return [{"color": ink, "shapes": shapes}]
 
 
-## Lion — gold lozenge ringed by a spiked mane.
+## Lion — THE CLAW: four talons raking down-and-right from a pad.
+##
+## This mark used to be a lozenge ringed by eight radial spikes, and that was
+## the defect the colour pass found in the OTHER channel (2026-08-09). Three
+## of the nine were radial bursts — lion, kraken and sun — and a radial burst
+## is a radial burst at 20 px on a shield: measured against each other they
+## carried no information at all, which mattered doubly because sigil SHAPE is
+## the redundant channel a colourblind player reads when the tinctures
+## collapse. The sun keeps the rays (it is the sun; radial is what it MEANS),
+## and the other two moved to silhouettes only they own.
+##
+## A claw is also the haus's own name — Goldclaw, "a lion settles every
+## account" — and it is asymmetric, which is worth more at board distance than
+## any amount of detail: a mark that leans reads as a direction, and no other
+## sigil in the nine leans this way.
 func _mark_lion(ink: Color) -> Array:
-	var c := Vector2(0.0, -0.10)
-	var shapes: Array = [
-		_poly([Vector2(0.0, -0.34), Vector2(0.21, -0.10), Vector2(0.0, 0.14), Vector2(-0.21, -0.10)]),
-	]
-	for k in 8:
-		shapes.append(_spike(c, k * TAU / 8.0, 0.30, 0.52, 0.05))
+	var shapes: Array = []
+	# Four talons, splayed like a strike. Each is three chained segments with
+	# a falling thickness, so the tips taper and the stroke CURVES.
+	var spread := [-0.30, -0.10, 0.10, 0.30]
+	for i in spread.size():
+		var lean: float = spread[i]
+		var root := Vector2(lean * 1.25 - 0.10, -0.46)
+		var mid := root + Vector2(0.10 + lean * 0.22, 0.36)
+		var tip := mid + Vector2(0.26 + lean * 0.10, 0.30)
+		shapes.append(_seg(root.x, root.y, mid.x, mid.y, 0.115))
+		shapes.append(_seg(mid.x, mid.y, tip.x, tip.y, 0.075))
+		shapes.append(_poly([
+			tip + Vector2(0.04, 0.02), tip + Vector2(-0.05, -0.03),
+			tip + Vector2(0.11, 0.16)]))
 	return [{"color": ink, "shapes": shapes}]
 
 
@@ -311,12 +333,43 @@ func _mark_dragon(ink: Color, hot: Color) -> Array:
 	]
 
 
-## Kraken — radial tentacle spokes around a black heart.
+## Kraken — a mantle over FIVE CURLING arms, all coiling the same way.
+##
+## The straight-spoked version of this mark was the second of the three radial
+## bursts (see _mark_lion): eight even spikes around a disc is a STAR, and the
+## nine already had two of those. Curling every arm in one direction turns the
+## same footprint into a pinwheel — a silhouette with handedness, which is a
+## property no other sigil in the nine has and which survives being 20 px
+## wide, monochrome, and seen by a deuteranope.
+##
+## The arms are built as chained segments whose direction rotates by a fixed
+## step and whose thickness falls, i.e. a discrete logarithmic spiral: an arm
+## that tapers AND turns reads as a tentacle, while one that only tapers reads
+## as a ray of something.
+const KRAKEN_ARMS := 5
+const KRAKEN_JOINTS := 4
+const KRAKEN_CURL := 0.62      # radians added per joint — the handedness
+const KRAKEN_REACH := 0.175    # first joint's length, in uv units
+
 func _mark_kraken(ink: Color) -> Array:
-	var c := Vector2(0.0, -0.06)
-	var shapes: Array = [_cir(c.x, c.y, 0.15)]
-	for k in 8:
-		shapes.append(_spike(c, k * TAU / 8.0 + TAU / 16.0, 0.17, 0.52, 0.055))
+	var c := Vector2(0.0, -0.14)
+	# the mantle: a hooded bell, wider than it is tall, so the head is a
+	# SHAPE and not just the hub the arms happen to meet at
+	var shapes: Array = [
+		_cir(c.x, c.y, 0.185),
+		_poly([Vector2(c.x - 0.175, c.y + 0.02), Vector2(c.x + 0.175, c.y + 0.02),
+			Vector2(c.x + 0.10, c.y - 0.30), Vector2(c.x - 0.10, c.y - 0.30)]),
+	]
+	for k in KRAKEN_ARMS:
+		var ang := k * TAU / KRAKEN_ARMS + 0.36
+		var p := c + Vector2(cos(ang), sin(ang)) * 0.17
+		var len_j := KRAKEN_REACH
+		for j in KRAKEN_JOINTS:
+			var q := p + Vector2(cos(ang), sin(ang)) * len_j
+			shapes.append(_seg(p.x, p.y, q.x, q.y, 0.090 - 0.019 * j))
+			p = q
+			ang += KRAKEN_CURL
+			len_j *= 0.82
 	return [{"color": ink, "shapes": shapes}]
 
 

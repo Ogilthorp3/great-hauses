@@ -642,12 +642,34 @@ func reload_pack_rules() -> void:
 ## KIT_SHADE_FLOOR / KIT_SHADE_GAIN remap that luminance before the multiply:
 ## the pack's cloth patches sit anywhere between L 0.2 (the skeleton's crimson
 ## cloak) and L 0.8 (the ranger's blue cape), and un-remapped that spread turns
-## the same house colour into two different houses. Floor 0.52 with gain 0.85
-## lands every cast's cloth in the top half of the kit colour while keeping
-## the shading ORDER intact (it is linear and monotonic, like the tone floor
-## it replaces).
-const KIT_SHADE_FLOOR := 0.52
-const KIT_SHADE_GAIN := 0.85
+## the same house colour into two different houses. The remap is exactly
+## `L' = floor + gain * L` — linear and monotonic, so every fold the artist
+## painted keeps its ordering.
+##
+## THE PLASTIC-TOY DEFECT (the owner, 2026-08-09, on the boot frame: "the two
+## armies read at board distance as a solid blue mass and a solid yellow mass
+## — closer to plastic toys than to the gritty armoured look the game earned
+## in its close-ups"). The numbers were 0.52 / 0.85, and floor + gain = 1.37:
+## every cloth texel above L 0.565 CLIPPED to 1.0. On the KayKit atlases that
+## is most of a tabard, so the majority of every jersey rendered as one flat
+## unshaded slab of the house colour — the exact signature of moulded plastic,
+## and it got worse the brighter the jersey, which is why the gold army looked
+## the most like a toy.
+##
+## 0.40 / 0.60 sums to 1.00: the brightest cloth texel lands at exactly the
+## jersey colour and NOTHING clips, so the whole painted shading range
+## survives the multiply and a tabard has folds again. The floor is still high
+## enough (0.40 vs 0.52) that no cast's cloth drops into the dark hole the
+## floor was introduced to fix — the span it lands in, 0.40-1.00, is actually
+## WIDER than the 0.52-1.00 the old pair could reach after clipping.
+##
+## Saturation is deliberately NOT the lever here. Nine hauses separated by
+## cranking chroma is how the armies got candy-bright in the first place; the
+## separation is carried by the palette's VALUE and CHROMA spread (see
+## hauses/*/haus.json and tools/haus_palette_check.py), and this constant only
+## gives the cloth its shading back.
+const KIT_SHADE_FLOOR := 0.40
+const KIT_SHADE_GAIN := 0.60
 
 ## NATURAL — the whisper. A natural surface keeps its OWN atlas colours; this
 ## is the faint cast of the house tint it is allowed to take so an army still

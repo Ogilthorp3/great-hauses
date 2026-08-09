@@ -7,12 +7,14 @@ extends SceneTree
 #
 # It answers three questions, in this order:
 #
-#   1. DID THE PORT CHANGE ANYTHING? The nine houses moved out of one
-#      src/houses/houses.json and into nine houses/<id>/house.json packs. The
-#      GOLDEN table below is the pre-port data, transcribed from that file's
-#      last committed state, and every field of every house is compared against
-#      it — plus the crest, half-helm and army-cast each house resolves to. A
-#      refactor that changes a colour is not a refactor.
+#   1. IS THE PALETTE THE ONE A HUMAN APPROVED? The GOLDEN table below is the
+#      nine hauses, field for field, and every field of every haus is compared
+#      against it — plus the crest, half-helm and army-cast each one resolves
+#      to. It began as the PRE-PORT data (the nine moved out of one
+#      src/houses/houses.json into nine packs, and "a refactor that changes a
+#      colour is not a refactor"); it now doubles as the palette lock for the
+#      2026-08-09 separation pass, because a colour that drifts here is a
+#      colour nobody sees drift until a player complains.
 #
 #   2. DOES THE FORMAT REFUSE WHAT IT MUST? A third-party pack must not be able
 #      to undo the material-role discipline: no blue horses, no jersey painted
@@ -47,55 +49,83 @@ const HELM_DIR := "res://assets/custom-props/pawn-helms"
 const ADVENTURERS := "res://assets/kaykit-adventurers"
 const SKELETONS := "res://assets/kaykit-skeletons"
 
-## THE PRE-PORT DATA — src/houses/houses.json as it stood at commit a27279b,
-## field for field. This is the whole proof of "no behaviour change": the port
-## moved bytes between files, and these are the bytes.
+## THE PALETTE LOCK — the shipped nine, field for field.
+##
+## It started life as the PRE-PORT data (src/houses/houses.json at commit
+## a27279b), proving the pack port moved bytes and changed no behaviour. That
+## proof was made and shipped; what the literal is worth KEEPING for is the
+## other job it does — nine hand-reviewed colours nobody can drift by accident.
+## Rendering a haus is expensive, so a colour that quietly changes here is a
+## colour nobody sees change until a player complains.
+##
+## These values are the 2026-08-09 separation pass (`tools/haus_palette_check.py`
+## and `tools/haus_field.gd` carry the measurements). Three deliberate escapes
+## from the old pile-ups are worth naming, because they will look like typos:
+##   * hartcrown is SABLE. It was copper, and copper sat 11.8 dE from the
+##     dragon's crimson and 15.8 from the sun's orange — the warm pile-up. A
+##     stag on sable-and-or is period heraldry and its manifest already said
+##     so: `primary` was #1d1a17 long before the jersey caught up.
+##   * swiftcrest is PURPURE. It was #37b0c8 sky-cyan, 9.0 dE from Winterfang
+##     — the tightest pair in the whole game. Nine hauses cannot hold three
+##     blues; purpure is the tincture heraldry keeps for exactly this.
+##   * winterfang is PALE and hartcrown is NEAR-BLACK on purpose: value and
+##     chroma are separation axes here, not side effects. Do not "fix" the
+##     pale one by saturating it.
+## And one field that reads like a typo and is not: hartcrown's `tower` whisper
+## is COOL (#3d5670) under a WARM jersey. The whisper is what the rook's
+## masonry picks up, and a near-black warm jersey lands the tower stone inside
+## NATURAL_KIT_DISTANCE of it — the role gate caught it at 0.09 and said so.
+## Pushing only the masonry's whisper cold moves the stone off the jersey
+## without touching the jersey, and a storm-grey keep under a black-and-gold
+## stag is the reading Stormrest wanted anyway.
+## Changing a hex here without re-running both tools is how the pile-ups came
+## back the last two times.
 const GOLDEN := [
 	{"id": "winterfang", "archetype": "wolf", "name": "Haus Winterfang",
 		"seat": "Frosthollow", "motto": "The wolf remembers.",
-		"primary": "#8d99a6", "secondary": "#eef2f5", "accent": "#7fb0d4",
-		"piece": "#9fb4cc", "tower": "#8ca1b8", "kit": "#6f9fc9",
-		"coat": "white_grey"},
+		"primary": "#5b7a92", "secondary": "#eef2f5", "accent": "#8bc4ee",
+		"piece": "#a7cee8", "tower": "#8db3cc", "kit": "#8bc4ee",
+		"coat": "black"},
 	{"id": "goldclaw", "archetype": "lion", "name": "Haus Goldclaw",
 		"seat": "Gildenspire", "motto": "A lion settles every account.",
-		"primary": "#8e1f2c", "secondary": "#d9a441", "accent": "#f0c96a",
-		"piece": "#d4a43c", "tower": "#b8862f", "kit": "#f0cc2a",
+		"primary": "#8e1f2c", "secondary": "#e8bf3c", "accent": "#f0c352",
+		"piece": "#d6b055", "tower": "#b39a4a", "kit": "#e8bf3c",
 		"coat": "chestnut"},
 	{"id": "hartcrown", "archetype": "stag", "name": "Haus Hartcrown",
 		"seat": "Stormrest", "motto": "The storm answers to us.",
-		"primary": "#1d1a17", "secondary": "#cfa63b", "accent": "#e8c866",
-		"piece": "#8f5218", "tower": "#784514", "kit": "#7a3410",
-		"coat": "dapple_grey"},
+		"primary": "#241f18", "secondary": "#cfa63b", "accent": "#e8c866",
+		"piece": "#6b6152", "tower": "#3d5670", "kit": "#4a300c",
+		"coat": "white_grey"},
 	{"id": "ashwyrm", "archetype": "dragon", "name": "Haus Ashwyrm",
 		"seat": "Cinderhold", "motto": "From ash, dominion.",
-		"primary": "#171214", "secondary": "#b3282d", "accent": "#e04b3a",
-		"piece": "#b03a2e", "tower": "#93302a", "kit": "#c2261e",
-		"coat": "black"},
+		"primary": "#171214", "secondary": "#a12042", "accent": "#e0533a",
+		"piece": "#94384c", "tower": "#7d2f40", "kit": "#a12042",
+		"coat": "dark_bay"},
 	{"id": "tidegrip", "archetype": "kraken", "name": "Haus Tidegrip",
 		"seat": "Brinehold", "motto": "The tide takes what it pleases.",
-		"primary": "#4c6357", "secondary": "#14181a", "accent": "#7d9c8d",
-		"piece": "#6f8a7d", "tower": "#5d7568", "kit": "#3f8a6d",
+		"primary": "#12332e", "secondary": "#8fdcc4", "accent": "#1a2a28",
+		"piece": "#6fb5a0", "tower": "#5c9987", "kit": "#3ab793",
 		"coat": "drowned_grey"},
 	{"id": "thornvale", "archetype": "rose", "name": "Haus Thornvale",
 		"seat": "Bloomhall", "motto": "Every rose keeps its thorns.",
-		"primary": "#2f5d3a", "secondary": "#d3b04a", "accent": "#8fbf6a",
-		"piece": "#79a04a", "tower": "#648540", "kit": "#4f9235",
+		"primary": "#2f5d3a", "secondary": "#d3b04a", "accent": "#9ecf63",
+		"piece": "#6a8c46", "tower": "#57753a", "kit": "#54862a",
 		"coat": "dun"},
 	{"id": "duskfire", "archetype": "sun", "name": "Haus Duskfire",
 		"seat": "Sunspire", "motto": "The sun kneels for no one.",
-		"primary": "#c96a1e", "secondary": "#a3282a", "accent": "#f0a03c",
-		"piece": "#e07b2f", "tower": "#c2691f", "kit": "#e85f14",
+		"primary": "#c96a1e", "secondary": "#a3282a", "accent": "#f5b25a",
+		"piece": "#e08c3a", "tower": "#c07526", "kit": "#ee7716",
 		"coat": "liver_chestnut"},
 	{"id": "swiftcrest", "archetype": "falcon", "name": "Haus Swiftcrest",
 		"seat": "Skyloft", "motto": "Honor rides the high wind.",
-		"primary": "#7fb3d9", "secondary": "#f2f6f9", "accent": "#4f86ad",
-		"piece": "#6fc2c9", "tower": "#5aa3ab", "kit": "#37b0c8",
+		"primary": "#3f2064", "secondary": "#f2f6f9", "accent": "#b98ae0",
+		"piece": "#a273d0", "tower": "#8a5cb4", "kit": "#9448c8",
 		"coat": "bay"},
 	{"id": "silverbrook", "archetype": "trout", "name": "Haus Silverbrook",
 		"seat": "Rivergate", "motto": "The river binds us all.",
-		"primary": "#2c4d7c", "secondary": "#c9d3dc", "accent": "#8fb3d9",
-		"piece": "#6e8fc4", "tower": "#5d7aa9", "kit": "#3560ad",
-		"coat": "dark_bay"},
+		"primary": "#16345f", "secondary": "#c9d3dc", "accent": "#79a5de",
+		"piece": "#5b7fb8", "tower": "#4c6b9c", "kit": "#1a4489",
+		"coat": "dapple_grey"},
 ]
 
 ## A minimal manifest that passes, used as the base for the negative controls

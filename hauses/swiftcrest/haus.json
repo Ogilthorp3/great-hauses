@@ -6,14 +6,14 @@
   "seat": "Skyloft",
   "motto": "Honor rides the high wind.",
   "colors": {
-    "primary": "#7fb3d9",
+    "primary": "#3f2064",
     "secondary": "#f2f6f9",
-    "accent": "#4f86ad"
+    "accent": "#b98ae0"
   },
   "tints": {
-    "piece": "#6fc2c9",
-    "tower": "#5aa3ab",
-    "kit": "#37b0c8",
+    "piece": "#a273d0",
+    "tower": "#8a5cb4",
+    "kit": "#9448c8",
     "saturation": 0.25
   },
   "coat": "bay",

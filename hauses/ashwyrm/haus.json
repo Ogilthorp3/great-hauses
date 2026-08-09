@@ -7,16 +7,16 @@
   "motto": "From ash, dominion.",
   "colors": {
     "primary": "#171214",
-    "secondary": "#b3282d",
-    "accent": "#e04b3a"
+    "secondary": "#a12042",
+    "accent": "#e0533a"
   },
   "tints": {
-    "piece": "#b03a2e",
-    "tower": "#93302a",
-    "kit": "#c2261e",
+    "piece": "#94384c",
+    "tower": "#7d2f40",
+    "kit": "#a12042",
     "saturation": 0.25
   },
-  "coat": "black",
+  "coat": "dark_bay",
   "sigil": "res://assets/sigils/ashwyrm.png",
   "crest": "res://assets/custom-props/crests/crest_ashwyrm.glb",
   "pawn_helm": "res://assets/custom-props/pawn-helms/pawn_helm_ashwyrm.glb"

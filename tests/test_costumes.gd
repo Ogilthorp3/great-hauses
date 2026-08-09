@@ -79,6 +79,7 @@ func _main() -> void:
 	_test_glyph_medallion()
 	_test_mount_barding()
 	_test_horse_coats()
+	_test_haus_separation()
 	_test_material_role_table()
 	_test_role_split()
 	_test_role_gate()
@@ -761,6 +762,219 @@ func _test_horse_coats() -> void:
 
 func _rgb_gap(a: Color, b: Color) -> float:
 	return Vector3(a.r - b.r, a.g - b.g, a.b - b.b).length()
+
+
+## THE NINE MUST BE UNMISTAKABLE (the owner, 2026-08-09: "make sure that
+## hauses have enough different colors so there is no confusion between them").
+##
+## Every previous separation check in this file is an RGB DISTANCE with a
+## hand-picked floor, and RGB distance is not what an eye measures: it rates
+## two dark blues as far apart as a dark blue and a mid yellow. Both earlier
+## critics found ONE confusable pair each and both got a LOCAL patch, and the
+## pile-ups survived every time — because nothing here could see a PILE. It
+## takes a full pairwise matrix in a perceptual space to notice that three
+## hauses are blue and three are warm gold.
+##
+## So this is the real instrument, in the suite: CIELAB + CIEDE2000 over all
+## 36 pairs, and then the same 36 pairs again through each of the three
+## dichromacy simulations, because a pair that separates for a trichromat and
+## collapses for a deuteranope is not separated — that is 8 % of men.
+##
+## The floors are set BELOW the shipped palette's measured minima, on purpose:
+## this is a regression gate, not a target. What the numbers meant when they
+## were set (tools/haus_palette_check.py, same maths, same day):
+##      declared jerseys   min 22.6 dE2000, dichromatic min 8.1
+##      pawn-dome albedos  min 15.8 dE2000, dichromatic min 5.9
+## and BEFORE the pass: jerseys 13.0 / 1.9 — Winterfang's ice and Swiftcrest's
+## sky, which a deuteranope could not tell apart at all.
+##
+## tools/haus_field.gd is the other half and is not replaceable by this: it
+## renders all nine under the hall's eight ORANGE torches and samples the
+## pixels, because the light moves every one of these colours before a player
+## sees it (as rendered: 15.7 dE, from 9.0).
+const SEP_KIT_FLOOR := 16.0
+const SEP_KIT_CB_FLOOR := 6.0
+const SEP_DOME_FLOOR := 12.0
+const SEP_DOME_CB_FLOOR := 4.5
+## ...and the SPREAD. Nine hues at one brightness and one saturation is the
+## other way to be confusing, and it is the way that also looks like plastic:
+## a pale haus, a near-black haus, a muted haus and a vivid haus are four
+## distinguishable armies even at one hue apart, and no amount of hue
+## juggling substitutes for that. Winterfang is the pale one (v 0.93),
+## Hartcrown the near-black (v 0.23) — do not "fix" either by saturating it.
+const SEP_VALUE_SPAN := 0.45
+const SEP_CHROMA_SPAN := 0.35
+
+
+func _test_haus_separation() -> void:
+	var ids: Array = registry.house_ids()
+	var kits := {}
+	for hid in ids:
+		kits[hid] = registry.get_house_tint(hid, "kit")
+	_check_separation("jersey", kits, SEP_KIT_FLOOR, SEP_KIT_CB_FLOOR)
+
+	# The pawn DOME, which is the colour an army has 16 of: the jersey cut by
+	# the helm's shell weight (and cut harder for the Drowned Legion's charred
+	# twin). Two jerseys can clear the floor and still land their domes on top
+	# of each other, because that cut is not the same for every haus.
+	var domes := {}
+	for hid in ids:
+		var pv := _spawn(T_PAWN, FROST, hid)
+		var helm: Node = pv.find_child("Helm", true, false)
+		for mi: MeshInstance3D in (helm as Node3D).find_children(
+				"*", "MeshInstance3D", true, false):
+			for s in mi.mesh.get_surface_count():
+				var base := mi.mesh.surface_get_material(s) as StandardMaterial3D
+				if base == null or not str(base.resource_name).begins_with(
+						assets.HELM_IRON_MATERIAL):
+					continue
+				var over := mi.get_surface_override_material(s) as StandardMaterial3D
+				if over != null:
+					domes[hid] = over.albedo_color
+		pv.free()
+	check("separation: every haus reported a pawn dome", ids.size(), domes.size())
+	_check_separation("pawn dome", domes, SEP_DOME_FLOOR, SEP_DOME_CB_FLOOR)
+
+	# VALUE and CHROMA as axes, not side effects.
+	var v_lo := 9.9
+	var v_hi := -1.0
+	var s_lo := 9.9
+	var s_hi := -1.0
+	for hid in kits:
+		var c: Color = kits[hid]
+		v_lo = minf(v_lo, c.v)
+		v_hi = maxf(v_hi, c.v)
+		s_lo = minf(s_lo, c.s)
+		s_hi = maxf(s_hi, c.s)
+	check("separation: the nine span VALUE (%.2f-%.2f)" % [v_lo, v_hi], true,
+			v_hi - v_lo >= SEP_VALUE_SPAN)
+	check("separation: the nine span CHROMA (%.2f-%.2f)" % [s_lo, s_hi], true,
+			s_hi - s_lo >= SEP_CHROMA_SPAN)
+
+
+## One channel's full pairwise matrix, in plain sight and under all three
+## dichromacies. Prints every offending pair rather than just failing, because
+## "which pair" is the whole diagnosis.
+func _check_separation(label: String, table: Dictionary, floor_de: float,
+		cb_floor: float) -> void:
+	var names: Array = table.keys()
+	for sim in ["", "deuteranopia", "protanopia", "tritanopia"]:
+		var labs := {}
+		for hid in names:
+			var c: Color = table[hid]
+			labs[hid] = _lab(_dichromat(c, sim))
+		var worst := 9999.0
+		var worst_pair := ""
+		for i in names.size():
+			for j in range(i + 1, names.size()):
+				var a: String = names[i]
+				var b: String = names[j]
+				var d: float = _delta_e2000(labs[a], labs[b])
+				if d < worst:
+					worst = d
+					worst_pair = "%s/%s" % [a, b]
+				if d < (floor_de if sim.is_empty() else cb_floor):
+					print("      %s%s too close: %s %s vs %s %s (dE %.1f)"
+							% [label, "" if sim.is_empty() else " (" + sim + ")",
+							a, (table[a] as Color).to_html(false),
+							b, (table[b] as Color).to_html(false), d])
+		check("separation: %s%s min dE2000 %.1f (%s)" % [label,
+				"" if sim.is_empty() else " / " + sim, worst, worst_pair],
+				true, worst >= (floor_de if sim.is_empty() else cb_floor))
+
+
+## Brettel/Vienot dichromacy simulation through LMS. "" = normal vision.
+func _dichromat(c: Color, kind: String) -> Color:
+	if kind.is_empty():
+		return c
+	var lin := Vector3(_srgb_to_linear(c.r), _srgb_to_linear(c.g),
+			_srgb_to_linear(c.b))
+	var lms := Vector3(
+			0.31399022 * lin.x + 0.63951294 * lin.y + 0.04649755 * lin.z,
+			0.15537241 * lin.x + 0.75789446 * lin.y + 0.08670142 * lin.z,
+			0.01775239 * lin.x + 0.10944209 * lin.y + 0.87256922 * lin.z)
+	match kind:
+		"protanopia":
+			lms.x = 1.05118294 * lms.y - 0.05116099 * lms.z
+		"deuteranopia":
+			lms.y = 0.9513092 * lms.x + 0.04866992 * lms.z
+		"tritanopia":
+			lms.z = -0.86744736 * lms.x + 1.86727089 * lms.y
+	var back := Vector3(
+			5.47221206 * lms.x - 4.6419601 * lms.y + 0.16963708 * lms.z,
+			-1.1252419 * lms.x + 2.29317094 * lms.y - 0.1678952 * lms.z,
+			0.02980165 * lms.x - 0.19318073 * lms.y + 1.16364789 * lms.z)
+	return Color(_linear_to_srgb(back.x), _linear_to_srgb(back.y),
+			_linear_to_srgb(back.z))
+
+
+func _srgb_to_linear(v: float) -> float:
+	return v / 12.92 if v <= 0.04045 else pow((v + 0.055) / 1.055, 2.4)
+
+
+func _linear_to_srgb(v: float) -> float:
+	var c := clampf(v, 0.0, 1.0)
+	return c * 12.92 if c <= 0.0031308 else 1.055 * pow(c, 1.0 / 2.4) - 0.055
+
+
+## sRGB -> CIELAB (D65). Vector3(L, a, b).
+func _lab(c: Color) -> Vector3:
+	var r := _srgb_to_linear(c.r)
+	var g := _srgb_to_linear(c.g)
+	var b := _srgb_to_linear(c.b)
+	var xyz := Vector3(
+			(0.4124564 * r + 0.3575761 * g + 0.1804375 * b) / 0.95047,
+			0.2126729 * r + 0.7151522 * g + 0.0721750 * b,
+			(0.0193339 * r + 0.1191920 * g + 0.9503041 * b) / 1.08883)
+	var f := Vector3(_lab_f(xyz.x), _lab_f(xyz.y), _lab_f(xyz.z))
+	return Vector3(116.0 * f.y - 16.0, 500.0 * (f.x - f.y), 200.0 * (f.y - f.z))
+
+
+func _lab_f(t: float) -> float:
+	return pow(t, 1.0 / 3.0) if t > 0.008856 else (903.3 * t + 16.0) / 116.0
+
+
+## CIEDE2000. The perceptual metric, not the 1976 Euclidean one: Lab distance
+## badly over-rates saturated blues and under-rates near-neutrals, which are
+## exactly the two regions this palette deliberately uses.
+func _delta_e2000(p: Vector3, q: Vector3) -> float:
+	var c1 := Vector2(p.y, p.z).length()
+	var c2 := Vector2(q.y, q.z).length()
+	var cbar := (c1 + c2) * 0.5
+	var c7 := pow(cbar, 7.0)
+	var gg := 0.5 * (1.0 - sqrt(c7 / (c7 + pow(25.0, 7.0))))
+	var a1 := (1.0 + gg) * p.y
+	var a2 := (1.0 + gg) * q.y
+	var cp1 := Vector2(a1, p.z).length()
+	var cp2 := Vector2(a2, q.z).length()
+	var h1 := 0.0 if is_zero_approx(a1) and is_zero_approx(p.z) \
+			else fposmod(rad_to_deg(atan2(p.z, a1)), 360.0)
+	var h2 := 0.0 if is_zero_approx(a2) and is_zero_approx(q.z) \
+			else fposmod(rad_to_deg(atan2(q.z, a2)), 360.0)
+	var dl := q.x - p.x
+	var dc := cp2 - cp1
+	var dh := 0.0
+	if cp1 * cp2 > 0.0:
+		dh = wrapf(h2 - h1, -180.0, 180.0)
+	var dhh := 2.0 * sqrt(cp1 * cp2) * sin(deg_to_rad(dh * 0.5))
+	var lbar := (p.x + q.x) * 0.5
+	var cpbar := (cp1 + cp2) * 0.5
+	var hbar := h1 + h2
+	if cp1 * cp2 > 0.0:
+		hbar = h1 + wrapf(h2 - h1, -180.0, 180.0) * 0.5
+		hbar = fposmod(hbar, 360.0)
+	var t := 1.0 - 0.17 * cos(deg_to_rad(hbar - 30.0)) \
+			+ 0.24 * cos(deg_to_rad(2.0 * hbar)) \
+			+ 0.32 * cos(deg_to_rad(3.0 * hbar + 6.0)) \
+			- 0.20 * cos(deg_to_rad(4.0 * hbar - 63.0))
+	var cp7 := pow(cpbar, 7.0)
+	var rc := 2.0 * sqrt(cp7 / (cp7 + pow(25.0, 7.0)))
+	var sl := 1.0 + (0.015 * pow(lbar - 50.0, 2.0)) / sqrt(20.0 + pow(lbar - 50.0, 2.0))
+	var sc := 1.0 + 0.045 * cpbar
+	var sh := 1.0 + 0.015 * cpbar * t
+	var rt := -sin(deg_to_rad(2.0 * 30.0 * exp(-pow((hbar - 275.0) / 25.0, 2.0)))) * rc
+	return sqrt(pow(dl / sl, 2.0) + pow(dc / sc, 2.0) + pow(dhh / sh, 2.0)
+			+ rt * (dc / sc) * (dhh / sh))
 
 
 ## Widest half-extent of the character's head/skull mesh (model space).

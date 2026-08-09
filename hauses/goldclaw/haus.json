@@ -7,13 +7,13 @@
   "motto": "A lion settles every account.",
   "colors": {
     "primary": "#8e1f2c",
-    "secondary": "#d9a441",
-    "accent": "#f0c96a"
+    "secondary": "#e8bf3c",
+    "accent": "#f0c352"
   },
   "tints": {
-    "piece": "#d4a43c",
-    "tower": "#b8862f",
-    "kit": "#f0cc2a",
+    "piece": "#d6b055",
+    "tower": "#b39a4a",
+    "kit": "#e8bf3c",
     "saturation": 0.25
   },
   "coat": "chestnut",

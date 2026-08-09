@@ -8,12 +8,12 @@
   "colors": {
     "primary": "#c96a1e",
     "secondary": "#a3282a",
-    "accent": "#f0a03c"
+    "accent": "#f5b25a"
   },
   "tints": {
-    "piece": "#e07b2f",
-    "tower": "#c2691f",
-    "kit": "#e85f14",
+    "piece": "#e08c3a",
+    "tower": "#c07526",
+    "kit": "#ee7716",
     "saturation": 0.25
   },
   "coat": "liver_chestnut",

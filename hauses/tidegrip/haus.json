@@ -6,14 +6,14 @@
   "seat": "Brinehold",
   "motto": "The tide takes what it pleases.",
   "colors": {
-    "primary": "#4c6357",
-    "secondary": "#14181a",
-    "accent": "#7d9c8d"
+    "primary": "#12332e",
+    "secondary": "#8fdcc4",
+    "accent": "#1a2a28"
   },
   "tints": {
-    "piece": "#6f8a7d",
-    "tower": "#5d7568",
-    "kit": "#3f8a6d",
+    "piece": "#6fb5a0",
+    "tower": "#5c9987",
+    "kit": "#3ab793",
     "saturation": 0.25
   },
   "coat": "drowned_grey",
