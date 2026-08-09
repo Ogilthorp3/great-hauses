@@ -54,9 +54,22 @@ extends Node3D
 ##   EMISSIVE MATERIALS ONLY throughout (the hall's 8-omni budget is FULL:
 ##   this module adds NO Light3D nodes on any path). Click/Esc skips
 ##   straight to the tier's end state (all losers AND smoldering skeletons
-##   removed, camera + Engine.time_scale restored). time_scale hygiene
-##   mirrors DuelDirector: restored on normal end, skip, failsafe, and
-##   _exit_tree.
+##   removed, camera + Engine.time_scale + WorldEnvironment restored).
+##   time_scale hygiene mirrors DuelDirector: restored on normal end, skip,
+##   failsafe, and _exit_tree.
+##
+## THE FIRE is the DRACARYS kit (res://assets/vfx/dracarys.gd) since
+## 2026-08-09 — a six-layer torrent (core jet + rolling billows + embers and
+## ash that outlive the jet + ground fire + heat shimmer + camera/exposure
+## punch) mounted on rig.mouth_node(). It replaced this module's own
+## billboard stack, which a critic read as "bare opaque squares… JPEG
+## compression blocks, not embers". The kit creates ZERO Light3D nodes; its
+## only reach outside its own subtree is a WorldEnvironment exposure/glow
+## lift and a camera h_offset/v_offset/fov shake, both recorded on first
+## touch and restored unconditionally by cut(), hard_stop(), _exit_tree and
+## PREDELETE — there is no success-only restore path. A stuck exposure is a
+## shipping bug, so tests/test_cinematics.gd asserts the restore on the
+## normal end, on the skip, and on a spectator freed mid-torrent.
 ##
 ## Sequence order at checkmate: king death anim (DuelDirector checkmate
 ## cinematic) -> await play_ashfall(...) -> the existing championship /
@@ -68,6 +81,7 @@ signal ashfall_finished
 const DD := preload("res://src/cinematics/duel_director.gd")
 const DragonRigScript := preload("res://src/cinematics/dragon_rig.gd")
 const CaptionScript := preload("res://src/cinematics/cine_caption.gd")
+const DracarysScript := preload("res://assets/vfx/dracarys.gd")
 
 const PIECE_KING := 5              # PieceView.Type.KING — kings never burn twice
 const CHARCOAL := Color(0.09, 0.085, 0.08)
@@ -75,7 +89,19 @@ const EMBER_GLOW := Color(0.9, 0.28, 0.06)
 
 ## Championship throne perch — MUST equal GreatHall.DRAGON_HOVER (the hall
 ## is the authority; test_dragon.gd asserts the two stay in sync).
-const THRONE_PERCH := Vector3(0.0, 2.2, 9.9)
+## Raised 2026-08-09 by 1.15 × champ_scale (1.6) with the rest of the
+## origin-moved constants — see DragonRig.BODY_RISE.
+const THRONE_PERCH := Vector3(0.0, 4.04, 9.9)
+
+## THE BREATH, in clip time of `Rear_Breathe` (2.25 s, authored inhale →
+## held blast → recoil). The ceremony drives this playhead by hand off its
+## own wall clock — see DragonRig.play_manual for why no single speed works.
+const BREATH_LUNGE_END := 0.92    ## the uncoil lands; the jaws open
+const BREATH_HOLD_END := 1.33     ## end of the held blast
+const BREATH_CLIP_END := 2.25     ## recoil complete
+## Fraction of the breath phase spent lunging; the rest is the held blast
+## the fire sweeps under.
+const BREATH_LUNGE_FRAC := 0.25
 
 ## MORTAL-KOMBAT remains cast — the module's OWN local table (PieceAssets
 ## stays untouched by doctrine). Keyed by duck piece_type; anything not
@@ -98,7 +124,10 @@ const ASHFALL_LINES: Array[String] = [
 
 ## Perch pose (world space of this node's parent). Defaults match
 ## GreatHall.spectator_perch() with the board at the origin.
-@export var perch_position := Vector3(0.0, 4.7, 11.2)
+## Root y values below all carry the +1.15 × rig_scale lift the ground-origin
+## serpent-wyrm needs (DragonRig.BODY_RISE); each keeps the beast's BODY at
+## exactly the screen height the old mid-air-root rig read at.
+@export var perch_position := Vector3(0.0, 6.02, 11.2)   ## 4.70 + 1.15×1.15
 @export var perch_yaw := PI            ## face the board (-Z)
 @export var dragon_scale := 1.15
 @export var idle_speed := 0.55         ## slow Flying_Idle loop at the perch
@@ -128,13 +157,13 @@ const ASHFALL_LINES: Array[String] = [
 @export var ash_collapse_wall := 0.8   ## Death_A is retimed to fit this window
 @export var ash_char_wall := 0.4       ## tint -> charcoal (Tidegrip char-in-place)
 @export var ash_crumble_wall := 0.45   ## final sink into the stone, then freed
-@export var ash_hover_height := 0.0    ## root y while breathing (body reads ~2 u up)
-@export var ash_hover_backoff := 2.9   ## distance from the losers' centroid
+@export var ash_hover_height := 1.61   ## root y while breathing (0.00 + 1.15×1.4)
+@export var ash_hover_backoff := 3.6   ## distance from the losers' centroid
 @export var ashfall_slow_scale := 0.55
 @export var ceremony_scale := 1.4      ## the wyrm swells for the ceremony
 @export var champ_scale := 1.6         ## …and larger still upon the throne
 @export var bank_radius := 8.6         ## inside the ±12 walls and 10.6-radius pillars
-@export var bank_height := 3.5         ## bank floor — never below y≈3
+@export var bank_height := 5.11        ## bank floor root y (3.50 + 1.15×1.4)
 @export var failsafe_wall_sec := 18.0
 
 ## Integrator references (both duck-typed, both optional):
@@ -159,9 +188,7 @@ var _ash_skip := false
 var _ash_seq := 0
 var _prev_time_scale := 1.0
 var _ash_losers: Array = []
-var _flames: Array = []                # GPUParticles3D children of the mouth
-var _flame_core: GPUParticles3D = null
-var _flame_tail: Array = []            # embers + drifting ash (the lingering tail)
+var _fx: Node3D = null                 # DracarysVFX — the torrent (lazily built)
 var _remains: Array = []               # live skeleton entries: {node, anim, smoke, mats}
 var _drift: GPUParticles3D = null      # championship tableau ember drift
 var _champ_mode := false
@@ -198,7 +225,6 @@ func _ready() -> void:
 	_end_scale = dragon_scale
 	_end_idle_speed = idle_speed
 	_build_gaze()
-	_build_flame()
 	_glance_in = randf_range(glance_min_gap, glance_max_gap)
 
 
@@ -372,7 +398,10 @@ func play_ashfall(losing_side: int, winning_house: String = "",
 		# The awe shot: a low camera pulled back from the board — the wyrm
 		# wheels across the hall as a winged SILHOUETTE (this asset's
 		# majesty lives in its wingspan at distance, never in close-ups).
-		_cam_track(Vector3(0.0, 0.7, -4.5), _body_pos())
+		# It must stand in the AISLE, not on the board: at z -4.5 the dolly
+		# sat a single tile from the near rank and every ashfall frame was
+		# shot from inside somebody's helmet (found by eye, 2026-08-09).
+		_cam_track(Vector3(0.0, 1.35, -9.0), _body_pos())
 		if u >= 1.0:
 			break
 		var tree := get_tree()
@@ -382,7 +411,7 @@ func play_ashfall(losing_side: int, winning_house: String = "",
 
 	# ── III. THE FLARE — wing-spread hover above the board center ──
 	rig.play_loop("Flying_Idle", 0.6, 0.5)   # slow flap: the mighty hover
-	var hover_center := Vector3(0.0, 1.5, 0.0)
+	var hover_center := Vector3(0.0, 3.11, 0.0)   # 1.50 + 1.15×1.4 (root moved)
 	var f0_pos := position
 	var f0_yaw := rotation.y
 	var f0_roll := rotation.z
@@ -390,15 +419,16 @@ func play_ashfall(losing_side: int, winning_house: String = "",
 		position = f0_pos.lerp(hover_center, u) + Vector3.UP * sin(u * PI) * 0.5
 		rotation.y = lerp_angle(f0_yaw, PI, u)
 		rotation.z = lerpf(f0_roll, 0.0, u)
-		_cam_track(Vector3(0.0, 0.9, -5.8), _body_pos())
+		_cam_track(Vector3(0.0, 1.55, -9.6), _body_pos())
 	await _wall_lerp(seq, flare, 0.0, 1.0, ash_flare_wall)
 	if _ash_seq != seq or _ash_skip:
 		return
 
 	# ── IV. THE INHALE — one beat of stillness before the judgment ──
+	_ensure_fx()   # build the torrent now, off-screen, not on the ignition frame
 	var inhale := func(u: float) -> void:
 		position = hover_center + Vector3.UP * (0.18 * u)
-		_cam_track(Vector3(0.0, 0.95, -5.3), _body_pos())
+		_cam_track(Vector3(0.0, 1.7, -9.2), _body_pos())
 	await _wall_lerp(seq, inhale, 0.0, 1.0, ash_inhale_wall)
 	if _ash_seq != seq or _ash_skip:
 		return
@@ -410,12 +440,18 @@ func play_ashfall(losing_side: int, winning_house: String = "",
 	away.y = 0.0
 	away = away.normalized() if away.length() > 0.01 else Vector3.BACK
 	var breath_hover := Vector3(focus.x, ash_hover_height, focus.z) + away * ash_hover_backoff
-	rig.play_once("Headbutt", 1.4, 0.2)   # the lunge that opens the jet
-	_set_flame(true)
+	# `Rear_Breathe` is driven BY HAND: the lunge is played fast, then the
+	# held-blast pose is crawled through for the whole fire sweep (see
+	# DragonRig.play_manual). The jet ignites the frame the jaws reach the
+	# hold and cuts when the sweep ends — the beat the asset was authored for.
+	var manual := rig.play_manual("Rear_Breathe")
+	if not manual:
+		rig.play_once("Headbutt", 1.4, 0.2)   # ancient rigs without the clip
 	var order := _sweep_order(breath_hover)
 	var burned := {}
 	var line := _kill_line(winning_house)
 	var line_shown := false
+	var lit := false
 	var jet_side := (focus - breath_hover).cross(Vector3.UP)
 	jet_side = jet_side.normalized() if jet_side.length() > 0.01 else Vector3.RIGHT
 	var inhale_pos := position
@@ -423,20 +459,35 @@ func play_ashfall(losing_side: int, winning_house: String = "",
 	while _ash_seq == seq and not _ash_skip:
 		var u := clampf(float(Time.get_ticks_msec() - bt0) / (ash_breath_wall * 1000.0), 0.0, 1.0)
 		position = inhale_pos.lerp(breath_hover, clampf(u / 0.2, 0.0, 1.0))
-		var aim := _sweep_aim(order, u, focus)
+		if manual:
+			rig.seek_clip(_breath_clip_time(u))
+		# The blast: fire only while the jaws are open on the held pose.
+		var blasting := u >= BREATH_LUNGE_FRAC
+		var b := clampf((u - BREATH_LUNGE_FRAC) / maxf(1.0 - BREATH_LUNGE_FRAC, 0.001), 0.0, 1.0)
+		var aim := _sweep_aim(order, b, focus)
 		_aim_breath(aim, breath_hover)
+		if blasting and not lit:
+			lit = true
+			_fire_start(aim)
+		elif blasting:
+			_fire_aim(aim)
 		# Ignite each survivor as the jet passes its slot in the sweep.
-		var slot := int(floor(u * order.size() - 0.0001)) if order.size() > 0 else -1
+		var slot := (int(floor(b * order.size() - 0.0001)) if blasting else -1) \
+			if order.size() > 0 else -1
 		for i in range(0, slot + 1):
 			if not burned.has(i):
 				burned[i] = true
 				_incinerate(order[i], seq)
-		if not line_shown and u >= 0.45:
+		if not line_shown and u >= 0.55:
 			line_shown = true
 			caption.show_line(line)
-		_cam_track(focus + jet_side * 5.6 + Vector3.UP * 1.8
-			- (focus - breath_hover).normalized() * 1.6,
-			(focus + _body_pos()) * 0.5)
+		# Both subjects in one frame: the wyrm rearing and the army it is
+		# burning. Raised and pulled back 2026-08-09 — at UP*1.8 the dolly
+		# stood among the pieces and the head that the jet leaves was off
+		# the top of every blast frame.
+		_cam_track(focus + jet_side * 6.4 + Vector3.UP * 3.4
+			- (focus - breath_hover).normalized() * 2.6,
+			focus.lerp(_body_pos() + Vector3.UP * 1.5, 0.62))
 		if u >= 1.0:
 			break
 		var tree := get_tree()
@@ -453,19 +504,30 @@ func play_ashfall(losing_side: int, winning_house: String = "",
 	# ── VI. THE LINGER — the jet cuts; embers and drifting ash hang in
 	# the torchlight while the last of the burned fall. The wyrm departs
 	# only when the field is bones and ash (bounded).
-	if _flame_core != null:
-		_flame_core.emitting = false
-	rig.play_loop("Flying_Idle", 0.6, 0.4)
+	# cut() is the GRACEFUL stop: the jet retracts over 0.16 s while the
+	# embers, ash, ground fire and smoke live on for seconds — the lingering
+	# tail this phase exists to show. hard_stop() would kill them too.
+	_fire_cut()
+	_gaze_off()   # the head comes back off the aim point with the jet
+	var recoil_wall := minf(ash_linger_wall * 0.45, 0.65)
+	if not manual:
+		rig.play_loop("Flying_Idle", 0.6, 0.4)
 	var lt0 := Time.get_ticks_msec()
 	while _ash_seq == seq and not _ash_skip:
 		var el := float(Time.get_ticks_msec() - lt0) / 1000.0
-		if el >= ash_linger_wall * 0.7:
-			_set_flame_tail(false)   # emitters stop; live particles drift on
+		# The recoil out of the blast, then back to the hover loop.
+		if manual:
+			if el < recoil_wall:
+				rig.seek_clip(lerpf(BREATH_HOLD_END, BREATH_CLIP_END,
+					clampf(el / maxf(recoil_wall, 0.001), 0.0, 1.0)))
+			else:
+				manual = false
+				rig.play_loop("Flying_Idle", 0.6, 0.4)
 		if el >= ash_linger_wall and (_field_resolved() or el >= ash_linger_wall + 2.2):
 			break
-		_cam_track(focus + jet_side * 3.8 + Vector3.UP * 1.2
-			- (focus - breath_hover).normalized() * 0.8,
-			focus + Vector3.UP * 0.45)
+		_cam_track(focus + jet_side * 4.4 + Vector3.UP * 2.2
+			- (focus - breath_hover).normalized() * 1.4,
+			focus + Vector3.UP * 0.7)
 		var tree := get_tree()
 		if tree == null:
 			return
@@ -553,7 +615,8 @@ func _ash_finish(seq: int) -> void:
 		return
 	_ash_active = false
 	Engine.time_scale = _prev_time_scale
-	_set_flame(false)
+	_fire_stop()   # THE SKIP: clears every particle AND restores env + camera
+	_gaze_off()
 	if caption != null:
 		caption.hide_line()
 	for p in _ash_losers:   # end state: every loser gone, skipped or not
@@ -580,10 +643,12 @@ func _ash_finish(seq: int) -> void:
 
 func _exit_tree() -> void:
 	## Finally-style guarantee: a freed spectator never strands a slowed
-	## clock or a stolen viewport (the DuelDirector hygiene rule).
+	## clock, a stolen viewport or a lifted exposure (the DuelDirector
+	## hygiene rule, extended to the dracarys environment lift).
 	if _ash_active:
 		_ash_active = false
 		Engine.time_scale = _prev_time_scale
+	_fire_stop()
 	for entry in _remains:   # remains live outside this subtree — free them
 		var n = entry.get("node")
 		if is_instance_valid(n):
@@ -683,22 +748,39 @@ func _sweep_aim(order: Array, u: float, fallback: Vector3) -> Vector3:
 	return (pts[i] as Vector3).lerp(pts[i + 1], f - float(i))
 
 
+## Wall-clock progress through the breath phase (0..1) -> `Rear_Breathe`
+## playhead in seconds. Two segments:
+##   u < BREATH_LUNGE_FRAC : clip 0.00 -> 0.92, the cock-back and uncoil,
+##                           played FASTER than authored so the lunge snaps
+##   u >= BREATH_LUNGE_FRAC: clip 0.92 -> 1.33, THE HELD BLAST, crawled
+##                           through so the open-jawed pose covers the whole
+##                           fire sweep instead of 0.41 s of it
+## The recoil (1.33 -> 2.25) is played out by the linger phase.
+static func _breath_clip_time(u: float) -> float:
+	if u < BREATH_LUNGE_FRAC:
+		return BREATH_LUNGE_END * clampf(u / BREATH_LUNGE_FRAC, 0.0, 1.0)
+	var b := clampf((u - BREATH_LUNGE_FRAC) / maxf(1.0 - BREATH_LUNGE_FRAC, 0.001), 0.0, 1.0)
+	return lerpf(BREATH_LUNGE_END, BREATH_HOLD_END, b)
+
+
 func _yaw_toward(from: Vector3, to: Vector3) -> float:
 	var d := to - from
 	return atan2(d.x, d.z)   # native forward is +Z
 
 
+## Turn the whole beast onto the aim point and crank the HEAD after it, so
+## the torrent leaves a snout that is actually pointing at what it burns.
+##
+## The mouth node's own basis is deliberately NOT overwritten any more: the
+## dracarys kit aims from the muzzle's ORIGIN to the world target itself, and
+## writing a basis onto a BoneAttachment3D child only fights the animation
+## that owns the head bone. The LookAtModifier3D already on the Head bone is
+## the right instrument — it is limited, eased, and blends with the clip.
 func _aim_breath(aim: Vector3, hover: Vector3) -> void:
 	rotation.y = _yaw_toward(hover, aim)
-	var mouth := rig.mouth_node()
-	if mouth == null:
-		return
-	var dir := aim - mouth.global_position
-	if dir.length() < 0.05:
-		return
-	# Mouth convention: +Z points out of the jaws — looking_at(-dir) puts
-	# -Z on -dir, i.e. +Z onto the target.
-	mouth.global_basis = Basis.looking_at(-dir.normalized(), Vector3.UP)
+	if _look != null and is_instance_valid(_look) and _gaze_target != null:
+		_gaze_target.global_position = aim
+		_look.influence = 0.85
 
 
 # ── MORTAL-KOMBAT INCINERATION ─────────────────────────────────────────────
@@ -956,86 +1038,129 @@ func _field_resolved() -> bool:
 	return _remains.is_empty()
 
 
-# ── flame (emissive particles ONLY — no Light3D on any path) ───────────────
-# Builder lives in DragonRig.spawn_emitter (shared with the hall's tableau
-# ember drift). The core jet cuts with the breath; embers + drifting ash
-# are the LINGERING TAIL — long lifetimes carry them 3-4 s past the jet.
+# ── THE FIRE — the DRACARYS kit (res://assets/vfx/dracarys.gd) ─────────────
+# Six layers: core jet, rolling billows, embers + ash that outlive the jet,
+# ground fire, heat shimmer, impact punch. It creates NO Light3D — firelight
+# is HDR emissive particles plus an additive glow quad lying on the stone.
+# The only state it touches outside its own subtree is the WorldEnvironment
+# exposure/glow lift and the camera shake offsets, and BOTH are restored
+# unconditionally by cut(), hard_stop(), _exit_tree and PREDELETE.
+#
+# Built lazily on the inhale beat: this module is instanced by every unit
+# test and every match, and only a checkmate ever needs 3 280 particles.
 
 
-func _set_flame(on: bool) -> void:
-	for f in _flames:
-		if is_instance_valid(f):
-			f.emitting = on
+## Build (once) and bind the torrent. Safe to call repeatedly.
+func _ensure_fx() -> void:
+	if _fx != null and is_instance_valid(_fx):
+		_bind_fx()
+		return
+	if rig == null or rig.mouth_node() == null:
+		return
+	_fx = DracarysScript.new()
+	_fx.name = "Dracarys"
+	# Parented to the spectator, which never scales (the RIG scales) — the
+	# kit drives its muzzle by GLOBAL transform, so position/rotation of this
+	# node are compensated but a parent scale would not be.
+	add_child(_fx)
+	# Board scale, not the demo stage: the losing army is ~8x2 tiles, so the
+	# sweep wants ~4 tiles of reach, not the kit's 9 m default (its README
+	# §7 hand-over asks for exactly this re-tune).
+	_fx.reach = 4.2
+	_fx.torrent_spread = 13.0
+	_fx.ember_tail = 3.2
+	_fx.ash_tail = 3.0
+	# The kit's stock HDR values were tuned against a stand-in stage at 9 m;
+	# fired six units across a small dark hall they bloom the stone walls
+	# white. Trimmed by eye and by measurement (2026-08-09).
+	_fx.intensity = 0.66
+	# The punches are driven here rather than by auto_punch so the hall gets
+	# a KICK, not a new exposure setting: the stock 1.24× exposure + 0.40
+	# glow lifted the whole room a full stop.
+	_fx.auto_punch = false
+	_bind_fx()
 
 
-func _set_flame_tail(on: bool) -> void:
-	for f in _flame_tail:
-		if is_instance_valid(f):
-			f.emitting = on
+## (Re)bind the live camera, the hall's WorldEnvironment and the floor the
+## ground pool lies on. Cheap; done at every ignition because the ceremony
+## camera is taken and released around it.
+func _bind_fx() -> void:
+	if _fx == null or not is_instance_valid(_fx):
+		return
+	var cam: Camera3D = _cine_cam if _cam_live else null
+	if cam == null:
+		var vp := get_viewport()
+		cam = vp.get_camera_3d() if vp != null else null
+	_fx.bind_camera(cam)
+	_fx.bind_environment(_world_env())
+	_fx.floor_y = _fire_floor_y()
 
 
-func _build_flame() -> void:
+func _world_env() -> WorldEnvironment:
+	var tree := get_tree()
+	if tree == null:
+		return null
+	var found := tree.root.find_children("*", "WorldEnvironment", true, false)
+	return found[0] as WorldEnvironment if not found.is_empty() else null
+
+
+## Where the ground pool lies: the board's top face when the integrator gave
+## us a board, otherwise the burning army's own footing.
+func _fire_floor_y() -> float:
+	if board != null and is_instance_valid(board) and board.has_method("square_to_world"):
+		var local: Vector3 = board.square_to_world(Vector2i(0, 0))
+		return (board as Node3D).to_global(local).y if board is Node3D else local.y
+	var lo := INF
+	for p in _ash_losers:
+		if is_instance_valid(p) and p is Node3D:
+			lo = minf(lo, (p as Node3D).global_position.y)
+	return 0.0 if lo == INF else lo
+
+
+func _fire_start(aim: Vector3) -> void:
+	_ensure_fx()
+	if _fx == null or not is_instance_valid(_fx):
+		return
+	_bind_fx()
 	var mouth := rig.mouth_node()
 	if mouth == null:
 		return
-	# Core jet: fat additive tongues, white-gold -> orange-red -> gone.
-	_flame_core = DragonRigScript.spawn_emitter(mouth, "FlameCore", {
-		"amount": 150, "lifetime": 0.55, "size": 0.34,
-		"velocity": Vector2(6.5, 9.0), "spread": 9.0,
-		"gravity": Vector3(0.0, 1.4, 0.0), "grow": 2.6,
-		"ramp": [
-			[0.0, Color(1.0, 0.93, 0.6, 0.0)],
-			[0.12, Color(1.0, 0.85, 0.4, 0.95)],
-			[0.5, Color(1.0, 0.42, 0.1, 0.8)],
-			[0.85, Color(0.7, 0.16, 0.03, 0.35)],
-			[1.0, Color(0.25, 0.05, 0.01, 0.0)],
-		],
-		"blend": BaseMaterial3D.BLEND_MODE_ADD, "emission_energy": 2.6,
-	})
-	_flames.append(_flame_core)
-	# Ember sparks: hot chips thrown past the jet — long-lived, they rain
-	# and drift well after the breath ends.
-	var embers := DragonRigScript.spawn_emitter(mouth, "Embers", {
-		"amount": 110, "lifetime": 2.4, "size": 0.07,
-		"velocity": Vector2(4.5, 8.5), "spread": 17.0,
-		"gravity": Vector3(0.0, -1.7, 0.0), "grow": 0.7,
-		"ramp": [
-			[0.0, Color(1.0, 0.75, 0.3, 1.0)],
-			[0.45, Color(1.0, 0.4, 0.08, 0.9)],
-			[1.0, Color(0.5, 0.1, 0.02, 0.0)],
-		],
-		"blend": BaseMaterial3D.BLEND_MODE_ADD, "emission_energy": 3.2,
-	})
-	_flames.append(embers)
-	_flame_tail.append(embers)
-	# Drifting ash: grey flakes that hang in the torchlight and settle
-	# slowly over the burned ground — the ceremony's aftertaste.
-	var ash := DragonRigScript.spawn_emitter(mouth, "AshDrift", {
-		"amount": 90, "lifetime": 3.4, "size": 0.09,
-		"velocity": Vector2(2.0, 5.0), "spread": 26.0,
-		"gravity": Vector3(0.0, -1.0, 0.0), "grow": 0.5,
-		"ramp": [
-			[0.0, Color(0.35, 0.33, 0.3, 0.0)],
-			[0.15, Color(0.4, 0.37, 0.33, 0.8)],
-			[1.0, Color(0.12, 0.11, 0.1, 0.0)],
-		],
-		"blend": BaseMaterial3D.BLEND_MODE_MIX, "emission_energy": 0.0,
-	})
-	_flames.append(ash)
-	_flame_tail.append(ash)
-	# Smoke wisps: unshaded soot, no emission, rises off the jet's tail.
-	# (Kept small and faint — big translucent quads read blocky in stills.)
-	_flames.append(DragonRigScript.spawn_emitter(mouth, "Smoke", {
-		"amount": 42, "lifetime": 1.6, "size": 0.42,
-		"velocity": Vector2(1.8, 3.0), "spread": 24.0,
-		"gravity": Vector3(0.0, 1.1, 0.0), "grow": 2.6,
-		"ramp": [
-			[0.0, Color(0.12, 0.1, 0.09, 0.0)],
-			[0.25, Color(0.14, 0.12, 0.11, 0.26)],
-			[1.0, Color(0.05, 0.05, 0.05, 0.0)],
-		],
-		"blend": BaseMaterial3D.BLEND_MODE_MIX, "emission_energy": 0.0,
-	}))
+	# `duration` is the jet's own length; the ceremony cuts it by hand at the
+	# end of the sweep, so ask for a hair more than the sweep can take.
+	_fx.start(mouth, aim, ash_breath_wall + 1.0)
+	# LAYER 6, hand-driven (auto_punch is off — see _ensure_fx). The camera
+	# shake writes only h_offset/v_offset/fov, so the ceremony dolly keeps
+	# working underneath it; both punches record-and-restore.
+	var cam: Camera3D = _cine_cam if _cam_live else null
+	if cam == null:
+		var vp := get_viewport()
+		cam = vp.get_camera_3d() if vp != null else null
+	if cam != null:
+		_fx.punch_camera(cam, 0.09, 0.55, 24.0, 1.7)
+	var we := _world_env()
+	if we != null:
+		_fx.punch_exposure(we, ash_breath_wall, 1.06, 0.10, 0.05, 0.07)
+
+
+func _fire_aim(aim: Vector3) -> void:
+	if _fx == null or not is_instance_valid(_fx) or not _fx.is_active():
+		return
+	var mouth := rig.mouth_node()
+	if mouth != null:
+		_fx.aim(mouth, aim)   # sweeping the beam across the army
+
+
+## The graceful stop: the jet retracts, the tail lives on.
+func _fire_cut() -> void:
+	if _fx != null and is_instance_valid(_fx) and _fx.is_active():
+		_fx.cut()
+
+
+## THE SKIP: instant clear + full camera/environment restore. Idempotent, and
+## safe when nothing ever fired.
+func _fire_stop() -> void:
+	if _fx != null and is_instance_valid(_fx):
+		_fx.hard_stop()
 
 
 ## Championship tableau: a gentle ember drift over the throne. Created
@@ -1060,7 +1185,8 @@ func _ensure_drift() -> void:
 		],
 		"blend": BaseMaterial3D.BLEND_MODE_ADD, "emission_energy": 2.2,
 	})
-	_drift.position = Vector3.UP * 3.2
+	# Rig-local, so it rides the ground-origin root: just over the back.
+	_drift.position = Vector3.UP * (DragonRigScript.BODY_RISE + 1.10)
 	_drift.emitting = true
 
 
@@ -1126,11 +1252,14 @@ func _cam_release() -> void:
 # ── ceremony misc ──────────────────────────────────────────────────────────
 
 
-## Where the beast's body reads on screen: the rig ships mid-flight, the
-## torso floating ~2 u above the armature root (scaled).
+## Where the beast's body reads on screen. The serpent-wyrm's armature root
+## sits ON THE GROUND between its feet; the torso/chest mass centre is
+## DragonRig.BODY_RISE (0.95, measured) above it, scaled. (Was 2.1 — the old
+## Quaternius rig hung its mesh around a mid-air root. Every ceremony height
+## moved with this constant; see DragonRig's header for the conversion.)
 func _body_pos() -> Vector3:
 	var s := rig.scale.x if rig != null else 1.0
-	return global_position + Vector3.UP * (2.1 * s)
+	return global_position + Vector3.UP * (DragonRigScript.BODY_RISE * s)
 
 
 ## Concurrent scale swell — a tween, never a pop.

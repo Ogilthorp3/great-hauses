@@ -22,7 +22,17 @@ var checks_run := 0
 ## A hard-erroring test function aborts silently at the error and its await
 ## resumes as if it finished — the floor turns silent aborts into a loud
 ## failure (same guard as test_cinematics.gd).
-const MIN_EXPECTED_CHECKS := 105
+const MIN_EXPECTED_CHECKS := 125
+
+## THE SERPENT-WYRM CONTRACT (dragon-v2, installed 2026-08-09). Asserted
+## against the names GODOT ends up with, never the ones the GLB was authored
+## with: the importer silently strips a trailing _Cycle/_Loop, so the asset's
+## `Flap_Cycle` arrives as `Flap`, and a suite that trusted the Blender-side
+## name would pass while the game called a clip that does not exist.
+const REQUIRED_CLIPS: Array[String] = [
+	"Flying_Idle", "Fast_Flying", "Headbutt", "Rear_Breathe",
+	"Perch_Idle", "Glide", "Land_Settle", "Roar", "HitReact", "Yes", "No",
+]
 
 
 class Duck:
@@ -64,6 +74,9 @@ func _main() -> void:
 	var lights_before := _light_count()
 	_test_kill_lines()
 	_test_ceremony_budgets()
+	_test_origin_moved()
+	await _test_rig_contract()
+	await _test_fire_wiring()
 	await _test_rate_limit_and_gate()
 	await _test_ashfall_completion()
 	await _test_ashfall_duck_scan()
@@ -518,3 +531,122 @@ func _test_ashfall_free_restore() -> void:
 	for l in losers:
 		if is_instance_valid(l):
 			l.free()
+
+
+## THE ORIGIN MOVED (dragon-v2). Pure arithmetic on the shipped constants:
+## the serpent-wyrm's Root sits ON THE GROUND between its feet instead of in
+## mid-air, so every hardcoded dragon height moved by +1.15 x rig_scale. The
+## invariant worth locking is not the raw numbers — it is that the BODY still
+## reads at the height the ceremony was staged for. Getting this wrong buries
+## the beast in the floor or parks it in the rafters, and neither shows up as
+## a failing assertion anywhere else.
+func _test_origin_moved() -> void:
+	var Rig := preload("res://src/cinematics/dragon_rig.gd")
+	check("origin: BODY_RISE is the measured mass centre", true,
+			is_equal_approx(Rig.BODY_RISE, 0.95))
+	var s: DragonSpectator = Spectator.new()   # never enters the tree
+	# body height = root + BODY_RISE * scale, per pose, vs the old rig's
+	# (old_root + 2.10 * scale). Same screen height on both sides.
+	var pairs := [
+		["perch", s.perch_position.y, s.dragon_scale, 4.70],
+		["breath hover", s.ash_hover_height, s.ceremony_scale, 0.00],
+		["bank", s.bank_height, s.ceremony_scale, 3.50],
+		["throne", Spectator.THRONE_PERCH.y, s.champ_scale, 2.20],
+	]
+	for p: Array in pairs:
+		var now: float = float(p[1]) + Rig.BODY_RISE * float(p[2])
+		var was: float = float(p[3]) + 2.10 * float(p[2])
+		check("origin: %s body height unchanged (%.2f)" % [p[0], now], true,
+				absf(now - was) < 0.02)
+	check("origin: throne perch still equals the hall's hover", true,
+			Spectator.THRONE_PERCH == GH.DRAGON_HOVER)
+	# The hall's own perch anchor is what game.gd feeds the spectator; if the
+	# two drift, the module lifts and the hall does not.
+	var hall: GreatHall = GH.new()
+	check("origin: spectator default matches the hall anchor", true,
+			absf(hall.spectator_perch().y - s.perch_position.y) < 0.02)
+	hall.free()
+	# The breath playhead map: monotonic, starts at 0, and spends the whole
+	# fire sweep inside the authored HELD BLAST window.
+	var mono := true
+	var prev := -1.0
+	for i in 21:
+		var t: float = Spectator._breath_clip_time(float(i) / 20.0)
+		if t < prev - 0.0001:
+			mono = false
+		prev = t
+	check("breath: clip time is monotonic", true, mono)
+	check("breath: starts at the top of the clip", true,
+			is_equal_approx(Spectator._breath_clip_time(0.0), 0.0))
+	check("breath: jaws open exactly at the lunge hand-off", true,
+			is_equal_approx(Spectator._breath_clip_time(Spectator.BREATH_LUNGE_FRAC),
+				Spectator.BREATH_LUNGE_END))
+	check("breath: the sweep ends on the held blast, not past it", true,
+			is_equal_approx(Spectator._breath_clip_time(1.0), Spectator.BREATH_HOLD_END))
+	s.free()
+
+
+## The rig contract, read out of the LIVE AnimationPlayer and Skeleton3D.
+func _test_rig_contract() -> void:
+	var s := _fast_spectator()
+	await process_frame
+	check("rig: AnimationPlayer found", true, s.rig != null and s.rig.anim != null)
+	for clip: String in REQUIRED_CLIPS:
+		check("rig: clip '%s' exists Godot-side" % clip, true, s.rig.has_clip(clip))
+	# The three deliberate aliases must stay interchangeable, or the incumbent
+	# call sites silently no-op (play_once/play_loop swallow a missing clip).
+	check("rig: Hover == Flying_Idle length", true,
+			is_equal_approx(s.rig.clip_length("Hover"), s.rig.clip_length("Flying_Idle")))
+	check("rig: Flap == Fast_Flying length", true,
+			is_equal_approx(s.rig.clip_length("Flap"), s.rig.clip_length("Fast_Flying")))
+	check("rig: Headbutt == Rear_Breathe length", true,
+			is_equal_approx(s.rig.clip_length("Headbutt"), s.rig.clip_length("Rear_Breathe")))
+	check("rig: the blast hold fits inside Rear_Breathe", true,
+			s.rig.clip_length("Rear_Breathe") >= Spectator.BREATH_CLIP_END - 0.01)
+	# Skeleton + the fire mount.
+	check("rig: skeleton found", true, s.rig.skeleton != null)
+	check("rig: Head bone", true, s.rig.skeleton.find_bone("Head") != -1)
+	check("rig: Head_end bone", true, s.rig.skeleton.find_bone("Head_end") != -1)
+	var mouth := s.rig.mouth_node()
+	check("rig: mouth mount resolves", true, mouth != null)
+	check("rig: mouth mount is offset down the head bone (not at the origin)",
+			true, mouth != null and mouth.position.length() > 0.05)
+	check("rig: hand-driven playhead accepted", true, s.rig.play_manual("Rear_Breathe"))
+	s.rig.seek_clip(Spectator.BREATH_LUNGE_END)
+	check("rig: seek parks the playhead on the blast", true,
+			absf(s.rig.anim.current_animation_position - Spectator.BREATH_LUNGE_END) < 0.05)
+	s.free()
+	await process_frame
+
+
+## The DRACARYS wiring: the kit is built lazily, mounted on the mouth, fired
+## by the ceremony, and left INACTIVE with no Light3D behind it.
+func _test_fire_wiring() -> void:
+	var lights_before := _light_count()
+	var s := _fast_spectator()
+	await process_frame
+	check("fire: not built before a ceremony needs it", true, s.get("_fx") == null)
+	var losers := _spawn_army(1, 3, 1.5)
+	var saw_fire := {"v": false}
+	var runner := func() -> void:
+		await s.play_ashfall(1, "House Winterfang", losers)
+	runner.call()
+	var sampler := func() -> void:
+		while is_instance_valid(s) and s.is_ashfall_active():
+			var fx = s.get("_fx")
+			if fx != null and is_instance_valid(fx) and fx.is_active():
+				saw_fire["v"] = true
+			await process_frame
+	sampler.call()
+	var done: bool = await _wait_until(func() -> bool: return not s.is_ashfall_active(), 10.0)
+	check("fire: ceremony completed", true, done)
+	check("fire: the torrent actually ignited", true, saw_fire["v"])
+	var fx = s.get("_fx")
+	check("fire: kit built and mounted", true, fx != null and is_instance_valid(fx))
+	check("fire: inactive once the ceremony ends", false,
+			fx != null and is_instance_valid(fx) and fx.is_active())
+	check("fire: no Light3D anywhere in the kit", 0,
+			(fx as Node).find_children("*", "Light3D", true, false).size() if fx != null else 0)
+	s.free()
+	await process_frame
+	check("fire: no Light3D added by the whole fire path", lights_before, _light_count())

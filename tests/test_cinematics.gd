@@ -3,10 +3,21 @@ extends SceneTree
 # Headless unit tests for DuelDirector — focused on Engine.time_scale
 # hygiene: the restore MUST hold on every exit path (normal end, skip,
 # failsafe overrun, director freed mid-cinematic) plus the kill-line pool.
+#
+# Since 2026-08-09 this suite also owns the DRACARYS RESTORE CONTRACT. The
+# fire kit lifts the hall's WorldEnvironment (tonemap exposure, glow,
+# ambient) and shakes the camera (h_offset / v_offset / fov) at ignition. A
+# STUCK EXPOSURE IS A SHIPPING BUG — the whole hall would stay a stop
+# brighter for the rest of the session — so the restore is asserted on every
+# exit path there is: the normal end of the ceremony, the click/Esc skip
+# mid-torrent, and the spectator being freed mid-torrent (the error path).
+# The lift is also asserted to be REAL mid-shot, or the three restore
+# assertions could all pass vacuously against an effect that never fired.
 # Run: /Applications/Godot.app/Contents/MacOS/Godot --headless --path <project> -s res://tests/test_cinematics.gd
 # Exit code 0 = all green, 1 = failures.
 
 const DD := preload("res://src/cinematics/duel_director.gd")
+const Spectator := preload("res://src/cinematics/dragon_spectator.gd")
 const LINES_PATH := "res://src/cinematics/kill_lines.json"
 
 var failures := 0
@@ -15,7 +26,7 @@ var checks_run := 0
 ## A hard-erroring test function aborts silently at the error and its await
 ## resumes as if it finished — so "no FAIL lines" is NOT proof the suite ran.
 ## This floor turns silently-aborted tests into a loud failure.
-const MIN_EXPECTED_CHECKS := 30
+const MIN_EXPECTED_CHECKS := 55
 
 
 class Duck:
@@ -41,6 +52,13 @@ func _main() -> void:
 	await _test_failsafe_restore()
 	await _test_promotion_restore()
 	await _test_checkmate_restore()
+	var lights_before := _light_count()
+	await _test_dracarys_lift_is_real()
+	await _test_dracarys_restore_normal()
+	await _test_dracarys_restore_skip()
+	await _test_dracarys_restore_free()
+	check("dracarys: no Light3D added by the fire on any path",
+			lights_before, _light_count())
 	check("final: time_scale is 1.0", true, is_equal_approx(Engine.time_scale, 1.0))
 	check("final: no test silently aborted (checks >= %d)" % MIN_EXPECTED_CHECKS,
 			true, checks_run >= MIN_EXPECTED_CHECKS)
@@ -259,3 +277,196 @@ func _test_checkmate_restore() -> void:
 	check("checkmate: inactive after", false, d.is_active())
 	d.free()
 	king.free()
+
+
+# ── DRACARYS RESTORE CONTRACT ──────────────────────────────────────────────
+# The fire kit's only reach outside its own subtree is the WorldEnvironment
+# lift and the camera shake. Both are recorded on first touch and must come
+# back EXACTLY, on every exit path. These tests stage a real ceremony over a
+# real Environment and a real Camera3D, then compare field by field.
+
+
+class Duck3D:
+	extends Node3D
+	## Minimal PieceView-shaped loser (the duck fields DragonSpectator reads).
+	var piece_type := 0
+	var side := 1
+
+	func _init() -> void:
+		var mi := MeshInstance3D.new()
+		mi.mesh = CapsuleMesh.new()
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = Color(0.8, 0.4, 0.3)
+		mi.material_override = mat
+		add_child(mi)
+
+
+func _light_count() -> int:
+	return root.find_children("*", "Light3D", true, false).size()
+
+
+## The stage: a WorldEnvironment with a torch-lit-hall-shaped Environment, a
+## current Camera3D, a fast spectator and three warriors to burn.
+func _fire_stage(breath: float) -> Dictionary:
+	var env := Environment.new()
+	env.background_mode = Environment.BG_COLOR
+	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	env.tonemap_exposure = 1.12
+	env.glow_enabled = true
+	env.glow_intensity = 0.35
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	env.ambient_light_color = Color(0.3, 0.275, 0.265)
+	env.ambient_light_energy = 0.66
+	var we := WorldEnvironment.new()
+	we.environment = env
+	root.add_child(we)
+	var cam := Camera3D.new()
+	cam.fov = 50.0
+	root.add_child(cam)
+	cam.current = true
+	var s: DragonSpectator = Spectator.new()
+	s.ash_ramp_wall = 0.05
+	s.ash_bank_wall = 0.15
+	s.ash_flare_wall = 0.06
+	s.ash_inhale_wall = 0.06
+	s.ash_breath_wall = breath
+	s.ash_linger_wall = 0.12
+	s.ash_return_wall = 0.08
+	s.ash_flash_wall = 0.03
+	s.ash_smolder_wall = 0.06
+	s.ash_collapse_wall = 0.06
+	s.ash_char_wall = 0.04
+	s.ash_crumble_wall = 0.04
+	s.failsafe_wall_sec = 12.0
+	root.add_child(s)
+	var losers: Array = []
+	for i in 3:
+		var d := Duck3D.new()
+		root.add_child(d)
+		d.position = Vector3(-1.5 + i * 1.5, 0.0, 1.5)
+		losers.append(d)
+	return {"env": env, "we": we, "cam": cam, "s": s, "losers": losers,
+		"saved": _env_snapshot(env), "cam_saved": _cam_snapshot(cam)}
+
+
+func _env_snapshot(env: Environment) -> Array:
+	return [env.tonemap_exposure, env.glow_enabled, env.glow_intensity,
+		env.glow_bloom, env.ambient_light_source, env.ambient_light_energy,
+		env.ambient_light_color]
+
+
+func _cam_snapshot(cam: Camera3D) -> Array:
+	return [cam.h_offset, cam.v_offset, cam.fov]
+
+
+func _env_restored(tag: String, stage: Dictionary) -> void:
+	var env: Environment = stage["env"]
+	check("%s: tonemap_exposure restored" % tag, stage["saved"][0], env.tonemap_exposure)
+	check("%s: glow_enabled restored" % tag, stage["saved"][1], env.glow_enabled)
+	check("%s: glow_intensity restored" % tag, stage["saved"][2], env.glow_intensity)
+	check("%s: glow_bloom restored" % tag, stage["saved"][3], env.glow_bloom)
+	check("%s: ambient_source restored" % tag, stage["saved"][4], env.ambient_light_source)
+	check("%s: ambient_energy restored" % tag, stage["saved"][5], env.ambient_light_energy)
+	check("%s: ambient_color restored" % tag, stage["saved"][6], env.ambient_light_color)
+
+
+func _cam_restored(tag: String, stage: Dictionary) -> void:
+	var cam: Camera3D = stage["cam"]
+	if not is_instance_valid(cam):
+		return
+	check("%s: camera h_offset restored" % tag, stage["cam_saved"][0], cam.h_offset)
+	check("%s: camera v_offset restored" % tag, stage["cam_saved"][1], cam.v_offset)
+	check("%s: camera fov restored" % tag, stage["cam_saved"][2], cam.fov)
+
+
+func _teardown_stage(stage: Dictionary) -> void:
+	for n in [stage["s"], stage["cam"], stage["we"]]:
+		if is_instance_valid(n):
+			n.free()
+	for l in stage["losers"]:
+		if is_instance_valid(l):
+			l.free()
+	await process_frame
+
+
+## The lift must be DEMONSTRABLY real mid-shot, or every restore assertion
+## below could pass against an effect that never fired.
+func _test_dracarys_lift_is_real() -> void:
+	var stage := _fire_stage(1.6)
+	var s: DragonSpectator = stage["s"]
+	var env: Environment = stage["env"]
+	var base: float = env.tonemap_exposure
+	var peak := {"exp": base, "glow": env.glow_intensity}
+	var runner := func() -> void:
+		await s.play_ashfall(1, "House Winterfang", stage["losers"])
+	runner.call()
+	var sampler := func() -> void:
+		while is_instance_valid(s) and s.is_ashfall_active():
+			peak["exp"] = maxf(peak["exp"], env.tonemap_exposure)
+			peak["glow"] = maxf(peak["glow"], env.glow_intensity)
+			await process_frame
+	sampler.call()
+	var done: bool = await _wait_until(
+		func() -> bool: return not s.is_ashfall_active(), 15.0)
+	check("lift: ceremony completed", true, done)
+	check("lift: exposure demonstrably kicked mid-shot", true, peak["exp"] > base * 1.02)
+	check("lift: glow demonstrably kicked mid-shot", true,
+			peak["glow"] > stage["saved"][2] + 0.01)
+	await _teardown_stage(stage)
+
+
+func _test_dracarys_restore_normal() -> void:
+	var stage := _fire_stage(0.6)
+	var s: DragonSpectator = stage["s"]
+	await s.play_ashfall(1, "House Winterfang", stage["losers"])
+	await process_frame
+	await process_frame
+	check("fire-normal: ceremony inactive", false, s.is_ashfall_active())
+	_env_restored("fire-normal", stage)
+	_cam_restored("fire-normal", stage)
+	check("fire-normal: time_scale restored", true, is_equal_approx(Engine.time_scale, 1.0))
+	await _teardown_stage(stage)
+
+
+func _test_dracarys_restore_skip() -> void:
+	## THE SKIP: click/Esc mid-torrent must snap the environment back, not
+	## leave the hall a stop brighter for the rest of the session.
+	var stage := _fire_stage(4.0)   # long breath so there is a torrent to skip
+	var s: DragonSpectator = stage["s"]
+	var env: Environment = stage["env"]
+	var runner := func() -> void:
+		await s.play_ashfall(1, "House Winterfang", stage["losers"])
+	runner.call()
+	var lifted: bool = await _wait_until(
+		func() -> bool: return env.tonemap_exposure > stage["saved"][0] * 1.02, 8.0)
+	check("fire-skip: torrent lifted the environment first", true, lifted)
+	s.skip()
+	await process_frame
+	await process_frame
+	check("fire-skip: ceremony inactive", false, s.is_ashfall_active())
+	_env_restored("fire-skip", stage)
+	_cam_restored("fire-skip", stage)
+	check("fire-skip: time_scale restored", true, is_equal_approx(Engine.time_scale, 1.0))
+	await _teardown_stage(stage)
+
+
+func _test_dracarys_restore_free() -> void:
+	## THE ERROR PATH: the spectator is freed mid-torrent (scene change, a
+	## crash in the caller, a rematch). _exit_tree must still restore.
+	var stage := _fire_stage(4.0)
+	var s: DragonSpectator = stage["s"]
+	var env: Environment = stage["env"]
+	var runner := func() -> void:
+		await s.play_ashfall(1, "House Winterfang", stage["losers"])
+	runner.call()
+	var lifted: bool = await _wait_until(
+		func() -> bool: return env.tonemap_exposure > stage["saved"][0] * 1.02, 8.0)
+	check("fire-free: torrent lifted the environment first", true, lifted)
+	s.free()
+	await process_frame
+	await process_frame
+	_env_restored("fire-free", stage)
+	_cam_restored("fire-free", stage)
+	check("fire-free: time_scale restored on exit-tree", true,
+			is_equal_approx(Engine.time_scale, 1.0))
+	await _teardown_stage(stage)

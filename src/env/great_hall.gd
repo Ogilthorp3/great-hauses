@@ -12,13 +12,25 @@ extends Node3D
 ## floor top sits at y = -0.3 (the board plinth rests on it).
 ##
 ## Integrator API (banners):
+##   dress_for_match(player, rival)         THE DRESSING — colours AND sigils
+##   dress_for_champion(house)              the throne shot: the hall falls
 ##   get_banner(i) -> HallBanner            i = 0..8
 ##   set_banner_colors(colors)              dyes banners 0..n in index order
+##                                          (colour only — sigils stay put)
 ##   banners                                the Array[HallBanner] itself
 ## Banner index map (world positions, camera default looks toward +Z):
 ##   0,1,2  far wall   (z=+12) at x = -4, 0, +4   (2 is screen-left)
 ##   3,4,5  west wall  (x=-12) at z = -4, 0, +4   (screen-right side)
 ##   6,7,8  east wall  (x=+12) at z = -4, 0, +4   (screen-left side)
+##
+## THE HALL WEARS THE MATCHUP (ISSUES.md P12, 2026-08-09): the hall dresses
+## ITSELF from Session at _ready — the player's house claims the west wall
+## and the far-wall flank it faces, the rival claims the east wall and the
+## opposite flank, each in its own heraldic colours AND its own sigil. Before
+## this the nine banners were anonymous dyed rectangles: every
+## Winterfang-vs-Goldclaw frame hung red and cream cloth and the room the war
+## is actually fought in was the only place in the game that never said who
+## was fighting.
 ##
 ## FPS probe (env verification, no game-code hooks): launch with user arg
 ## "--env-fps" to print one "ENV_FPS second=<n> fps=<v>" line per second for
@@ -45,10 +57,16 @@ const SEGMENT_XS := [-10.0, -6.0, -2.0, 2.0, 6.0, 10.0]  # 6 x 4u = 24u side
 ## face z = +11.5), base centered so the back edge nearly kisses the stone.
 const THRONE_POS := Vector3(0.0, FLOOR_Y, 10.7)
 ## Championship dragon hover: above the throne, wings clearing the 4 u wall
-## line (the hall is open-topped) but well under the y≈7 ceiling. NOTE the
-## rig ships mid-flight: the body floats ~1.5-2 u above the armature root,
-## so the root sits low and the beast reads at ~y 4.
-const DRAGON_HOVER := Vector3(0.0, 2.2, 9.9)
+## line (the hall is open-topped) but well under the y≈7 ceiling.
+##
+## THE ORIGIN MOVED (dragon-v2, 2026-08-09). The Quaternius rig hung its mesh
+## around a MID-AIR root; the serpent-wyrm's `Root` sits ON THE GROUND
+## between its feet, with the torso mass centre measured at
+## DragonRig.BODY_RISE (0.95) × rig scale above it. Rule from the asset's
+## author: new_root_y = old_root_y + 1.15 × rig_scale. At DRAGON_SCALE 1.6
+## that is 2.2 + 1.84 = 4.04, and the body still reads at the same y 5.56 it
+## always did — which is why throne_focus() below did NOT move.
+const DRAGON_HOVER := Vector3(0.0, 4.04, 9.9)
 ## Ceremony sizing (2026-08-08): the tableau dragon reads at 1.6 — the same
 ## scale the DragonSpectator championship ceremony settles at, so the
 ## hand-off from ashfall to tableau never pops. (test_dragon.gd asserts
@@ -74,6 +92,7 @@ func _ready() -> void:
 	_build_banners()
 	_build_throne()
 	_build_fill_lights()
+	_dress_from_session()
 	var args := OS.get_cmdline_user_args()
 	if args.has("--env-fps"):
 		_fps_probe = true
@@ -102,9 +121,63 @@ func get_banner(i: int) -> HallBanner:
 
 
 func set_banner_colors(colors: Array) -> void:
-	## Dye banners 0..n-1 in index order (see the map in the header).
+	## Dye banners 0..n-1 in index order (see the map in the header). COLOUR
+	## ONLY — whichever house each banner flies (its sigil) is untouched, so
+	## an integrator re-dye can never leave a lion's sigil on a wolf's wall.
 	for i in mini(colors.size(), banners.size()):
 		banners[i].set_house_color(colors[i])
+
+
+## THE DRESSING. Hang the nine banners for the match actually being played:
+## the player's house on the west wall plus the two far-wall stations it
+## faces, the rival's on the east wall plus the far-wall station opposite.
+## Each banner flies its house's SIGIL over its house's cloth.
+##
+## Which of a house's three heraldic colours each station flies is deliberate:
+## stations 3 and 6 (the wall centres the e2e board-truth asserts read) fly
+## the PRIMARY exactly, and the rest alternate through secondary/accent so a
+## near-black primary (Hartcrown #1d1a17, Ashwyrm #171214) never leaves a
+## whole wall invisible in a torch-lit room.
+func dress_for_match(player_house: String, rival_house: String) -> void:
+	if player_house.is_empty() or banners.is_empty():
+		return
+	var rival := rival_house if not rival_house.is_empty() else player_house
+	var pc := HouseRegistry.get_colors(player_house)
+	var rc := HouseRegistry.get_colors(rival)
+	var plan := [
+		[player_house, pc["primary"]],   # 0 far wall, player's flank
+		[player_house, pc["accent"]],    # 1 far wall centre
+		[rival, rc["primary"]],          # 2 far wall, rival's flank
+		[player_house, pc["primary"]],   # 3 west wall — the player's
+		[player_house, pc["secondary"]], # 4
+		[player_house, pc["accent"]],    # 5
+		[rival, rc["primary"]],          # 6 east wall — the rival's
+		[rival, rc["secondary"]],        # 7
+		[rival, rc["accent"]],           # 8
+	]
+	for i in mini(plan.size(), banners.size()):
+		banners[i].set_house(str(plan[i][0]), plan[i][1] as Color)
+
+
+## THE THRONE SHOT: every banner in the hall falls to the champion — the
+## whole room, sigils included, becomes one house. Alternates primary/accent
+## so nine identical rectangles do not read as wallpaper.
+func dress_for_champion(house: String) -> void:
+	if house.is_empty() or banners.is_empty():
+		return
+	var c := HouseRegistry.get_colors(house)
+	for i in banners.size():
+		banners[i].set_house(house, (c["primary"] if i % 2 == 0 else c["accent"]) as Color)
+
+
+## Self-dressing: the hall reads the matchup off Session (statics survive
+## change_scene, and GreatHall._ready runs before the game root's _ready that
+## would otherwise have to push it in). Unconfigured launches — probes,
+## --smoke, direct game.tscn runs — leave the neutral undyed cloth alone.
+func _dress_from_session() -> void:
+	if not Session.configured or Session.player_house.is_empty():
+		return
+	dress_for_match(Session.player_house, Session.rival_house())
 
 
 # -- construction ----------------------------------------------------------
@@ -283,6 +356,12 @@ func _build_throne() -> void:
 func summon_champion_dragon() -> Node3D:
 	if dragon != null:
 		return dragon
+	# The championship staging is also where the hall falls to the champion:
+	# the tournament only reaches this throne when the player's house wins
+	# the final, so Session.player_house IS the champion. Runs after the
+	# integrator's own colour pass, so the sigils have the last word.
+	if Session.configured and not Session.player_house.is_empty():
+		dress_for_champion(Session.player_house)
 	var rig: DragonRig = DragonRigScript.spawn(
 		self, "ChampionDragon", DRAGON_HOVER + Vector3.UP * 0.55, PI,
 		DRAGON_SCALE * 0.92)
@@ -312,7 +391,11 @@ func summon_champion_dragon() -> Node3D:
 		],
 		"blend": BaseMaterial3D.BLEND_MODE_ADD, "emission_energy": 2.2,
 	})
-	drift.position = Vector3.UP * 3.2
+	# Rig-local: the wyrm's mass centre sits at BODY_RISE (0.95); the drift
+	# hangs a little over its back. (Was 3.2, tuned against the old mid-air
+	# root — with the ground-origin rig that would have parked the embers in
+	# the rafters, a whole body length above the beast.)
+	drift.position = Vector3.UP * (DragonRigScript.BODY_RISE + 1.10)
 	drift.emitting = true
 	return dragon
 
@@ -331,9 +414,18 @@ func dragon_wink() -> void:
 		_dragon_anim.play("Flying_Idle", 0.4)
 
 
-## Framing anchor for the championship tableau (throne + dragon + dais).
+## Framing anchor for the championship tableau (throne + dragon + dais). The
+## tableau camera sits at this point + its offset and LOOKS AT this point, so
+## the anchor is the frame's centre.
+##
+## Raised 2026-08-09. At +2.2 the frame centred on the throne's back and the
+## dragon was simply off the top — the old chibi showed a strip of wing, the
+## serpent-wyrm shows two feet. The wyrm spans DRAGON_HOVER.y (4.04, its feet
+## — the root is ON THE GROUND now) up to ~7.6, and the champion stands at
+## FLOOR_Y; +3.4 is the centre that holds BOTH, checked on the rendered
+## showcase frame, not computed and hoped for.
 func throne_focus() -> Vector3:
-	return THRONE_POS + Vector3(0.0, 2.2, 0.0)
+	return THRONE_POS + Vector3(0.0, 3.4, 0.0)
 
 
 ## Where the champion stands: on the hall floor at the foot of the throne,
@@ -344,11 +436,12 @@ func throne_dais() -> Vector3:
 
 ## Perch anchor for the DragonSpectator module: high above the far wall,
 ## above the default camera's frame (pitch -0.85 keeps it out of shot) but
-## in view the moment the player orbits up. Wall top sits at FLOOR_Y + 4;
-## the rig body floats ~1.6-3.1 u above its root, so the root rides just
-## over the wall line.
+## in view the moment the player orbits up. Wall top sits at FLOOR_Y + 4.
+## The serpent-wyrm's root is ON THE GROUND between its feet, so the root
+## rides 1.15 × spectator scale (1.15) higher than the old mid-air-root rig
+## did — 5.0 + 1.3225 — and the body still reads at the same y 7.11.
 func spectator_perch() -> Vector3:
-	return Vector3(0.0, FLOOR_Y + 5.0, WALL_HALF - 0.8)
+	return Vector3(0.0, FLOOR_Y + 6.3225, WALL_HALF - 0.8)
 
 
 func _build_fill_lights() -> void:
