@@ -28,7 +28,7 @@
 			"seat": "Stormrest",
 			"motto": "The storm answers to us.",
 			"colors": { "primary": "#1d1a17", "secondary": "#cfa63b", "accent": "#e8c866" },
-			"tints": { "piece": "#b09040", "tower": "#8d7333", "saturation": 0.25 },
+			"tints": { "piece": "#7d6a4a", "tower": "#665741", "saturation": 0.25 },
 			"sigil": "res://assets/sigils/hartcrown.png"
 		},
 		{
@@ -78,7 +78,7 @@
 			"seat": "Skyloft",
 			"motto": "Honor rides the high wind.",
 			"colors": { "primary": "#7fb3d9", "secondary": "#f2f6f9", "accent": "#4f86ad" },
-			"tints": { "piece": "#86b6e0", "tower": "#74a0c8", "saturation": 0.25 },
+			"tints": { "piece": "#6fc2c9", "tower": "#5aa3ab", "saturation": 0.25 },
 			"sigil": "res://assets/sigils/swiftcrest.png"
 		},
 		{

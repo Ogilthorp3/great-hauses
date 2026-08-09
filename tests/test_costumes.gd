@@ -33,9 +33,14 @@ const T_BISHOP := 3
 const T_QUEEN := 4
 const T_KING := 5
 const TYPE_NAMES := ["PAWN", "ROOK", "KNIGHT", "BISHOP", "QUEEN", "KING"]
-## Height-grading display order (not enum order). The MOUNTED knight
-## (ISSUES.md #1) sits between bishop and rook.
-const GRADE_ORDER := [T_PAWN, T_BISHOP, T_KNIGHT, T_ROOK, T_QUEEN, T_KING]
+## Height-grading order (not enum order). The MOUNTED knight moved from
+## between-bishop-and-rook to between-QUEEN-and-KING on 2026-08-08 — see
+## PieceAssets.TYPE_HEIGHT: normalizing a horse+rider ensemble into a foot
+## soldier's slot shrank the rider below pawn height and the horse to dog
+## size. A man on a warhorse out-tops a standing queen; only the king out-tops
+## him. The monotonic assertion below is unchanged in strength — it is the
+## ORDER that moved, and it moved on purpose.
+const GRADE_ORDER := [T_PAWN, T_BISHOP, T_ROOK, T_QUEEN, T_KNIGHT, T_KING]
 const FROST := 0
 const EMBER := 1
 
@@ -68,6 +73,8 @@ func _main() -> void:
 	_test_glyph_orientation()
 	_test_pawn_helms()
 	_test_mounted_knight()
+	_test_royal_silhouette()
+	_test_palette_envelope()
 	await _test_selection_feedback()
 	await _test_rook_crumble()
 	await _test_knight_death()
@@ -185,7 +192,7 @@ func _test_shield_types() -> void:
 	knight.free()
 
 
-## Strict monotonic height grading pawn<knight<bishop<rook<queen<king,
+## Strict monotonic height grading pawn<bishop<rook<queen<knight<king,
 ## measured from the assembled models (not the config table), for the
 ## adventurer cast, the skeleton cast, and the legacy path.
 func _test_height_grading() -> void:
@@ -233,6 +240,7 @@ func _test_pawn_helms() -> void:
 	var mount_pos: Vector3 = Vector3(0.0, 0.945, 0.0)
 	var scenes := {}
 	var iron_albedo := {}
+	var helm_charge := {}
 	for hid in registry.house_ids():
 		var pv := _spawn(T_PAWN, FROST, hid)
 		var helm: Node3D = pv.find_child("Helm", true, false)
@@ -262,9 +270,13 @@ func _test_pawn_helms() -> void:
 		scenes[hid] = packed.resource_path
 		check("helm %s: helm mesh names its own house" % hid, true,
 				helm.find_child("*%s*" % hid, true, false) != null)
-		# Rim + motif wear the house accent; the iron shell is left alone.
-		var accent_ok := false
-		var iron_ok := true
+		# BOTH surfaces are dressed now (critic defect #11): the dome in the
+		# house body color, the rim/motif in the house CHARGE — the heraldic
+		# color furthest from that dome, so the motif can never be
+		# green-on-green again (defect #9). The dome must stay clearly darker
+		# than the charge: a pawn is house-colored, not gilded.
+		var charge_ok := false
+		var shell_ok := false
 		for mi: MeshInstance3D in helm.find_children("*", "MeshInstance3D", true, false):
 			for s in mi.mesh.get_surface_count():
 				var base := mi.mesh.surface_get_material(s) as StandardMaterial3D
@@ -272,14 +284,22 @@ func _test_pawn_helms() -> void:
 				if base == null:
 					continue
 				if str(base.resource_name).begins_with(assets.HELM_ACCENT_MATERIAL):
-					var want: Color = registry.get_colors(hid)["accent"]
-					accent_ok = over != null \
-							and over.albedo_color.is_equal_approx(base.albedo_color * want)
+					charge_ok = over != null and over.albedo_color != base.albedo_color
+					if over != null:
+						helm_charge[hid] = over.albedo_color
 				elif str(base.resource_name).begins_with(assets.HELM_IRON_MATERIAL):
-					iron_ok = iron_ok and over == null
-					iron_albedo[hid] = base.albedo_color
-		check("helm %s: rim/motif dyed in the house accent" % hid, true, accent_ok)
-		check("helm %s: iron shell left plain" % hid, true, iron_ok)
+					shell_ok = over != null
+					if over != null:
+						iron_albedo[hid] = over.albedo_color
+		check("helm %s: rim/motif dyed in the house charge" % hid, true, charge_ok)
+		check("helm %s: dome dyed in the house color" % hid, true, shell_ok)
+		# The two must actually contrast — that is the whole point of a charge.
+		check("helm %s: charge separated from the dome" % hid, true,
+				helm_charge.has(hid) and iron_albedo.has(hid)
+				and Vector3((helm_charge[hid] as Color).r - (iron_albedo[hid] as Color).r,
+						(helm_charge[hid] as Color).g - (iron_albedo[hid] as Color).g,
+						(helm_charge[hid] as Color).b - (iron_albedo[hid] as Color).b
+					).length() > 0.20)
 		# The bear hood must be OFF (it swallows the helm) and still THERE —
 		# _raw_model_height counts it, so freeing it would rescale the pawn.
 		var hoods: Array = pv.find_children("*BearHat*", "MeshInstance3D", true, false)
@@ -300,9 +320,23 @@ func _test_pawn_helms() -> void:
 	# iron and rim baked black, mirroring its charred charger.
 	check("helm: Drowned Legion wears the charred twin", true,
 			str(scenes["tidegrip"]).contains("charred"))
-	check("helm: charred iron is darker than a living house's", true,
+	check("helm: the Drowned Legion's dome is charred darker", true,
 			(iron_albedo["tidegrip"] as Color).get_luminance()
 			< (iron_albedo["goldclaw"] as Color).get_luminance())
+	# NINE DISTINCT PAWN RANKS (critic defects #10/#11): at board distance the
+	# dome IS the pawn, so no two houses may dye theirs the same color.
+	var dome_pairs := 0
+	for a in iron_albedo:
+		for b in iron_albedo:
+			if str(a) >= str(b):
+				continue
+			var ca: Color = iron_albedo[a]
+			var cb: Color = iron_albedo[b]
+			if Vector3(ca.r - cb.r, ca.g - cb.g, ca.b - cb.b).length() < 0.10:
+				dome_pairs += 1
+				print("      pawn domes too close: %s %s vs %s %s"
+						% [a, ca.to_html(false), b, cb.to_html(false)])
+	check("helm: no two houses share a pawn dome color", 0, dome_pairs)
 	# Pawns ONLY — a helm on a bishop or a crest on a pawn would break the
 	# rank read the whole costume system is built on.
 	for t in [T_BISHOP, T_KNIGHT, T_ROOK, T_QUEEN, T_KING]:
@@ -376,9 +410,11 @@ func _test_mounted_knight() -> void:
 		var hide_mesh := pv._horse.find_child("Horse", true, false) as MeshInstance3D
 		check("mounted %s: horse hide wears the house tint" % label, true,
 				hide_mesh != null and hide_mesh.get_surface_override_material(0) != null)
-		check("mounted %s: saddle keeps its leather" % label, true,
+		# The saddle is HARNESS, not heraldry: dyed with the hide (defect #6 —
+		# it was the last stock brown left on nine differently-colored mounts).
+		check("mounted %s: saddle wears house-dyed harness" % label, true,
 				(pv.find_child("Saddle", true, false) as MeshInstance3D)
-						.get_surface_override_material(0) == null)
+						.get_surface_override_material(0) != null)
 		# Seating: the rider rides ON the saddle — hips inside the seat slab,
 		# never floating above it or sunk through the horse's back.
 		var rider: Node3D = pv.find_child("Rider", true, false)
@@ -425,6 +461,87 @@ func _test_mounted_knight() -> void:
 	gold.free()
 	winter.free()
 	tide.free()
+
+
+## ROYAL SILHOUETTE FROM ABOVE (critic defect #3, 2026-08-08). The gameplay
+## camera looks DOWN. What a player sees of a royal is the top of a head — and
+## with the crown scaled inside the skull line, Winterfang's king and queen
+## were the same large pale-blue dome at board distance: "the player cannot
+## find their own king."
+##
+## The rule this pins: a KING'S crown must break his own head silhouette (its
+## spiked ring wider than the skull, so it reads from directly overhead), and
+## a QUEEN'S tiara must NOT (it is a band on a bare head, the opposite read).
+## Measured on every house, both casts, in head-bone space.
+func _test_royal_silhouette() -> void:
+	for hid in ["winterfang", "goldclaw", "tidegrip"]:
+		var king := _spawn(T_KING, FROST, hid)
+		var queen := _spawn(T_QUEEN, FROST, hid)
+		var head_r: float = _head_half_width(king)
+		var crown_r: float = _prop_radius(king.find_child("Crown", true, false))
+		var tiara_r: float = _prop_radius(queen.find_child("Tiara", true, false))
+		check("royals %s: crown breaks the skull line (%.2f vs head %.2f)"
+				% [hid, crown_r, head_r], true, crown_r > head_r)
+		check("royals %s: tiara stays inside it (%.2f vs head %.2f)"
+				% [hid, tiara_r, head_r], true, tiara_r < head_r * 0.85)
+		check("royals %s: the two footprints are far apart" % hid, true,
+				crown_r > tiara_r * 1.6)
+		king.free()
+		queen.free()
+
+
+## Widest half-extent of the character's head/skull mesh (model space).
+func _head_half_width(pv: Node) -> float:
+	var widest := 0.0
+	for mi: MeshInstance3D in pv.find_children("*", "MeshInstance3D", true, false):
+		var n := str(mi.name)
+		if not (n.containsn("head") or n.containsn("skull")):
+			continue
+		widest = maxf(widest, mi.mesh.get_aabb().size.x * 0.5)
+	return widest
+
+
+## Footprint radius of a head prop in its BoneAttachment3D's space.
+func _prop_radius(prop: Node) -> float:
+	if prop == null:
+		return 0.0
+	var node := prop as Node3D
+	var r := 0.0
+	for mi: MeshInstance3D in node.find_children("*", "MeshInstance3D", true, false):
+		var box: AABB = (node.transform * mi.transform) * mi.mesh.get_aabb()
+		r = maxf(r, maxf(maxf(absf(box.position.x), absf(box.end.x)),
+				maxf(absf(box.position.z), absf(box.end.z))))
+	return r
+
+
+## THE PALETTE ENVELOPE (critic defects #6/#7, 2026-08-08). Every surface an
+## army renders must belong to that army: no stock pack color may survive the
+## dye. This is the gate that would have caught the shipped magenta grimoire,
+## lime staff orb, salmon shield rim, maroon knight's shield, orange-tan bow
+## and forest-green queen's hood — all nine houses, all at once, all invisible
+## to a suite that only ever asked "is a material set?".
+##
+## Heraldry (sigil, banner, caparison, pennant) and regalia (crown, tiara) are
+## exempt BY NAME in costume_preview.PALETTE_EXEMPT and documented there.
+func _test_palette_envelope() -> void:
+	for hid in registry.house_ids():
+		var offenders: Array = []
+		for t in GRADE_ORDER:
+			var pv := _spawn(t, FROST, hid)
+			offenders.append_array(preview.palette_offenders(pv, hid))
+			pv.free()
+		check("palette %s: whole army inside its own palette" % hid,
+				"[]", str(offenders))
+	# The dye must actually be doing work — a pass that fired on nothing is
+	# not a pass. Strip the dye off one prop and the gate must go red.
+	var probe := _spawn(T_BISHOP, FROST, "winterfang")
+	var tome: Node3D = probe.find_child("Gear_tome", true, false)
+	for mi: MeshInstance3D in tome.find_children("*", "MeshInstance3D", true, false):
+		for s in mi.mesh.get_surface_count():
+			mi.set_surface_override_material(s, null)
+	check("palette: the gate detects an undyed prop", true,
+			not preview.palette_offenders(probe, "winterfang").is_empty())
+	probe.free()
 
 
 ## Model-space AABB of a named mesh under the ensemble (mounted-knight rig).

@@ -115,12 +115,150 @@ for a in list(bpy.data.actions):
     bpy.data.actions.remove(a)
 print("[horse] rig + actions dropped — static standing horse")
 
+# ======================================================================
+# THE DESTRIER PASS (critic defect #1, 2026-08-08)
+# ======================================================================
+# Quaternius ships a slim RIDING horse: long thin legs, a giraffe-straight
+# neck carrying the skull to the very top of the model, a torso half-width of
+# 0.45 against a 5.6-long body, and a mane/tail two vertices thick. It renders
+# beautifully in a 1280x720 beauty shot. On the board — where the whole piece
+# is ~50 px tall and lit from above — it read as "a dog-sized, spindly,
+# mane-less, tail-less quadruped", and worse: with the skull at the model's
+# apex the RIDER'S HEAD AND THE HORSE'S HEAD LANDED AT THE SAME HEIGHT, so the
+# silhouette was a two-headed animal, and from the near-side camera the rider
+# simply occluded the horse's head entirely. A knight riding a greyhound.
+#
+# We own this conversion, so the mount is reshaped into a WAR HORSE — the fix
+# is proportional, not a scale-up:
+#   LEGS shorter        stocky, and it drops the saddle (and the whole rider)
+#                       closer to the ground, buying ensemble height back
+#   BARREL/NECK thicker mass is what survives at 50 px; a wide barrel under a
+#                       caparison is the cavalry read
+#   NECK ARCHED DOWN    the single most important change: the head comes off
+#                       the top of the silhouette and reaches FORWARD, so the
+#                       rider's helm owns the skyline alone and the horse's
+#                       head extends the shape into an unmistakable quadruped
+#   MANE + TAIL bulked  two vertices of hair are invisible; a chunky crest and
+#                       a fat brush are two more silhouette landmarks
+# Every landmark the tack needs is MEASURED off the result below, never
+# hard-coded, so these knobs can move without unseating the saddle.
+
+me = horse_mesh.data
+# glTF ships custom split normals; they do not survive a deformation. Drop
+# them and let Blender recompute from the new geometry.
+bpy.ops.object.select_all(action='DESELECT')
+horse_mesh.select_set(True)
+bpy.context.view_layer.objects.active = horse_mesh
+if me.has_custom_normals:
+    bpy.ops.mesh.customdata_custom_splitnormals_clear()
+
+LEG_TOP_Z = 1.90       # knee/elbow line — below it is leg, above it is body
+LEG_SHORTEN = 0.78     # destrier stance: 22% off the leg length
+BARREL_GAIN = 0.46     # torso half-width x1.46
+NECK_GAIN = 0.34       # neck half-width x1.34
+NECK_DROP_DEG = 21.0   # how far the neck arches down and forward
+# Mane and tail are FLAT strips: widen them too far and they stop being hair
+# and become dark planks bolted to the horse (caught in the beauty shot at
+# 2.10/2.30). Enough to survive downsampling, not enough to read as slabs.
+MANE_WIDEN = 1.45
+TAIL_WIDEN = 1.55
+TAIL_THICKEN = 1.12
+LEG_GIRTH = 1.34      # sticks read as spindles; a destrier stands on columns
+
+# material name -> vertex indices (glTF primitives never share vertices)
+mat_verts = {m.name: set() for m in me.materials}
+for poly in me.polygons:
+    name = me.materials[poly.material_index].name
+    for vi in poly.vertices:
+        mat_verts[name].add(vi)
+hair_verts = mat_verts.get("Hair", set())
+
+
+def window(v, lo_out, lo_in, hi_in, hi_out):
+    """Smooth 0..1 trapezoid: 0 outside [lo_out,hi_out], 1 inside [lo_in,hi_in]."""
+    if v <= lo_out or v >= hi_out:
+        return 0.0
+    if lo_in <= v <= hi_in:
+        return 1.0
+    t = (v - lo_out) / (lo_in - lo_out) if v < lo_in else (hi_out - v) / (hi_out - hi_in)
+    return t * t * (3.0 - 2.0 * t)          # smoothstep
+
+
+# 1. shorter legs — body rides down with them, hooves stay on the ground
+drop = LEG_TOP_Z * (1.0 - LEG_SHORTEN)
+for v in me.vertices:
+    v.co.z = v.co.z * LEG_SHORTEN if v.co.z < LEG_TOP_Z else v.co.z - drop
+
+# 2. girth: barrel and neck widen about the spine (legs keep their stance)
+for v in me.vertices:
+    barrel = window(v.co.y, -2.5, -1.40, 1.05, 1.70) \
+        * window(v.co.z, 1.05, 1.55, 9.0, 9.1)
+    neck = window(v.co.y, -2.85, -2.40, -1.15, -0.70) \
+        * window(v.co.z, 2.00, 2.45, 9.0, 9.1)
+    v.co.x *= 1.0 + max(BARREL_GAIN * barrel, NECK_GAIN * neck)
+
+# 2b. leg girth: thicken each leg about its OWN axis (a global x-scale would
+# just splay the stance). Quadrants: fore/hind x left/right.
+leg_top = LEG_TOP_Z * LEG_SHORTEN
+quads = {}
+for v in me.vertices:
+    if v.co.z >= leg_top:
+        continue
+    q = (v.co.y > 0.0, v.co.x > 0.0)
+    acc = quads.setdefault(q, [0.0, 0.0, 0])
+    acc[0] += v.co.x
+    acc[1] += v.co.y
+    acc[2] += 1
+for v in me.vertices:
+    if v.co.z >= leg_top:
+        continue
+    acc = quads[(v.co.y > 0.0, v.co.x > 0.0)]
+    cx, cy = acc[0] / acc[2], acc[1] / acc[2]
+    taper = 1.0 + (LEG_GIRTH - 1.0) * min(1.0, v.co.z / leg_top + 0.25)
+    v.co.x = cx + (v.co.x - cx) * taper
+    v.co.y = cy + (v.co.y - cy) * taper
+
+# 3. arch the neck down and forward about the withers
+pivot_y, pivot_z = -1.00, 3.515 - drop
+ang = math.radians(NECK_DROP_DEG)
+for v in me.vertices:
+    w = window(-v.co.y, 0.80, 2.20, 9.0, 9.1)
+    if w <= 0.0:
+        continue
+    c, s = math.cos(ang * w), math.sin(ang * w)
+    dy, dz = v.co.y - pivot_y, v.co.z - pivot_z
+    v.co.y = pivot_y + dy * c - dz * s
+    v.co.z = pivot_z + dy * s + dz * c
+
+# 4. mane and tail: two vertices of hair are nothing at board scale
+tail_zs = [me.vertices[i].co.z for i in hair_verts if me.vertices[i].co.y > 0.4]
+tail_mid = sum(tail_zs) / len(tail_zs) if tail_zs else 0.0
+for i in hair_verts:
+    v = me.vertices[i]
+    if v.co.y < 0.4:                       # mane: crest along the neck
+        v.co.x *= MANE_WIDEN
+    else:                                  # tail: a fat brush, not a wire
+        v.co.x *= TAIL_WIDEN
+        v.co.z = tail_mid + (v.co.z - tail_mid) * TAIL_THICKEN
+
+me.update()
+
 # ---------------------------------------------------------------- war tack
-# World-space landmarks measured off the standing pose (Blender Z-up, horse
-# faces -Y): back top z=3.515 over the saddle zone y in [-0.9..-0.2], torso
-# half-width ~0.45, belly/leg action below z~2.2.
-BACK_TOP = 3.515
+# Landmarks MEASURED off the reshaped standing pose (Blender Z-up, horse
+# faces -Y) rather than hard-coded, so the destrier knobs above stay free.
 SADDLE_Y = -0.55          # seat center along the spine (negative = forward)
+BACK_TOP = max(v.co.z for v in me.vertices
+               if -0.95 <= v.co.y <= -0.15 and abs(v.co.x) < 0.40)
+# Belly on the MID-LINE BETWEEN the leg pairs — anywhere else and the tape
+# measure lands on a foreleg and reports the knee.
+BELLY_Z = min(v.co.z for v in me.vertices
+              if -0.55 <= v.co.y <= 0.55 and abs(v.co.x) < 0.22)
+FLANK_X = max(abs(v.co.x) for v in me.vertices if -1.30 <= v.co.y <= 1.00)
+HEAD_TOP = max(v.co.z for v in me.vertices)
+SEAT_TOP = BACK_TOP - 0.04 + 0.20     # top of the saddle slab built below
+print(f"[horse] destrier: back {BACK_TOP:.3f} belly {BELLY_Z:.3f} "
+      f"flank {FLANK_X:.3f} head_top {HEAD_TOP:.3f} seat_top {SEAT_TOP:.3f} "
+      f"(head clears the back by {HEAD_TOP - BACK_TOP:.3f})")
 
 
 def make_material(name, base, rough=0.9):
@@ -156,12 +294,15 @@ def add_box(size, loc, mat, taper=1.0):
 
 # Saddle: seat slab over the back (wider than the torso so it reads from the
 # side), pommel lip fore, cantle lip aft.
+# Sized off the MEASURED flank so a fatter barrel never swallows its own
+# saddle: the seat has to overhang the torso to read from the side.
+SEAT_W = FLANK_X * 1.32
 saddle_parts = [
-    add_box((0.72, 0.60, 0.20), (0.0, SADDLE_Y, BACK_TOP - 0.04), MAT_LEATHER,
+    add_box((SEAT_W, 0.60, 0.20), (0.0, SADDLE_Y, BACK_TOP - 0.04), MAT_LEATHER,
             taper=0.88),
-    add_box((0.62, 0.12, 0.38), (0.0, SADDLE_Y - 0.32, BACK_TOP - 0.02),
+    add_box((SEAT_W * 0.86, 0.12, 0.38), (0.0, SADDLE_Y - 0.32, BACK_TOP - 0.02),
             MAT_LEATHER, taper=0.68),                     # pommel
-    add_box((0.66, 0.14, 0.44), (0.0, SADDLE_Y + 0.33, BACK_TOP - 0.02),
+    add_box((SEAT_W * 0.92, 0.14, 0.44), (0.0, SADDLE_Y + 0.33, BACK_TOP - 0.02),
             MAT_LEATHER, taper=0.68),                     # cantle
 ]
 bpy.ops.object.select_all(action='DESELECT')
@@ -187,8 +328,8 @@ for p in saddle.data.polygons:
 # first cut: y -1.15..0.85, hem 2.52) vanished at gameplay distance.
 CAP_Y0, CAP_Y1 = -1.50, 1.20   # fore/aft extent along the spine
 CAP_TOP_Z = BACK_TOP + 0.06
-CAP_HEM_Z = 1.92               # below the belly — the silhouette maker
-CAP_HEM_X = 0.82
+CAP_HEM_Z = BELLY_Z - 0.30     # below the belly — the silhouette maker
+CAP_HEM_X = FLANK_X + 0.20
 COLS, ROWS = 12, 6             # along the body, down the drape
 
 cap_objs = []

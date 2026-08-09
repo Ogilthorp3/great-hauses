@@ -463,13 +463,19 @@ def helm_goldclaw(shell, iron, accent):
 
 def helm_hartcrown(shell, iron, accent):
     """STAG — two small antler NUBS: a short beam a side carrying two stubby
-    tines, one raked forward and one back. Never a rack."""
+    tines, one raked forward and one back. Never a rack.
+
+    THICKENED 2026-08-09 (critic defect #10): "Hartcrown's pawn crest is a
+    2-pixel gold wire." Correct — the beams were 0.060 radius on a piece
+    ~50 px tall, which is under one pixel of shading. The nubs keep their
+    height (a pawn stays under MOTIF_CEILING) and gain girth, which is the
+    dimension that actually survives downsampling."""
     objs = []
     for sx in (-1, 1):
         az, z = sx * math.radians(43.0), -0.175
         p = shell.point(az, z)
         grow = Vector((sx * 0.50, 0.05, 1.0)).normalized()
-        objs.append(assign(orient(add_cone(4, 0.060, 0.034, 0.165,
+        objs.append(assign(orient(add_cone(4, 0.088, 0.052, 0.170,
                                            loc=p + grow * 0.058),
                                   grow, Vector((0.0, 0.0, 1.0))), accent))
         head = p + grow * 0.140
@@ -478,7 +484,7 @@ def helm_hartcrown(shell, iron, accent):
         for k, tilt in enumerate(((sx * 1.05, -0.45, 0.90),
                                   (sx * 0.10, -0.30, 1.15))):
             td = Vector(tilt).normalized()
-            tine = add_cone(4, 0.034, 0.0, 0.175 - 0.025 * k,
+            tine = add_cone(4, 0.052, 0.0, 0.180 - 0.025 * k,
                             loc=head + td * 0.072)
             objs.append(assign(orient(tine, td, Vector((0.0, 0.0, 1.0))),
                                accent))
@@ -505,7 +511,15 @@ def helm_ashwyrm(shell, iron, accent):
 def helm_tidegrip(shell, iron, accent):
     """KRAKEN — three short tentacles that grip the brow, run back over the cap
     and hook UP at the tail. Built as TUBES, not ribbons: a ribbon on a helm
-    reads as one more fin, a tube reads as a limb."""
+    reads as one more fin, a tube reads as a limb.
+
+    HUMBLED 2026-08-09 (critic defect #8). The first cut hooked its tentacle
+    tails 0.150 clear of the cap; on the board that read as "a five-spike
+    black crown over a bare glowing-eyed face — grander than Thornvale's or
+    Hartcrown's ROYAL crests. It reads as a king, not a foot soldier." A pawn
+    outranking other houses' kings is a rank-legibility bug, so the tails now
+    barely lift off the shell and the limbs are thinner: the kraken still
+    grips the helm, it no longer wears it as a diadem."""
     objs = []
     for i, az_deg in enumerate((-42.0, 0.0, 42.0)):
         pts, radii = [], []
@@ -517,11 +531,11 @@ def helm_tidegrip(shell, iron, accent):
             az = math.radians(az_deg) * (1.0 + 0.55 * t)
             p = shell.point(az, z)
             n = shell.normal(az, z)
-            pts.append(p + n * (0.030 + 0.045 * t * t))
-            radii.append(0.070 - 0.016 * t)
-        # the tail hooks up and back, clear of the cap: the silhouette break
+            pts.append(p + n * (0.026 + 0.030 * t * t))
+            radii.append(0.055 - 0.014 * t)
+        # the tail curls back and only just off the cap — a grip, not a spike
         tail = pts[-1]
-        pts.append(tail + Vector((0.0, 0.070, 0.150)))
+        pts.append(tail + Vector((0.0, 0.062, 0.052)))
         radii.append(0.0)
         objs += tube_chain(pts, radii, accent, "Tentacle_%d" % i)
     return objs
@@ -529,8 +543,17 @@ def helm_tidegrip(shell, iron, accent):
 
 def helm_thornvale(shell, iron, accent):
     """ROSE — a banded browline (a beaded second band above the rim) with a
-    small bud boss at the front centre. The lowest silhouette of the nine:
-    Thornvale's pawns are the plainest soldiers on the board."""
+    rose BOSS at the front centre. The lowest silhouette of the nine:
+    Thornvale's pawns are the plainest soldiers on the board.
+
+    MOVED TO THE BROW AND ENLARGED 2026-08-09 (critic defect #9): "the rose
+    boss is invisible even at 5x zoom — band and boss are the same green as
+    the armour; the pawn is an unmarked black dome." Half of that was colour
+    and is fixed at runtime (the helm charge is now the heraldic colour
+    FURTHEST from the body, which hands Thornvale its gold). The other half
+    was placement and size: the boss sat high on the cap where the top-down
+    camera foreshortens it into the shell. It now sits ON the browband,
+    front and centre, half again as large."""
     objs = []
     band_z = shell.brow + 0.085
     secs = []
@@ -543,10 +566,11 @@ def helm_thornvale(shell, iron, accent):
         tangent = Vector((math.cos(az), math.sin(az), 0.0)).normalized()
         secs.append((p - nrm * 0.035, p + nrm * h, tangent * 0.060))
     objs.append(add_ribbon(secs, accent, "BrowBand"))
-    p = shell.point(0.0, band_z + 0.075)
-    n = shell.normal(0.0, band_z + 0.075)
-    objs.append(assign(add_sphere(6, 4, 0.105, loc=p + n * 0.030,
-                                  scale=(1.0, 0.78, 1.0)), accent))
+    boss_z = band_z + 0.028
+    p = shell.point(0.0, boss_z)
+    n = shell.normal(0.0, boss_z)
+    objs.append(assign(add_sphere(6, 4, 0.150, loc=p + n * 0.044,
+                                  scale=(1.0, 0.72, 1.0)), accent))
     for sx in (-1, 1):
         objs.append(spike(shell, sx * math.radians(32.0), band_z + 0.050, iron,
                           0.036, 0.0, 0.105,

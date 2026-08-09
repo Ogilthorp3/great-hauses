@@ -70,28 +70,39 @@ const ANIM_HIT := "Hit_A"
 const ANIM_DEATH := "Death_A"
 const ANIM_SPAWN := "Spawn_Ground"
 
-## Ensemble proportions, tuned BY EYE against the rendered beauty shot (the
+## Ensemble proportions, tuned BY EYE against the IN-GAME board frame (the
 ## KayKit cast is chibi — big head, wide shoulders — so a horse scaled to
 ## "anatomically right" reads as a pony under a giant). Horse-ensemble-local
 ## units, pre-normalization:
-##   HORSE_SCALE  the mount's size against the rider's native size. It is a
-##                straight trade: the ensemble is normalized to the type's
-##                design height, so a bigger mount buys silhouette by
-##                shrinking the rider. 0.58 was picked off rendered A/Bs
-##                (0.52 · 0.58 · 0.62 · 0.68 · 0.85) — the horse owns the
-##                shape while the helm and crest still read.
+##   HORSE_SCALE  the mount's size against the rider's native size. 0.72 —
+##                the destrier is deliberately the BIGGER animal now (its
+##                withers out-top the rider's own standing height), because
+##                mass below the rider is what says "cavalry" at 50 px.
 ##   RIDER_POS    the seat: hips sink onto the saddle slab top
-##                (3.675·HORSE_SCALE − hips-height 0.39) over the seat
-##                center (0.55·HORSE_SCALE) — no float, no gap.
+##                (3.320·HORSE_SCALE − hips-height 0.39) over the seat
+##                center (0.55·HORSE_SCALE) — no float, no gap. 3.320 is the
+##                slab top convert_horse.py prints as `seat_top`.
 ##   MODEL_YAW    stance. A chess piece is read head-on, and head-on a horse
-##                is a narrow shape hiding behind its rider. Reining the
-##                ensemble a quarter-turn presents head, barrel and the
-##                caparison's full drape to the camera — THE cavalry read.
-##                Applied to the Model, never the root, so duel face-offs
-##                (which turn the root) still put the knight on his victim.
-const KNIGHT_HORSE_SCALE := 0.58
-const KNIGHT_RIDER_POS := Vector3(0.0, 1.74, 0.32)
-const KNIGHT_MODEL_YAW := 30.0
+##                is a narrow shape hiding behind its rider — at 30 deg the
+##                board showed the mount's RUMP and nothing else, which is
+##                how nine armies ended up with "a helmeted torso on four thin
+##                legs". Every physical chess set answers this the same way:
+##                the knight stands in PROFILE. 74 deg is near-broadside —
+##                head one side, tail the other, barrel and caparison flank
+##                (sigil included) square to the player.
+##   RIDER_COUNTER_YAW
+##                ...and the rider twists back out of it, so the man still
+##                faces the enemy line while his horse stands across it. A
+##                cavalryman turned in the saddle is a real pose, and it is
+##                what keeps the capture duel legible: without it a
+##                broadside mount would swing the rider 74 deg off the victim
+##                he is striking.
+## Applied to the Model/Rider, never the ROOT, so duel face-offs (which turn
+## the root) still put the knight on his victim.
+const KNIGHT_HORSE_SCALE := 0.72
+const KNIGHT_RIDER_POS := Vector3(0.0, 2.00, 0.40)
+const KNIGHT_MODEL_YAW := 74.0
+const KNIGHT_RIDER_COUNTER_YAW := 52.0
 ## How far the rider tumbles off the saddle when the knight falls
 ## (ensemble-local; the slide runs while Death_A plays).
 const KNIGHT_FALL_OFFSET := Vector3(1.6, -1.55, -0.2)
@@ -108,6 +119,21 @@ const CREST_MOUNT_POS := Vector3(0.0, 1.04, 0.0)
 const HELM_MOUNT_POS := Vector3(0.0, 0.945, 0.0)
 ## Chest-bone mount for the king's cape (Skeleton_Rogue cape convention).
 const CAPE_MOUNT_POS := Vector3(0.0, 0.04, -0.08)
+
+## ROYAL LEGIBILITY FROM ABOVE (critic defect #3). The gameplay camera looks
+## DOWN, so what a player actually sees of a royal is the top of a head — and
+## at 5.3 the king's crown sat INSIDE his own skull's silhouette. Winterfang
+## therefore fielded a king and a queen who were, at board distance, the same
+## large pale-blue dome: "the player cannot find their own king."
+##
+## The two now differ where the player is looking. The crown is scaled until
+## its spiked ring is WIDER THAN THE SKULL — from above the king wears a
+## visible spiked halo, from the side a proper crown. The tiara stays inside
+## the skull line, a slim band on a bare head. Same prop, opposite reads;
+## tests/test_costumes.gd::_test_royal_silhouette measures both against the
+## head and fails if they ever converge again.
+const CROWN_SCALE := 6.8
+const TIARA_SCALE := Vector3(3.3, 1.9, 3.3)
 
 var piece_type: Type = Type.PAWN
 var side: House = House.FROST
@@ -522,8 +548,10 @@ func _strike_flash(victim_pos: Vector3) -> void:
 func _build_character() -> void:
 	_model = PieceAssets.character_scene(piece_type, house_id).instantiate()
 	_model.name = "Model"
+	if piece_type == Type.BISHOP:
+		_narrow_wizard_brim()   # BEFORE the height measure — it is the tallest mesh
 	# Strict height grading: normalize each model's raw height to the type's
-	# design height, so pawn<knight<bishop<rook<queen<king holds no matter
+	# design height, so pawn<bishop<rook<queen<knight<king holds no matter
 	# which cast (adventurer or skeleton) a house fields.
 	var raw_h := _raw_model_height(_model)
 	_model.scale = Vector3.ONE * (PieceAssets.piece_height(piece_type) / maxf(raw_h, 0.01))
@@ -572,6 +600,9 @@ func _build_knight() -> void:
 	_rider = PieceAssets.character_scene(piece_type, house_id).instantiate()
 	_rider.name = "Rider"
 	_rider.position = KNIGHT_RIDER_POS
+	# Twisted in the saddle: the horse stands broadside for the silhouette,
+	# the man stays turned toward the enemy line (see KNIGHT_MODEL_YAW).
+	_rider.rotation.y = deg_to_rad(-KNIGHT_RIDER_COUNTER_YAW)
 	_model.add_child(_rider)
 	var raw_h := KNIGHT_RIDER_POS.y + _raw_model_height(_rider)
 	_model.scale = Vector3.ONE * (PieceAssets.piece_height(piece_type) / maxf(raw_h, 0.01))
@@ -624,7 +655,13 @@ func _start_idle_sway() -> void:
 ## house-colored eyeballs is a bug.
 func _dye_mount(tint: Color) -> void:
 	for mi: MeshInstance3D in _horse.find_children("*", "MeshInstance3D", true, false):
-		if mi.name in ["Caparison", "Saddle"]:
+		# The CAPARISON is the only exclusion: it wears the house banner cloth
+		# (sigil and all) a few lines below. The SADDLE used to be excluded too
+		# "so it keeps its leather" — which meant every one of the nine armies
+		# rode on the same warm brown tack, the last stock color left on the
+		# mount (defect #6). It is harness now: dyed like the hide, and dark
+		# enough at its own low luminance to still read as leather.
+		if mi.name == "Caparison":
 			continue
 		for s in mi.mesh.get_surface_count():
 			var src := mi.get_active_material(s)
@@ -653,6 +690,18 @@ func _dress_caparison() -> void:
 	mat.metallic = 0.0
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	cap.material_override = mat
+
+
+## TYPE readability (critic defect #2): the mage cast's witch-hat brim is
+## roughly TWICE the body width, and the gameplay camera looks down — so every
+## bishop on the board was a saucer with a cone in the middle, hiding its own
+## face, staff and body. Narrow the brim and lift the crown so the hat reads
+## as a hat and the bishop underneath reads as a bishop. Both casts have one
+## (`*Hat*`); the reshape is axis-symmetric so it needs no per-cast branch.
+func _narrow_wizard_brim() -> void:
+	for mi: MeshInstance3D in _model.find_children("*Hat*", "MeshInstance3D",
+			true, false):
+		mi.mesh = PieceAssets.narrowed_hat_mesh(mi.mesh)
 
 
 ## Raw (unscaled) model height: top of the skinned meshes parented directly
@@ -689,6 +738,17 @@ func _bone_mount(bone: String, mount_name: String) -> BoneAttachment3D:
 
 ## TYPE signature gear: rigid props on the rig's handslot/chest bones.
 ## Same gear for every house — the type IS the gear.
+##
+## The gear is DYED (defects #6/#7, 2026-08-08). It used to be attached after
+## _tint_meshes purely so it would "keep its own colors", and that one line of
+## intent was the whole bug: every prop is a stock KayKit atlas, so every army
+## fielded a fluorescent magenta grimoire, a lime orb, a salmon shield rim, a
+## maroon saddle-shield and an orange-tan bow — the loudest colors in a frame
+## that is supposed to read as one house. Gear is dressing, not heraldry: it
+## goes through the same multiply the body does, at GEAR_SATURATION (flat), so
+## only the prop's own luminance survives and the hue is exactly the house's.
+## The SIGIL DECAL is the one exception and is attached AFTER the dye — that
+## plate IS heraldry and must keep the sigil's own paint.
 func _attach_gear() -> void:
 	for spec: Dictionary in PieceAssets.gear_specs(piece_type):
 		var att := _bone_mount(spec["bone"], "GearMount_%s" % spec["key"])
@@ -700,6 +760,7 @@ func _attach_gear() -> void:
 		prop.rotation_degrees = spec["rot_deg"]
 		prop.scale = Vector3.ONE * float(spec["scl"])
 		att.add_child(prop)
+		_tint_meshes(prop, _tint_for("piece"), PieceAssets.GEAR_SATURATION)
 		if bool(spec["decal"]) and HouseRegistry.has_house(house_id):
 			_attach_sigil_decal(prop, spec)
 
@@ -767,23 +828,52 @@ func _doff_bear_hood() -> void:
 		mi.visible = false
 
 
-## HOUSE flourish: the helm's rim + motif take the house ACCENT (the brightest
-## of the three house colors — it has to carry the house at a few pixels), the
-## iron shell is left alone. Materials are found BY NAME, never by surface
-## index. Saturation is irrelevant here (the helms are untextured flat colors,
-## so tinted_material's desaturation pass never runs) — the near-white accent
-## base is what makes the multiply land the house hue true.
+## HOUSE flourish: the pawn's helm, dressed in TWO house colors.
+##
+## THE DOME USED TO BE PLAIN BLACK IRON, deliberately — "that restraint is
+## what keeps a footman humble". At board distance the restraint cost the game
+## its pawn ranks: every army's front row was "a row of identical black
+## beads", and on the pale houses that black rank "visually belongs to a
+## different army than its own back rank" (critic defect #11). Nine houses,
+## one helmet.
+##
+## So the weight is inverted: the DOME carries the house color (dyed dark —
+## dark enough that a pawn is still plainly humbler than the crested royal
+## behind him) and the rim + motif carry the house CHARGE, the heraldic color
+## furthest from that dome (PieceAssets.house_charge_color — the fix for a
+## Thornvale rose that was green-on-green and invisible, defect #9). The
+## Drowned Legion's dome is dyed darker still: charred, but charred in
+## Tidegrip's own green rather than in nobody's black (defect #8).
+##
+## Materials are found BY NAME, never by surface index.
+const HELM_SHELL_WEIGHT := 0.62
+const HELM_SHELL_WEIGHT_DROWNED := 0.40
+
+
 func _dress_helm(helm: Node3D) -> void:
-	var accent: Color = _tint_for("piece")
+	var body: Color = _tint_for("piece")
+	var weight := HELM_SHELL_WEIGHT_DROWNED \
+			if house_id == PieceAssets.SKELETON_HOUSE else HELM_SHELL_WEIGHT
+	var shell := Color(body.r * weight, body.g * weight, body.b * weight)
+	var charge := shell.lightened(0.55)
 	if HouseRegistry.has_house(house_id):
-		accent = HouseRegistry.get_colors(house_id)["accent"]
+		charge = PieceAssets.house_charge_color(house_id, shell)
 	for mi: MeshInstance3D in helm.find_children("*", "MeshInstance3D", true, false):
 		for s in mi.mesh.get_surface_count():
 			var src := mi.get_active_material(s)
-			if src is StandardMaterial3D and str(src.resource_name) \
-					.begins_with(PieceAssets.HELM_ACCENT_MATERIAL):
+			if not src is StandardMaterial3D:
+				continue
+			var mat_name := str(src.resource_name)
+			if mat_name.begins_with(PieceAssets.HELM_ACCENT_MATERIAL):
+				# FLAT dye, not a multiply: the Drowned Legion's helm ships
+				# with its accent baked charcoal, and multiplying a charge
+				# into that landed #242c27 on a #2c3732 dome — invisible, the
+				# very failure this dressing exists to end.
 				mi.set_surface_override_material(
-					s, PieceAssets.tinted_material(src, accent, 1.0))
+					s, PieceAssets.dyed_material(src, charge, 0.92))
+			elif mat_name.begins_with(PieceAssets.HELM_IRON_MATERIAL):
+				mi.set_surface_override_material(
+					s, PieceAssets.dyed_material(src, body, weight))
 
 
 func _attach_crown() -> void:
@@ -796,9 +886,9 @@ func _attach_crown() -> void:
 		return
 	var crown: Node3D = PieceAssets.crown_scene(_tint_for("piece")).instantiate()
 	crown.name = "Crown"
-	crown.position = Vector3(0.0, 0.80, 0.0)   # ring at the brow line
+	crown.position = Vector3(0.0, 0.80, 0.0)   # ring at the skull's crown line
 	crown.rotation.y = deg_to_rad(-20.0)       # battle-bent point toward the camera
-	crown.scale = Vector3.ONE * 5.3            # 0.18 m prop on the stylized skull
+	crown.scale = Vector3.ONE * CROWN_SCALE
 	att.add_child(crown)
 
 
@@ -813,8 +903,8 @@ func _attach_tiara() -> void:
 		return
 	var tiara: Node3D = PieceAssets.crown_scene(_tint_for("piece")).instantiate()
 	tiara.name = "Tiara"
-	tiara.position = Vector3(0.0, 0.84, 0.0)   # band at the brow line
-	tiara.scale = Vector3(3.9, 2.1, 3.9)       # slim ring, points flattened
+	tiara.position = Vector3(0.0, 0.86, 0.0)   # band on the crown of the head
+	tiara.scale = TIARA_SCALE                  # slim ring, points flattened
 	# The crown GLB's INTERNAL nodes are also named Crown* — rename them or
 	# the queen reads "crowned" to every Crown-node check (e2e board-truth,
 	# the costume validator). The name IS the contract.
@@ -847,7 +937,7 @@ func _attach_cape() -> void:
 func _build_glyph_ring() -> void:
 	_glyph_ring = PieceAssets.glyph_ring_scene(piece_type).instantiate()
 	_glyph_ring.name = "GlyphRing"
-	_glyph_ring.position = Vector3(0.0, 0.002, 0.0)
+	_glyph_ring.position = Vector3(0.0, 0.004, 0.0)
 	add_child(_glyph_ring)
 	# Per-piece duplicate of the emissive glyph material so selection can
 	# brighten THIS ring only.
@@ -860,6 +950,19 @@ func _build_glyph_ring() -> void:
 					and src.resource_name == PieceAssets.GLYPH_MATERIAL_NAME:
 				_glyph_mat = (src as StandardMaterial3D).duplicate()
 				_glyph_mat.emission_energy_multiplier = PieceAssets.GLYPH_ENERGY_REST
+				# Critic defect #17: engraved WHITE, sitting on the floor
+				# under the piece, the glyph rendered as "a white blob half
+				# buried in the shadow — a stray specular highlight, not an
+				# icon". Two causes, two fixes: it was painted in nobody's
+				# color (now the house CHARGE, so it reads as this army's
+				# mark), and it was lying inside its own piece's contact
+				# shadow (now exempt from receiving one).
+				var glyph: Color = _tint_for("piece")
+				if HouseRegistry.has_house(house_id):
+					glyph = HouseRegistry.get_colors(house_id)["accent"]
+				_glyph_mat.albedo_color = glyph
+				_glyph_mat.emission = glyph
+				_glyph_mat.disable_receive_shadows = true
 				mi.set_surface_override_material(s, _glyph_mat)
 	_glyph_ring.visible = false
 

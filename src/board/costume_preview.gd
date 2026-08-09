@@ -24,10 +24,12 @@ const PieceScene := preload("res://scenes/piece_view.tscn")
 
 const SHOT_DIR := "res://test_e2e/artifacts/module-previews/costumes"
 ## Display order: reading order of the height grading, not enum order.
-## The MOUNTED knight (ISSUES.md #1) sits between bishop and rook.
+## The MOUNTED knight sits between QUEEN and KING (PieceAssets.TYPE_HEIGHT —
+## the ensemble is normalized on the rider, so the horse adds mass below him
+## instead of stealing his height).
 const TYPE_ORDER: Array[int] = [
-	PieceView.Type.PAWN, PieceView.Type.BISHOP, PieceView.Type.KNIGHT,
-	PieceView.Type.ROOK, PieceView.Type.QUEEN, PieceView.Type.KING,
+	PieceView.Type.PAWN, PieceView.Type.BISHOP, PieceView.Type.ROOK,
+	PieceView.Type.QUEEN, PieceView.Type.KNIGHT, PieceView.Type.KING,
 ]
 const COL_STEP := 1.35
 const ROW_STEP := 2.6
@@ -143,9 +145,11 @@ static func validate_piece(pv: PieceView, piece_type: int, house_id: String) -> 
 
 ## HOUSE: the per-house PAWN half-helm (ISSUES.md #3) — pawns of a real house
 ## wear one and NOBODY else does; it hangs off the head bone so the height law
-## can't feel it; its rim/motif surface wears the house color while the iron
-## shell is left plain; and the Barbarian's bear hood is off, because a helm
-## under that hood is a helm nobody will ever see.
+## can't feel it; BOTH its surfaces are dressed (the dome in the house body
+## color, the rim/motif in the house charge — critic defect #11: nine armies
+## shipped with the same black dome and the pawn ranks were interchangeable);
+## and the Barbarian's bear hood is off, because a helm under that hood is a
+## helm nobody will ever see.
 static func _validate_helm(pv: PieceView, piece_type: int, house_id: String,
 		tag: String) -> Array[String]:
 	var errs: Array[String] = []
@@ -169,7 +173,7 @@ static func _validate_helm(pv: PieceView, piece_type: int, house_id: String,
 		errs.append("%s: helm mounted at %v, expected %v"
 				% [tag, helm.position, PieceView.HELM_MOUNT_POS])
 	var accent_dressed := false
-	var iron_untouched := true
+	var shell_dressed := false
 	for mi: MeshInstance3D in helm.find_children("*", "MeshInstance3D", true, false):
 		for s in mi.mesh.get_surface_count():
 			var base := mi.mesh.surface_get_material(s)
@@ -181,17 +185,138 @@ static func _validate_helm(pv: PieceView, piece_type: int, house_id: String,
 				accent_dressed = true
 			if mat_name.begins_with(PieceAssets.HELM_IRON_MATERIAL) \
 					and mi.get_surface_override_material(s) != null:
-				iron_untouched = false
+				shell_dressed = true
 	if not accent_dressed:
-		errs.append("%s: helm rim/motif not wearing the house color" % tag)
-	if not iron_untouched:
-		errs.append("%s: helm iron overridden — the shell stays plain" % tag)
+		errs.append("%s: helm rim/motif not wearing the house charge" % tag)
+	if not shell_dressed:
+		errs.append("%s: helm dome not wearing the house color" % tag)
 	# The bear hood must be HIDDEN (never freed — see PieceView._doff_bear_hood).
 	for mi: MeshInstance3D in pv.find_children(
 			PieceAssets.BEAR_HOOD_PATTERN, "MeshInstance3D", true, false):
 		if mi.visible:
 			errs.append("%s: bear hood still worn over the helm" % tag)
 	return errs
+
+
+# ── palette envelope (defects #6/#7) ───────────────────────────────────────
+#
+# The bug these constants exist to prevent: a material that never went through
+# the house dye still renders, and a stock pack color becomes the loudest thing
+# in the frame. Nine armies shipped with a fluorescent MAGENTA grimoire, a LIME
+# staff orb, a SALMON shield rim, a FOREST-GREEN queen's hood and an ORANGE-TAN
+# bow, in every house, because signature gear was attached after _tint_meshes
+# "so it keeps its own colors".
+#
+# A surface is legal when BOTH hold:
+#   1. its albedo TEXTURE is desaturated to the ceiling — no texel can shout
+#      louder than PALETTE_TEXEL_LOUDNESS (saturation x value in HSV);
+#   2. its flat albedo lands on a house hue (or is neutral / near-black, which
+#      every palette contains — iron, bone, leather, shadow).
+
+## Loudest texel any dyed surface may still carry (HSV saturation x value).
+## A raw KayKit atlas scores 0.6+; the same atlas desaturated to the palette
+## ceiling scores ~0.10.
+const PALETTE_TEXEL_LOUDNESS := 0.22
+## How far a flat albedo may sit from the nearest house hue, in degrees.
+const PALETTE_HUE_TOL := 46.0
+## Chroma weight (HSV saturation x value) below which a color carries no house
+## information and is always legal — iron, bone, leather, shadow. A dark olive
+## banner rod scores 0.05; the shipped magenta grimoire scored 0.53 and the
+## lime staff orb 0.18.
+const PALETTE_CHROMA_FLOOR := 0.10
+## HERALDRY + REGALIA — deliberately outside the dye, by name:
+##   sigil plate / banner cloth / caparison / pennant carry the house's own
+##     artwork; dyeing them would dye the sigil.
+##   crown / tiara / TiaraBand are gold-and-frost, the two metals of kingship
+##     — that contrast against the house body IS the royal read (defect #3).
+##   the glyph ring is a TYPE marker, not a house one.
+const PALETTE_EXEMPT := ["SigilDecal", "BannerCloth", "Pennant", "Caparison",
+		"Crown", "Tiara", "TiaraBand", "GlyphRing"]
+
+## Every surface this piece renders that is outside its house's palette.
+## Returns [] when the whole piece reads as one house.
+static func palette_offenders(pv: PieceView, house_id: String) -> Array[String]:
+	var errs: Array[String] = []
+	if not HouseRegistry.has_house(house_id):
+		return errs
+	var hues: Array[float] = []
+	for c: Color in PieceAssets.house_palette(house_id):
+		if c.s * c.v > PALETTE_CHROMA_FLOOR:
+			hues.append(c.h * 360.0)
+	for mi: MeshInstance3D in pv.find_children("*", "MeshInstance3D", true, false):
+		if not mi.is_visible_in_tree() or _palette_exempt(mi, pv):
+			continue
+		for s in mi.mesh.get_surface_count():
+			var mat := mi.get_active_material(s) as StandardMaterial3D
+			if mat == null:
+				continue
+			var tag := "%s/%s#%d" % [house_id, mi.name, s]
+			var loud := _texel_loudness(mat.albedo_texture)
+			if loud > PALETTE_TEXEL_LOUDNESS:
+				errs.append("%s: undyed texture (loudness %.2f)" % [tag, loud])
+			var flat := mat.albedo_color * _texture_mean(mat.albedo_texture)
+			if flat.s * flat.v <= PALETTE_CHROMA_FLOOR:
+				continue
+			var best := 360.0
+			for h in hues:
+				best = minf(best, absf(wrapf(flat.h * 360.0 - h, -180.0, 180.0)))
+			if best > PALETTE_HUE_TOL:
+				errs.append("%s: hue %.0f is %.0f deg off the house palette (%s)"
+						% [tag, flat.h * 360.0, best, flat.to_html(false)])
+	return errs
+
+
+static func _palette_exempt(mi: MeshInstance3D, pv: PieceView) -> bool:
+	var node: Node = mi
+	while node != null and node != pv:
+		for name in PALETTE_EXEMPT:
+			if str(node.name).containsn(name):
+				return true
+		node = node.get_parent()
+	return false
+
+
+static var _palette_stats: Dictionary = {}   # texture rid -> [loudness, mean]
+
+
+## [loudest texel (HSV s*v), mean color] of a texture, sampled on a grid.
+static func _palette_probe(tex: Texture2D) -> Array:
+	if tex == null:
+		return [0.0, Color.WHITE]
+	var key := tex.get_instance_id()
+	if _palette_stats.has(key):
+		return _palette_stats[key]
+	var img := tex.get_image()
+	if img == null:
+		_palette_stats[key] = [0.0, Color.WHITE]
+		return _palette_stats[key]
+	if img.is_compressed():
+		img.decompress()
+	var steps := 24
+	var loud := 0.0
+	var sum := Color(0.0, 0.0, 0.0)
+	var n := 0
+	for iy in steps:
+		for ix in steps:
+			var px := img.get_pixel(
+					int((ix + 0.5) / steps * img.get_width()),
+					int((iy + 0.5) / steps * img.get_height()))
+			if px.a < 0.5:
+				continue
+			loud = maxf(loud, px.s * px.v)
+			sum += px
+			n += 1
+	var mean := Color.WHITE if n == 0 else Color(sum.r / n, sum.g / n, sum.b / n)
+	_palette_stats[key] = [loud, mean]
+	return _palette_stats[key]
+
+
+static func _texel_loudness(tex: Texture2D) -> float:
+	return float(_palette_probe(tex)[0])
+
+
+static func _texture_mean(tex: Texture2D) -> Color:
+	return _palette_probe(tex)[1]
 
 
 ## Measured world height of the piece body (the height-grading ground truth).

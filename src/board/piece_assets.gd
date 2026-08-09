@@ -43,16 +43,26 @@ const LOOPED_ANIMS := ["Idle_A", "Idle_B", "Walking_A", "Walking_B", "Walking_C"
 		"Running_A", "Running_B"]
 
 ## TYPE layer — strict height grading (world units, tallest body point).
-## pawn < bishop < knight < rook < queen < king, tuned so a full army reads
-## at a glance from the default gameplay camera. The rook's reference is its
-## TowerBody stone (the pennant pole is an accent allowed to poke above).
-## The MOUNTED knight (ISSUES.md #1) moved up a slot — a rider on horseback
-## reads taller than a foot bishop; his reference is the rider's helm (the
-## crest, like the pennant, is an accent above it).
+## pawn < bishop < rook < queen < KNIGHT < king, tuned so a full army reads at
+## a glance from the default gameplay camera. The rook's reference is its
+## TowerBody stone (the pennant pole is an accent allowed to poke above); the
+## knight's is the seated rider's helm (his crest is an accent above it).
+##
+## THE KNIGHT'S SLOT MOVED, DELIBERATELY (critic defect #1, 2026-08-08).
+## It used to be 0.98, one notch over the bishop — and that single number was
+## the whole cavalry-legibility bug. The ENSEMBLE is normalized to this value,
+## so a horse added under the rider does not add height, it STEALS it: at 0.98
+## the rider was scaled to 0.58 world units tall — a head SHORTER than a pawn
+## — and the horse under him shrank to dog size. A mounted knight cannot be
+## graded like a foot soldier. So the slot is now sized on the RIDER first
+## (~0.68 world, a full-size figure) with the horse adding its mass BELOW him,
+## which lands the ensemble at 1.22 — over the queen, under the king, exactly
+## where a man on a warhorse belongs. tests/test_costumes.gd asserts the new
+## order; GRADE_ORDER there carries the same reasoning.
 const TYPE_HEIGHT := {
 	0: 0.78,   # PAWN
 	1: 1.02,   # ROOK (TowerBody stone height)
-	2: 0.98,   # KNIGHT (mounted: rider's helm atop the horse)
+	2: 1.22,   # KNIGHT (mounted: rider's helm atop the destrier)
 	3: 0.94,   # BISHOP
 	4: 1.14,   # QUEEN
 	5: 1.26,   # KING
@@ -93,10 +103,19 @@ const GEAR_TOME := preload("res://assets/kaykit-adventurers/props/spellbook_clos
 const GEAR_BOW := preload("res://assets/kaykit-adventurers/props/bow_withString.gltf")
 const GEAR_QUIVER := preload("res://assets/kaykit-adventurers/props/quiver.gltf")
 
+## THE SWORD GRIP (critic defect #12). The blade's long axis is the prop's
+## local +Y and its ORIGIN sits at the guard, so mounting it at Vector3.ZERO
+## put the guard exactly inside the fist: "the blade passes through the fist
+## and forearm and the guard sits BELOW the gripping hand" — plainly visible
+## in the marquee duel close-up. Sliding the prop +0.17 along its own blade
+## axis lands the fist mid-grip (the grip runs local y -0.366..0) and lifts
+## the guard clear of the knuckles, where a guard belongs.
+const SWORD_GRIP := Vector3(0.0, 0.17, 0.0)
+
 const GEAR_SPECS := {
 	0: [   # PAWN — footman: sword + round shield
 		{"key": "sword", "scene": GEAR_SWORD, "bone": "handslot.r",
-			"pos": Vector3.ZERO, "rot_deg": Vector3.ZERO, "scl": 1.0, "decal": false},
+			"pos": SWORD_GRIP, "rot_deg": Vector3.ZERO, "scl": 1.0, "decal": false},
 		{"key": "shield", "scene": GEAR_SHIELD_ROUND, "bone": "handslot.l",
 			"pos": Vector3.ZERO, "rot_deg": Vector3.ZERO, "scl": 1.0, "decal": true,
 			"decal_pos": Vector3(0.0, 0.0, 0.21), "decal_size": 0.52},
@@ -104,7 +123,7 @@ const GEAR_SPECS := {
 	1: [],  # ROOK — the watchtower carries the banner instead
 	2: [   # KNIGHT — sword + kite shield
 		{"key": "sword", "scene": GEAR_SWORD, "bone": "handslot.r",
-			"pos": Vector3.ZERO, "rot_deg": Vector3.ZERO, "scl": 1.0, "decal": false},
+			"pos": SWORD_GRIP, "rot_deg": Vector3.ZERO, "scl": 1.0, "decal": false},
 		{"key": "shield", "scene": GEAR_SHIELD_KITE, "bone": "handslot.l",
 			"pos": Vector3.ZERO, "rot_deg": Vector3.ZERO, "scl": 1.0, "decal": true,
 			"decal_pos": Vector3(0.0, -0.04, 0.14), "decal_size": 0.48},
@@ -125,7 +144,7 @@ const GEAR_SPECS := {
 	],
 	5: [   # KING — sword in hand; crown + cape attach separately
 		{"key": "sword", "scene": GEAR_SWORD, "bone": "handslot.r",
-			"pos": Vector3.ZERO, "rot_deg": Vector3.ZERO, "scl": 1.0, "decal": false},
+			"pos": SWORD_GRIP, "rot_deg": Vector3.ZERO, "scl": 1.0, "decal": false},
 	],
 }
 
@@ -334,20 +353,63 @@ func banner_texture(house_id: String) -> Texture2D:
 # -- tint pipeline ---------------------------------------------------------
 
 
+## THE PALETTE ENVELOPE (critic pass 2026-08-08, defects #6/#7).
+##
+## The dye is a MULTIPLY over a partly-desaturated pack texture, so whatever
+## chroma survives `saturation` survives into the frame. At the shipped 0.25
+## the survivors were loud enough to break the house read in all nine armies:
+## the mage's grimoire stayed fluorescent MAGENTA, his staff orb LIME, the
+## queen's hood FOREST GREEN over Goldclaw's gold. A stock pack color has no
+## business being the brightest thing in a house's frame.
+##
+## So saturation is ceilinged here, at the one place every dyed material
+## passes through. Above the ceiling the multiply cannot pull a saturated
+## texel into the house hue; at or below it, every texel lands within a
+## narrow chroma band around the tint and the piece reads house-first,
+## material-second. `tests/test_costumes.gd::_test_palette_envelope` is the
+## gate that fails if a rendered surface ever escapes this band again.
+const PALETTE_SATURATION_CEILING := 0.10
+## Signature gear (sword, shield, staff, grimoire, bow, quiver) is dyed FLAT:
+## the pack props are single-texture atlases whose stock colors are pure
+## fantasy-loot candy, and they are the pieces a player's eye lands on. Full
+## desaturation makes the prop's own luminance the only thing that survives,
+## so the house hue is exact — the mount's dye doctrine, applied to tack.
+const GEAR_SATURATION := 0.0
+
+
 ## House-tinted variant of a pack material: desaturated albedo texture
 ## multiplied by the house tint, roughness pushed up. Cached and shared.
+## `saturation` is clamped to PALETTE_SATURATION_CEILING — see above.
 func tinted_material(src: StandardMaterial3D, tint: Color, saturation: float) -> StandardMaterial3D:
-	var key := "%d|%s" % [src.get_rid().get_id(), tint.to_html()]
+	var sat := minf(saturation, PALETTE_SATURATION_CEILING)
+	# Keyed on the resource's INSTANCE id, never its RID: a headless run has
+	# no rendering server, so Resource.get_rid() hands every material the same
+	# empty RID and one cache entry would be served to all of them (and a
+	# freed RID id is recycled, which is the same bug with a timer on it).
+	var key := "%d|%s|%.3f" % [src.get_instance_id(), tint.to_html(), sat]
 	if _tint_cache.has(key):
 		return _tint_cache[key]
 	var tinted: StandardMaterial3D = src.duplicate()
 	if tinted.albedo_texture != null:
-		tinted.albedo_texture = _desaturated(tinted.albedo_texture, saturation)
+		tinted.albedo_texture = _desaturated(tinted.albedo_texture, sat)
 	tinted.albedo_color = src.albedo_color * tint
 	tinted.roughness = maxf(tinted.roughness, 0.88)
 	tinted.metallic = minf(tinted.metallic, 0.05)
 	_tint_cache[key] = tinted
 	return tinted
+
+
+## Every color a house is allowed to put on the board: its three heraldic
+## colors plus the two multiply tints. The palette-envelope test measures
+## rendered surfaces against these hues.
+func house_palette(house_id: String) -> Array[Color]:
+	if not HouseRegistry.has_house(house_id):
+		return []
+	var cols: Dictionary = HouseRegistry.get_colors(house_id)
+	var out: Array[Color] = [cols["primary"], cols["secondary"], cols["accent"],
+			HouseRegistry.get_house_tint(house_id, "piece"),
+			HouseRegistry.get_house_tint(house_id, "tower")]
+	return out
 
 
 ## HOUSE layer — the knight's mount, dyed into the house palette.
@@ -363,14 +425,44 @@ func tinted_material(src: StandardMaterial3D, tint: Color, saturation: float) ->
 const MOUNT_DYE_FLOOR := 0.42   # darkest material still shows the hue
 const MOUNT_DYE_GAIN := 1.05    # ...and the lightest reads near full tint
 
+## The pack's own albedos are all dark browns within 0.11 of each other, so a
+## pure luminance dye flattened the animal into one silhouette-less blob at
+## board distance (critic defect #1: "spindly, mane-less, tail-less"). The
+## mount's parts are dyed on AUTHORED weights instead — a bright blaze, a dark
+## mane, darker hooves — so the destrier keeps internal contrast and its mane,
+## tail and legs stay separately readable while the whole animal still reads
+## house-colored. Unknown materials fall back to the luminance formula.
+const MOUNT_DYE_WEIGHTS := {
+	"Main": 1.00,          # the hide
+	"Main_Light": 1.32,    # blaze / socks — the bright accent
+	"Main_Dark": 0.60,     # ears, shading
+	"Muzzle": 0.50,
+	"Hair": 0.54,          # mane + tail: darker than the hide, not black
+	"Hooves": 0.32,
+	"saddle_leather": 0.44,
+}
+
 
 func dyed_mount_material(src: StandardMaterial3D, tint: Color) -> StandardMaterial3D:
-	var key := "mount|%d|%s" % [src.get_rid().get_id(), tint.to_html()]
+	var lum := src.albedo_color.get_luminance()
+	var weight: float = MOUNT_DYE_WEIGHTS.get(str(src.resource_name),
+			MOUNT_DYE_FLOOR + MOUNT_DYE_GAIN * lum)
+	return dyed_material(src, tint, weight)
+
+
+## Flat house dye: the tint at a fixed weight, keeping the source's alpha.
+## For UNTEXTURED pack/authored materials, where the ordinary multiply-tint
+## only darkens a stock color instead of replacing it (the brown-horse scar).
+func dyed_material(src: StandardMaterial3D, tint: Color,
+		weight: float) -> StandardMaterial3D:
+	var key := "dye|%d|%s|%.3f" % [src.get_instance_id(), tint.to_html(), weight]
 	if _tint_cache.has(key):
 		return _tint_cache[key]
 	var dyed: StandardMaterial3D = src.duplicate()
-	var lum := src.albedo_color.get_luminance()
-	dyed.albedo_color = tint * (MOUNT_DYE_FLOOR + MOUNT_DYE_GAIN * lum)
+	dyed.albedo_color = Color(
+			minf(tint.r * weight, 1.0),
+			minf(tint.g * weight, 1.0),
+			minf(tint.b * weight, 1.0))
 	dyed.albedo_color.a = src.albedo_color.a
 	dyed.roughness = maxf(dyed.roughness, 0.85)
 	dyed.metallic = minf(dyed.metallic, 0.05)
@@ -378,14 +470,113 @@ func dyed_mount_material(src: StandardMaterial3D, tint: Color) -> StandardMateri
 	return dyed
 
 
+## THE HOUSE CHARGE (critic defects #9/#10/#11). The color a house paints its
+## small marks in — helm rim and motif — chosen as whichever of its three
+## heraldic colors sits FURTHEST from the color the body is dyed in.
+##
+## Picking `accent` unconditionally is what made Thornvale's rose invisible: a
+## #8fbf6a rose on a #79a04a helm is the same green twice, and the critic
+## could not find it at 5x zoom. Contrast is a relationship, so it has to be
+## computed against the body, not declared in the palette. If the winner still
+## lands on the body's own brightness, it is pushed away from it — a charge
+## that a player cannot see is not heraldry.
+func house_charge_color(house_id: String, body: Color) -> Color:
+	if not HouseRegistry.has_house(house_id):
+		return Color.WHITE
+	var cols: Dictionary = HouseRegistry.get_colors(house_id)
+	var best: Color = cols["accent"]
+	var best_d := -1.0
+	for key in ["primary", "secondary", "accent"]:
+		var c: Color = cols[key]
+		var d := Vector3(c.r - body.r, c.g - body.g, c.b - body.b).length()
+		if d > best_d:
+			best_d = d
+			best = c
+	var body_lum := body.get_luminance()
+	if absf(best.get_luminance() - body_lum) < 0.20:
+		best = best.lightened(0.5) if body_lum < 0.35 else best.darkened(0.42)
+	return best
+
+
+# -- the bishop's hat (critic defect #2) -----------------------------------
+#
+# Both mage casts ship a witch hat whose BRIM IS TWICE THE BODY WIDTH. Seen
+# from the near-side top-down gameplay camera that brim is the entire piece:
+# "a navy saucer with a small cone in the middle — no face, no staff, no body.
+# A sombrero seen from above." Nothing about the material, the tint or the
+# lighting could rescue it; the shape was wrong.
+#
+# So the brim is narrowed and the crown lifted, on the MESH — not by scaling
+# the node (a skinned MeshInstance3D ignores its own transform) and not by
+# hiding the hat (it is the model's tallest mesh, i.e. the bishop's entire
+# height reference: hiding it would silently rescale every bishop, the exact
+# trap the Barbarian's bear hood already taught us). Rebuilding the surface
+# keeps the hat real, keeps it skinned, and keeps the height law honest.
+##  Outer brim radius is kept at CORE + (r - CORE) * BRIM_KEEP: a brim at the
+##  full radius comes in ~38%, the crown and its taper are untouched.
+const HAT_BRIM_CORE := 0.42     # fraction of max radius that is "crown"
+const HAT_BRIM_KEEP := 0.34     # how much of the overhang survives
+const HAT_CROWN_LIFT := 0.22    # ...and the cone grows back what the brim lost
+
+var _hat_cache: Dictionary = {}   # source mesh instance id -> ArrayMesh
+
+
+## The narrowed-brim variant of a wizard-hat mesh. Cached per source mesh.
+func narrowed_hat_mesh(src: Mesh) -> ArrayMesh:
+	var key := src.get_instance_id()
+	if _hat_cache.has(key):
+		return _hat_cache[key]
+	var box := src.get_aabb()
+	var cx := box.position.x + box.size.x * 0.5
+	var cz := box.position.z + box.size.z * 0.5
+	var base_y := box.position.y
+	var span_y := maxf(box.size.y, 0.0001)
+	var max_r := maxf(maxf(box.size.x, box.size.z) * 0.5, 0.0001)
+	var core := max_r * HAT_BRIM_CORE
+	var out := ArrayMesh.new()
+	for s in src.get_surface_count():
+		var arrays := src.surface_get_arrays(s)
+		var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+		for i in verts.size():
+			var v := verts[i]
+			var dx := v.x - cx
+			var dz := v.z - cz
+			var r := sqrt(dx * dx + dz * dz)
+			if r > core:
+				var f := (core + (r - core) * HAT_BRIM_KEEP) / r
+				v.x = cx + dx * f
+				v.z = cz + dz * f
+			var t := clampf((v.y - base_y) / span_y, 0.0, 1.0)
+			v.y = base_y + (v.y - base_y) * (1.0 + HAT_CROWN_LIFT * t)
+			verts[i] = v
+		arrays[Mesh.ARRAY_VERTEX] = verts
+		# Drop the compression flag: surface_get_arrays hands back plain data.
+		var fmt: int = src.surface_get_format(s) & ~Mesh.ARRAY_FLAG_COMPRESS_ATTRIBUTES
+		out.add_surface_from_arrays(src.surface_get_primitive_type(s), arrays,
+				[], {}, fmt)
+		out.surface_set_material(s, src.surface_get_material(s))
+	_hat_cache[key] = out
+	return out
+
+
 func _desaturated(tex: Texture2D, saturation: float) -> Texture2D:
-	var key := tex.get_rid().get_id()
+	# The saturation belongs in the key: body and gear pull the SAME pack
+	# atlas at different saturations, and a texture-only key silently served
+	# whichever one asked first to both.
+	var key := "%d|%.3f" % [tex.get_instance_id(), saturation]
 	if _desat_cache.has(key):
 		return _desat_cache[key]
-	var img := tex.get_image()
-	if img == null:
+	# DUPLICATE before touching it: Texture2D.get_image() hands back the
+	# texture's OWN Image, so decompress/convert/adjust_bcs edited the source
+	# atlas in place. Consequences, all silent: the first saturation to ask
+	# won for every later caller, a second pass compounded onto an already
+	# desaturated image, and every "is this material dyed?" check was
+	# comparing against a source that had been dyed behind its back.
+	var src_img := tex.get_image()
+	if src_img == null:
 		_desat_cache[key] = tex
 		return tex
+	var img := src_img.duplicate() as Image
 	if img.is_compressed():
 		img.decompress()
 	img.convert(Image.FORMAT_RGBA8)

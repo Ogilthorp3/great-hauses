@@ -147,10 +147,16 @@ export(f"{OUT_DIR}/crown.glb")
 print(f"[crown] wrote {OUT_DIR}/crown.glb")
 
 # ---------------------------------------------------------------- frost variant
+# DARK steel, not pale silver (critic defect #3, 2026-08-08). The cold houses
+# — Winterfang, Tidegrip, Swiftcrest, Silverbrook — dye their pieces pale
+# blue, and a pale silver crown on a pale blue head is no crown at all from
+# the gameplay camera: king and queen both read as one smooth dome and the
+# player cannot find their own king. The frost crown is now near-black steel
+# with a cold sheen, so it reads as a dark spiked ring against its wearer.
 bsdf = gold.node_tree.nodes["Principled BSDF"]
 gold.name = "crown_frost"
-bsdf.inputs["Base Color"].default_value = (0.62, 0.70, 0.78, 1.0)  # cold silver
-bsdf.inputs["Metallic"].default_value = 0.90
-bsdf.inputs["Roughness"].default_value = 0.38
+bsdf.inputs["Base Color"].default_value = (0.13, 0.16, 0.21, 1.0)  # dark steel
+bsdf.inputs["Metallic"].default_value = 0.85
+bsdf.inputs["Roughness"].default_value = 0.34
 export(f"{OUT_DIR}/crown_frost.glb")
 print(f"[crown] wrote {OUT_DIR}/crown_frost.glb")
