@@ -58,6 +58,17 @@ var label: String = ""
 var timeout_sec: float = 200.0
 var shots: bool = false
 var artifacts_dir: String = ""
+var abl_only: String = ""
+## THE WAY OUT FROM UNDER THE 60 Hz WALL.
+## A cost smaller than the refresh interval is invisible to a wall-clock
+## timer, and Metal gives Godot no GPU timestamps here — so the only honest
+## way to read a cost in milliseconds on this machine is to make the frame
+## genuinely expensive and measure the DIFFERENCE. `--perf-load=N`
+## supersamples the 3D render target by N (fill only: draw calls, primitives,
+## skinning and shadow submission are untouched), which lifts the frame clear
+## of the refresh interval and lets an A/B on GEOMETRY be read in real ms.
+## The absolute frame time under load is meaningless; the delta is not.
+var load_scale: float = 0.0
 
 var _done := false
 var _to_window: Transform2D = Transform2D.IDENTITY
@@ -71,6 +82,8 @@ var _last_us := 0
 var _bucket_us := 0          # wall-clock microseconds accumulated this bucket
 var _frame_ms: Array[float] = []
 var _scene_ms: Array[float] = []
+var _gpu_ms: Array[float] = []    # RenderingServer per-viewport GPU timer
+var _rcpu_ms: Array[float] = []   # RenderingServer per-viewport CPU timer
 var _draws_max := 0
 var _objs_max := 0
 var _prims_max := 0
@@ -112,6 +125,10 @@ func _ready() -> void:
 			artifacts_dir = arg.substr(17)
 		elif arg.begins_with("--perf-shots="):
 			shots = arg.substr(13) == "1"
+		elif arg.begins_with("--perf-abl="):
+			abl_only = arg.substr(11)
+		elif arg.begins_with("--perf-load="):
+			load_scale = float(arg.substr(12))
 	if mode.is_empty():
 		return   # dormant — a normal launch never reaches this file at all
 	if shots and artifacts_dir.is_empty():
@@ -129,6 +146,30 @@ func _ready() -> void:
 	_mark.name = "PerfProcMark"
 	_mark.process_priority = -100000   # first _process callback of the frame
 	get_tree().root.add_child.call_deferred(_mark)
+	## THE 60 Hz WALL, AND WHY THIS HARNESS NO LONGER REPORTS A COST IN ms.
+	##
+	## `--disable-vsync` does NOT defeat macOS presentation pacing. Measured,
+	## not assumed: a scene containing ONE Node and no 3D at all, launched
+	## with --disable-vsync --max-fps 0 at 960x540, renders 600 frames in
+	## 9.921 s — 60.5 fps, 16.535 ms per frame. An empty scene cannot cost
+	## 16.5 ms. The frame clock in a visible window on this machine measures
+	## the DISPLAY, and it does so no matter what is in the scene: this
+	## harness reported mean_ms 16.6 / fps 60.0 for the stock scene and for a
+	## scene with 55 % of its primitives removed, identically.
+	##
+	## Consequence: every mean_ms in a run that sits at ~16.6 ms is a wall,
+	## not a measurement, and no optimization can ever move it. Only costs
+	## LARGE ENOUGH TO MISS A VSYNC are visible to a wall-clock timer — which
+	## is exactly what the player feels, so that is what we now count.
+	##
+	## Godot's own per-viewport GPU timer would have been the way out, and it
+	## does not work here: viewport_get_measured_render_time_gpu() returns
+	## 0.0000 on every frame under the Metal backend (probed directly; the CPU
+	## half of the same API returns sane values, so the measurement IS
+	## enabled and it is the GPU timestamps that are absent). It is read
+	## anyway and reported, so that the day it starts working is obvious.
+	RenderingServer.viewport_set_measure_render_time(
+		get_viewport().get_viewport_rid(), true)
 	_last_us = Time.get_ticks_usec()
 	_watchdog()
 	_run()
@@ -178,6 +219,9 @@ func _process(_delta: float) -> void:
 	_bucket_us += dt_us
 	if _mark != null and _mark.t_us > 0:
 		_scene_ms.append(float(now - _mark.t_us) / 1000.0)
+	var vp_rid := get_viewport().get_viewport_rid()
+	_gpu_ms.append(RenderingServer.viewport_get_measured_render_time_gpu(vp_rid))
+	_rcpu_ms.append(RenderingServer.viewport_get_measured_render_time_cpu(vp_rid))
 	_draws_max = maxi(_draws_max,
 		int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)))
 	_objs_max = maxi(_objs_max,
@@ -221,16 +265,44 @@ func _emit_bucket() -> void:
 	# includes RenderingServer sync+draw — so they are read once per bucket
 	# and reported as what they are: worst whole-idle-step and worst physics
 	# step in the interval.
+	# GPU/render-CPU: mean and worst over the bucket. These are the columns to
+	# compare across changes once the frame clock is pinned to the refresh.
+	var gpu_mean := 0.0
+	var gpu_worst := 0.0
+	if not _gpu_ms.is_empty():
+		for v in _gpu_ms:
+			gpu_mean += v
+			gpu_worst = maxf(gpu_worst, v)
+		gpu_mean /= float(_gpu_ms.size())
+	var rcpu_mean := 0.0
+	if not _rcpu_ms.is_empty():
+		for v in _rcpu_ms:
+			rcpu_mean += v
+		rcpu_mean /= float(_rcpu_ms.size())
+	## THE HITCH COUNT — the only frame-time signal the 60 Hz wall cannot
+	## swallow. At the wall a served frame reads ~16.6 ms and a MISSED vsync
+	## reads ~33 ms, so frames >=25 ms are dropped frames, counted not
+	## averaged: this is the stutter the player reports, and unlike mean_ms it
+	## responds to real work being removed.
+	var ov25 := 0
+	var ov50 := 0
+	for v in _frame_ms:
+		if v >= 25.0:
+			ov25 += 1
+		if v >= 50.0:
+			ov50 += 1
 	_phase_t += 1
 	print(("PERF phase=%s t=%d fps=%.1f frames=%d min_ms=%.2f p5_ms=%.2f "
 		+ "mean_ms=%.2f median_ms=%.2f "
 		+ "p95_ms=%.2f WORST_ms=%.2f scene_ms_mean=%.3f scene_ms_worst=%.3f "
+		+ "gpu_ms=%.3f gpu_ms_worst=%.3f rcpu_ms=%.3f drops=%d drops50=%d "
 		+ "TIME_PROCESS_ms=%.2f TIME_PHYSICS_ms=%.2f "
 		+ "objs=%d draws=%d prims=%d vram_mb=%.1f "
 		+ "nodes=%d mem_mb=%.1f ts=%.2f") % [
 		_phase, _phase_t, float(n) / secs, n, fastest, p5,
 		mean, median, p95, worst,
 		scene_mean, scene_worst,
+		gpu_mean, gpu_worst, rcpu_mean, ov25, ov50,
 		Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0,
 		Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0,
 		_objs_max, _draws_max, _prims_max,
@@ -240,6 +312,8 @@ func _emit_bucket() -> void:
 		Engine.time_scale])
 	_frame_ms.clear()
 	_scene_ms.clear()
+	_gpu_ms.clear()
+	_rcpu_ms.clear()
 	_bucket_us = 0
 	_draws_max = 0
 	_objs_max = 0
@@ -266,6 +340,8 @@ func _set_phase(p: String) -> void:
 	_phase_t = 0
 	_frame_ms.clear()
 	_scene_ms.clear()
+	_gpu_ms.clear()
+	_rcpu_ms.clear()
 	_bucket_us = 0
 	_draws_max = 0
 	_objs_max = 0
@@ -749,25 +825,42 @@ const ABL_WARM := 1.0       # discarded after every toggle (atlas/pipeline churn
 const ABL_MEASURE := 2.0    # sampled window
 const ABL_CYCLES := 3
 
+## The default sweep. `--perf-abl=a,b,c` overrides it, so a candidate
+## optimization can be A/B'd on its own without paying for the whole list.
+const ABL_DEFAULT: Array[String] = [
+	# THE CONTROLLED RESOLUTION EXPERIMENT. A small 1080p WINDOW is not a
+	# valid 1080p measurement on this machine: it leaves the owner's live
+	# game visible, and a visible Godot window is a GPU co-tenant, while a
+	# screen-sized window occludes it. So the resolution axis is swept
+	# INSIDE one screen-sized window by scaling the 3D render target —
+	# same window, same compositor, same neighbours, one variable.
+	"res1080",        # 3D render target forced to exactly 1920x1080
+	"res50",          # 3D render scale 0.5 → 25 % of the pixels: FILL test
+	"res25",          # 3D render scale 0.25 → 6 % of the pixels: FILL test
+	"sun-shadow",     # the hall's single shadow-casting light
+	"anim",           # every AnimationPlayer switched inactive
+	"torch",          # the 8 torch flicker scripts stop processing
+	"hud",            # the CanvasLayer HUD hidden
+	"pieces",         # all 32 piece views hidden (whole-army upper bound)
+	"hall",           # the Great Hall environment hidden
+	"glow",           # the Environment's glow post-process off
+]
+
 func _ablation_sweep(game: Node) -> void:
-	var names: Array[String] = [
-		# THE CONTROLLED RESOLUTION EXPERIMENT. A small 1080p WINDOW is not a
-		# valid 1080p measurement on this machine: it leaves the owner's live
-		# game visible, and a visible Godot window is a GPU co-tenant, while a
-		# screen-sized window occludes it. So the resolution axis is swept
-		# INSIDE one screen-sized window by scaling the 3D render target —
-		# same window, same compositor, same neighbours, one variable.
-		"res1080",        # 3D render target forced to exactly 1920x1080
-		"res50",          # 3D render scale 0.5 → 25 % of the pixels: FILL test
-		"res25",          # 3D render scale 0.25 → 6 % of the pixels: FILL test
-		"sun-shadow",     # the hall's single shadow-casting light
-		"anim",           # every AnimationPlayer switched inactive
-		"torch",          # the 8 torch flicker scripts stop processing
-		"hud",            # the CanvasLayer HUD hidden
-		"pieces",         # all 32 piece views hidden (whole-army upper bound)
-		"hall",           # the Great Hall environment hidden
-		"glow",           # the Environment's glow post-process off
-	]
+	var names: Array[String] = ABL_DEFAULT.duplicate()
+	if not abl_only.is_empty():
+		names.clear()
+		for s in abl_only.split(",", false):
+			names.append(s.strip_edges())
+	if load_scale > 0.0:
+		var vp0 := get_viewport()
+		vp0.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
+		vp0.scaling_3d_scale = load_scale
+		await get_tree().process_frame
+		await get_tree().process_frame
+		print("PERF ABLLOAD scaling_3d_scale=%.2f (supersample: fill only, "
+			% load_scale
+			+ "geometry unchanged) — absolute ms is meaningless, deltas are real")
 	for nm in names:
 		for cycle in ABL_CYCLES:
 			_set_phase("warm")
@@ -815,6 +908,44 @@ func _ablate(game: Node, what: String) -> Array:
 				if d.shadow_enabled:
 					d.shadow_enabled = false
 					undo.append(func(): d.shadow_enabled = true)
+		## THE REGRESSION ARM. Puts the sun's cascade BACK to the engine
+		## default (4 splits over 100 m) so the shipped setting can be A/B'd
+		## against what it replaced, interleaved, under identical contention.
+		## Here the ABL arm is the OLD behaviour: d_prims is expected NEGATIVE.
+		"pssm4":
+			for n in _all_of_type(DirectionalLight3D):
+				var d := n as DirectionalLight3D
+				if not d.shadow_enabled:
+					continue
+				var om := d.directional_shadow_mode
+				var od := d.directional_shadow_max_distance
+				d.directional_shadow_mode = \
+					DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
+				d.directional_shadow_max_distance = 100.0
+				undo.append(func():
+					d.directional_shadow_mode = om
+					d.directional_shadow_max_distance = od)
+		## Candidate: the hall's own props stop casting sun shadows (the board
+		## and the pieces keep theirs). Upper bound on "shadow only what the
+		## player is looking at".
+		"hall-noshadow":
+			var hall_n: Node = game.get_node_or_null("GreatHall")
+			if hall_n != null:
+				for n in _descendants_of_type(hall_n, GeometryInstance3D):
+					var gi := n as GeometryInstance3D
+					if gi.cast_shadow == GeometryInstance3D.SHADOW_CASTING_SETTING_OFF:
+						continue
+					var oc := gi.cast_shadow
+					gi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+					undo.append(func(): gi.cast_shadow = oc)
+		## Candidate: halve the directional shadow atlas (4096 -> 2048). Pure
+		## fill/bandwidth on the shadow map, zero geometry change — so if the
+		## shadow cost is submission this moves nothing, and if it is shadow
+		## rasterisation this moves a lot. Diagnostic either way.
+		"shadow2048":
+			RenderingServer.directional_shadow_atlas_set_size(2048, true)
+			undo.append(func():
+				RenderingServer.directional_shadow_atlas_set_size(4096, true))
 		"anim":
 			for n in _all_of_type(AnimationPlayer):
 				var a := n as AnimationPlayer
@@ -863,6 +994,18 @@ func _ablate(game: Node, what: String) -> Array:
 					env.glow_enabled = false
 					undo.append(func(): env.glow_enabled = true)
 	return undo
+
+
+func _descendants_of_type(root: Node, t) -> Array[Node]:
+	var out: Array[Node] = []
+	var stack: Array[Node] = [root]
+	while not stack.is_empty():
+		var n: Node = stack.pop_back()
+		for c in n.get_children():
+			stack.append(c)
+		if n != root and is_instance_of(n, t):
+			out.append(n)
+	return out
 
 
 func _all_of_type(t) -> Array[Node]:

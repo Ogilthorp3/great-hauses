@@ -22,7 +22,8 @@ import sys
 from collections import OrderedDict
 
 FIELDS = ("frames", "min_ms", "p5_ms", "mean_ms", "median_ms", "p95_ms",
-          "WORST_ms", "scene_ms_mean", "scene_ms_worst", "objs", "draws",
+          "WORST_ms", "scene_ms_mean", "scene_ms_worst", "gpu_ms",
+          "gpu_ms_worst", "rcpu_ms", "drops", "drops50", "objs", "draws",
           "prims", "vram_mb", "nodes")
 
 
@@ -54,22 +55,30 @@ def agg(rows):
         # the phase); everything else as a mean, WORST as a maximum.
         if f in ("min_ms", "p5_ms"):
             out[f] = min(vals)
-        elif f in ("WORST_ms", "scene_ms_worst"):
+        elif f in ("WORST_ms", "scene_ms_worst", "gpu_ms_worst"):
             out[f] = max(vals)
         else:
             out[f] = sum(vals) / len(vals)
     return out
 
 
-HDR = (f'{"phase":<20}{"s":>3}{"fps@p5":>8}{"min":>7}{"p5":>7}{"mean":>7}'
-       f'{"p95":>7}{"WORST":>8}{"scene":>7}{"draws":>7}{"prims":>10}{"objs":>7}')
+## DROPS is the headline, not mean_ms. `--disable-vsync` does not defeat
+## macOS presentation pacing: an EMPTY scene renders 600 frames in 9.921 s
+## (60.5 fps, 16.535 ms/frame) on this machine, so the frame clock in a
+## visible window measures the display and nothing else. mean_ms therefore
+## sits at ~16.6 whatever the scene contains, and it is printed only so the
+## wall stays visible. What survives the wall is a MISSED vsync: `drops` =
+## frames >= 25 ms in that second. That is the stutter the player feels, and
+## it is the number an optimization has to move.
+HDR = (f'{"phase":<20}{"s":>3}{"drops/s":>8}{"WORST":>8}{"mean":>7}{"fps":>6}'
+       f'{"rCPU":>7}{"scene":>7}{"draws":>7}{"prims":>10}{"objs":>7}')
 
 
 def row(name, a):
-    fps = 1000.0 / a["p5_ms"] if a["p5_ms"] else 0.0
-    return (f'{name:<20}{a["secs"]:>3}{fps:>8.1f}{a["min_ms"]:>7.2f}'
-            f'{a["p5_ms"]:>7.2f}{a["mean_ms"]:>7.2f}{a["p95_ms"]:>7.2f}'
-            f'{a["WORST_ms"]:>8.2f}{a["scene_ms_mean"]:>7.3f}'
+    fps = 1000.0 / a["mean_ms"] if a["mean_ms"] else 0.0
+    return (f'{name:<20}{a["secs"]:>3}{a["drops"]:>8.2f}'
+            f'{a["WORST_ms"]:>8.2f}{a["mean_ms"]:>7.2f}{fps:>6.1f}'
+            f'{a["rcpu_ms"]:>7.2f}{a["scene_ms_mean"]:>7.3f}'
             f'{int(a["draws"]):>7}{int(a["prims"]):>10}{int(a["objs"]):>7}')
 
 
@@ -90,9 +99,9 @@ def ablation_table(phases):
     print("  cost_ms = median(ablated frame ms) subtracted from median(baseline frame ms);")
     print("  spread = baseline max-min across its own samples — a cost smaller than")
     print("  its own baseline spread is NOISE, not a finding.")
-    print(f'{"ablation":<16}{"base_ms":>9}{"abl_ms":>9}{"cost_ms":>9}{"cost_%":>8}'
-          f'{"b_spread":>10}{"base_fps":>10}{"abl_fps":>9}{"d_draws":>9}'
-          f'{"d_prims":>10}{"b_scene":>9}{"a_scene":>9}')
+    print(f'{"ablation":<16}{"b_drops":>9}{"a_drops":>9}{"d_drops":>9}'
+          f'{"base_ms":>9}{"abl_ms":>9}{"cost_ms":>9}{"b_spread":>10}'
+          f'{"d_draws":>9}{"d_prims":>10}')
     for k in abls:
         nm = k[4:]
         bk = "BASE-" + nm
@@ -106,8 +115,8 @@ def ablation_table(phases):
         adr = med([float(r["draws"]) for r in phases[k]])
         bpr = med([float(r["prims"]) for r in phases[bk]])
         apr = med([float(r["prims"]) for r in phases[k]])
-        bsc = med([float(r["scene_ms_mean"]) for r in phases[bk]])
-        asc = med([float(r["scene_ms_mean"]) for r in phases[k]])
+        bdp = med([float(r.get("drops", 0.0)) for r in phases[bk]])
+        adp = med([float(r.get("drops", 0.0)) for r in phases[k]])
         b, a = med(bms), med(ams)
         spread = max(bms) - min(bms) if bms else 0.0
         pct = 100.0 * (b - a) / b if b else 0.0
@@ -118,14 +127,17 @@ def ablation_table(phases):
         # calls, -970 k primitives) moved the number by 0.00 ms — that is not
         # "the pieces are free", that is the clock being a wall. Any row whose
         # BASELINE sits on the ceiling carries no information about cost.
+        # The frame clock is pinned to the refresh rate on this machine, so a
+        # baseline sitting on 16.67 ms says nothing about cost — but the GPU
+        # timer underneath it still does. Flag the wall, rank on dGPU_ms.
         flag = ""
         if abs(b - 16.667) < 0.35:
-            flag = "  <-- BASELINE AT 60Hz CEILING: no information"
-        elif abs(a - 16.667) < 0.35:
-            flag = "  <-- ablated arm hit the ceiling: cost is a LOWER bound"
-        print(f'{nm:<16}{b:>9.2f}{a:>9.2f}{b - a:>9.2f}{pct:>8.1f}{spread:>10.2f}'
-              f'{med(bfps):>10.1f}{med(afps):>9.1f}{int(bdr - adr):>9}'
-              f'{int(bpr - apr):>10}{bsc:>9.3f}{asc:>9.3f}{flag}')
+            flag = "  (mean at the 60Hz wall: read d_drops / d_prims)"
+        elif spread > abs(b - a):
+            flag = "  <-- cost below its own baseline spread: NOISE"
+        print(f'{nm:<16}{bdp:>9.2f}{adp:>9.2f}{bdp - adp:>9.2f}'
+              f'{b:>9.2f}{a:>9.2f}{b - a:>9.2f}{spread:>10.2f}'
+              f'{int(bdr - adr):>9}{int(bpr - apr):>10}{flag}')
 
 
 def main():
@@ -136,10 +148,24 @@ def main():
         if env:
             print(env)
         print(HDR)
+        tot_drops = 0.0
+        tot_frames = 0.0
+        idle_drops = 0.0
+        idle_secs = 0
         for k, v in phases.items():
             if k.startswith("BASE-") or k.startswith("ABL-") or k == "warm":
                 continue
             print(row(k, agg(v)))
+            for r in v:
+                tot_drops += float(r.get("drops", 0.0))
+                tot_frames += float(r.get("frames", 0.0))
+                if k.startswith("idle"):
+                    idle_drops += float(r.get("drops", 0.0))
+                    idle_secs += 1
+        if tot_frames:
+            print(f'  TOTAL dropped frames {int(tot_drops)} / {int(tot_frames)} '
+                  f'({100.0 * tot_drops / tot_frames:.2f}%)   '
+                  f'IDLE drops/s {idle_drops / max(idle_secs, 1):.2f}')
         ablation_table(phases)
 
 

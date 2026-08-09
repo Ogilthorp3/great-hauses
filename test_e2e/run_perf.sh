@@ -31,10 +31,37 @@
 #   ablate-1080p  controlled A/B sweep at 1080p (measured cost ranking)
 #   ablate-6k     controlled A/B sweep at 6K
 #
+# THE 60 Hz WALL — read this before quoting any millisecond from these logs.
+# `--disable-vsync` does NOT defeat macOS presentation pacing on this machine.
+# Measured: a scene holding ONE Node and no 3D renders 600 frames in 9.921 s
+# (60.5 fps, 16.535 ms/frame). An empty scene cannot cost 16.5 ms — so a
+# wall-clock frame timer in a visible window measures the DISPLAY, and it
+# reports mean_ms ~16.6 whether the scene carries 1.02 M primitives or 454 k.
+# Godot's per-viewport GPU timer would be the way out and returns 0.0000 under
+# the Metal backend (the CPU half of the same API works, so the measurement is
+# enabled and the timestamps are simply absent).
+#
+# Therefore, in order of trustworthiness:
+#   1. draws / prims        deterministic, identical across runs — the ranking
+#   2. drops (>=25 ms)      a MISSED vsync; the stutter the player feels
+#   3. mean_ms              ONLY meaningful under PERF_LOAD (see below)
+#
+# Env knobs:
+#   PERF_ABL=a,b,c   sweep only these ablation levers (default: all ten)
+#   PERF_LOAD=N      supersample the 3D target by N during an ablate sweep.
+#                    Fill only — draw calls, primitives, skinning and shadow
+#                    submission are untouched — so it lifts the frame clear of
+#                    the refresh interval and lets a GEOMETRY A/B be read in
+#                    real milliseconds. Absolute ms under load is meaningless;
+#                    the DELTA between arms is the measurement. N=2.0 at 1080p
+#                    put the frame at ~20.8 ms with a 2.3 ms spread, which is
+#                    where the sun-cascade cost was finally readable.
+#
 # Usage:
 #   ./run_perf.sh                       # preflight 1080p 6k contaminated
 #   ./run_perf.sh 1080p                 # one configuration
 #   ./run_perf.sh ablate-6k --force
+#   PERF_ABL=pssm4 PERF_LOAD=2.0 ./run_perf.sh ablate-1080p --once
 #
 # Logs land in test_e2e/artifacts/perf/<stamp>/ and the summary prints the
 # per-phase table straight out of them.
@@ -160,7 +187,9 @@ run_one() {
     --resolution "${w}x${h}" --position 0,0 \
     --disable-vsync --max-fps 0 --delta-smoothing disable \
     -- "--perf=$mode" "--perf-label=$label" "--perf-timeout=$((tmo - 15))" \
-       "--e2e-fen=$PERF_FEN" "${shot_args[@]+"${shot_args[@]}"}"
+       "--e2e-fen=$PERF_FEN" ${PERF_ABL:+"--perf-abl=$PERF_ABL"} \
+       ${PERF_LOAD:+"--perf-load=$PERF_LOAD"} \
+       "${shot_args[@]+"${shot_args[@]}"}"
   local rc=$?
   ps -Ao pid,%cpu,command | grep '[G]odot' > "$RUN_DIR/$label.cotenant-after.txt"
   if grep -Eq 'SCRIPT ERROR|Parse Error' "$log"; then

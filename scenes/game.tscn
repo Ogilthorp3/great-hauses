@@ -58,6 +58,16 @@ shadow_enabled = true
 shadow_opacity = 0.55
 shadow_blur = 1.6
 light_angular_distance = 2.2
+; PERF #1 — the cascade was covering a world that does not exist.
+; directional_shadow_mode was the engine default (PARALLEL_4_SPLITS) over the
+; default 100 m. This hall is 24 m across and the orbit camera never leaves a
+; 4-13 m ring around the board, so EVERY caster sat inside all four splits and
+; was re-submitted four times: the shadow pass measured 417 of 855 draw calls
+; and 795 k of 1.02 M primitives, 3.6x the main pass. One split over 30 m
+; covers everything the camera can physically see (13 m orbit + 12 m far wall
+; + margin) and submits each caster once.
+directional_shadow_mode = 0
+directional_shadow_max_distance = 30.0
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="."]
 environment = SubResource("Environment_gh")
