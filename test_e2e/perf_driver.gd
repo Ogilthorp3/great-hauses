@@ -33,6 +33,22 @@
 ##   perf    the regression gate: boot → Hall of Banners → match → intro →
 ##           idle → hover sweep → CAPTURE (duel cinematic) → AI reply →
 ##           quiet move → AI reply → idle. Every second is phase-tagged.
+##   noise   THE NOISE FLOOR AND THE CONTROL. Boots, then frees the game and
+##           samples a scene holding one bare Node — same engine, same
+##           harness, same per-frame logging, no content. Whatever this
+##           reports is what the INSTRUMENT costs; anything the game reports
+##           on top of it is the game. It is also the falsification test for
+##           any claim that the frame clock is pinned to the display: an
+##           empty scene that renders at 1000+ fps proves the clock is free.
+##   load    THE MATCH-LOAD HITCH, repeated. Hall → match → back to the Hall,
+##           N times, with every frame over the hitch threshold printed and
+##           the in-`_ready()` breakdown (PERF LOADSTEP, emitted by game.gd)
+##           interleaved. One transition is an anecdote; N is a measurement.
+##   vfx     THE DRACARYS TORRENT. Mate-in-1 → checkmate cinematic → the
+##           ashfall ceremony, phase-tagged off the ceremony's OWN clock
+##           (`spectator.ashfall_phase()`), because the ceremony bends
+##           Engine.time_scale and a stopwatch would sample the wrong beats.
+##           The only place GPUParticles3D exist in this game.
 ##   ablate  the same run up to the first settle, then a controlled A/B
 ##           sweep: one cost is switched off at a time for a fixed window and
 ##           switched back on, so the ranked cost list is MEASURED, not
@@ -43,11 +59,29 @@
 ##
 ## Output contract (consumed by run_perf.sh and by humans):
 ##   PERF ENV   ...   one line: window/framebuffer/scale/vsync/renderer
+##   PERF COTENANT ...  every other Godot process alive at measure time
 ##   PERF phase=<p> ...  one line per wall-clock second
+##   PERF HITCH ...   one line per frame over the hitch threshold, with its
+##                    offset inside the phase — the stall, located
+##   PERF LOADSTEP ...  in-`_ready()` breakdown of a match load (from game.gd)
 ##   PERF CENSUS <tag> ...  scene-graph cost census (draw calls vs surfaces)
 ##   PERF SCRIPT <tag> ...  which GDScript actually runs every frame
 ##   PERF STEP <name>   milestone reached
 ##   PERF DONE mode=<m> exit=<n>
+##
+## ─────────────────────────────────────────────────────────────────────────
+## THE CO-TENANCY RULE — the one that cost this project two agent-hours.
+##
+## A second Godot process rendering on this GPU is not background noise: at
+## 6K it takes ~90 % of this game's frame budget. Two separate agents
+## measured this game while the owner's live copy was on screen, read the
+## contention as a game defect, and reported a slow game that was in fact
+## running at 235-315 fps. Both of their harnesses PRINTED the co-tenant on
+## every run and neither controlled for it.
+##
+## So: every measurement records what else was rendering (PERF COTENANT), and
+## a number quoted without that line beside it is not a number.
+## ─────────────────────────────────────────────────────────────────────────
 
 extends Node
 
@@ -74,6 +108,17 @@ var _done := false
 var _to_window: Transform2D = Transform2D.IDENTITY
 var _last_input_pos := Vector2(-1e9, -1e9)
 var _shot_i := 0
+
+## THE HITCH THRESHOLD. A frame this long is a stall a player sees, not a
+## slow frame. It is deliberately well above any plausible steady-state
+## frame (this game renders at 3-4 ms) and above one missed 60 Hz vsync
+## (16.7 ms), so a HITCH line always means something genuinely stopped.
+const HITCH_MS := 25.0
+var _phase_start_us := 0
+var _frame_i := 0
+var _spin_cb: Callable = Callable()   # noise mode arm 3: mutate the scene/frame
+var _hitch_budget := 40      # cap the log; a run that stalls 500 times is a
+                             # different bug and the first 40 prove it
 
 # ── the sampler ────────────────────────────────────────────────────────────
 var _phase := ""
@@ -170,9 +215,44 @@ func _ready() -> void:
 	## anyway and reported, so that the day it starts working is obvious.
 	RenderingServer.viewport_set_measure_render_time(
 		get_viewport().get_viewport_rid(), true)
+	## Arms the in-`_ready()` load breakdown inside game.gd. The game reads
+	## this ONCE per match load; a normal launch never creates this node, so
+	## the meta is absent and the player pays a single `has_meta` per match.
+	Engine.set_meta("perf_trace", true)
 	_last_us = Time.get_ticks_usec()
+	_phase_start_us = _last_us
 	_watchdog()
 	_run()
+
+
+## WHAT ELSE WAS RENDERING. Recorded from inside the measured process, at
+## measure time — not by the launcher before it started, and not inferred.
+## Two agents already mistook a co-tenant's GPU load for this game's cost.
+func _cotenant_line() -> void:
+	## MATCH argv[0], NEVER THE WHOLE COMMAND LINE. Testing whether a command
+	## line CONTAINS "Godot" counts a sibling agent's shell that merely
+	## mentions it — that self-match made run_perf.sh report 47 co-tenants
+	## when the true answer was 0. `comm` is not the fix either: macOS `ps`
+	## truncates it to the column width ("/Applications/Go"), so matching on
+	## it finds nothing and reports a quiet machine that is not quiet — which
+	## is the more dangerous failure of the two. argv[0] is neither truncated
+	## nor confusable.
+	var out: Array = []
+	var rc := OS.execute("/bin/ps", ["-Ao", "pid=,%cpu=,args="], out, false)
+	var mine := OS.get_process_id()
+	var others: Array[String] = []
+	if rc == 0 and not out.is_empty():
+		for ln in str(out[0]).split("\n"):
+			var f := ln.strip_edges().split(" ", false)
+			if f.size() < 3 or not f[2].ends_with("/Godot"):
+				continue
+			if int(f[0]) == mine:
+				continue
+			others.append("pid=%s cpu=%s %s" % [f[0], f[1],
+				" ".join(f.slice(2)).substr(0, 90)])
+	print("PERF COTENANT count=%d self_pid=%d" % [others.size(), mine])
+	for o in others:
+		print("PERF COTENANT   %s" % o)
 
 
 ## THE RESOLUTION TRAP, and why `px` is computed the hard way.
@@ -209,6 +289,8 @@ func _env_line() -> void:
 
 # ── per-second sampling, on the WALL clock ─────────────────────────────────
 func _process(_delta: float) -> void:
+	if _spin_cb.is_valid():
+		_spin_cb.call(_delta)
 	if _phase.is_empty():
 		return
 	var now := Time.get_ticks_usec()
@@ -217,6 +299,17 @@ func _process(_delta: float) -> void:
 	var dt_ms := float(dt_us) / 1000.0
 	_frame_ms.append(dt_ms)
 	_bucket_us += dt_us
+	_frame_i += 1
+	## THE STALL, LOCATED. A per-second summary tells you a phase hitched; it
+	## cannot tell you WHERE inside the phase, and "somewhere in match-load"
+	## is not an actionable finding. Every frame over the threshold prints its
+	## offset from the phase start, so the hitch can be lined up against the
+	## PERF LOADSTEP breakdown emitted from inside game.gd's `_ready()`.
+	if dt_ms >= HITCH_MS and _hitch_budget > 0:
+		_hitch_budget -= 1
+		print("PERF HITCH phase=%s at_ms=%.1f ms=%.2f frame=%d scene_ms=%.3f" % [
+			_phase, float(now - _phase_start_us) / 1000.0, dt_ms, _frame_i,
+			(float(now - _mark.t_us) / 1000.0) if (_mark != null and _mark.t_us > 0) else -1.0])
 	if _mark != null and _mark.t_us > 0:
 		_scene_ms.append(float(now - _mark.t_us) / 1000.0)
 	var vp_rid := get_viewport().get_viewport_rid()
@@ -332,12 +425,41 @@ func _emit_bucket() -> void:
 
 
 func _set_phase(p: String) -> void:
-	## Flush whatever is in the bucket under the OLD tag, then start clean —
-	## a phase boundary must never smear two phases into one line.
+	## THE STRADDLING FRAME — and the bug that hid the biggest stall in the
+	## game from the instrument built to find it.
+	##
+	## Every phase switch is driven from a coroutine, and a coroutine waiting
+	## on `get_tree().process_frame` resumes BEFORE the `_process` callbacks
+	## of that frame. So the sequence at a match load was:
+	##
+	##   frame N   ... deferred change_scene: free, load, instantiate,
+	##                 game.gd::_ready() — 436 ms of work
+	##   frame N+1 process_frame fires -> the run coroutine wakes, sees the
+	##                 game exists, and calls _set_phase(...) which reset
+	##                 `_last_us = now` — DISCARDING the 436 ms delta
+	##             ... only THEN did this driver's `_process` run, measuring
+	##                 a delta of nearly zero
+	##
+	## Which is why 13 audited runs reported a 113-152 ms worst frame at
+	## match load: that was an earlier, smaller frame. The real one was never
+	## in the data at all. Bank the straddling interval against the phase
+	## that actually did the work, before flushing it.
+	var now := Time.get_ticks_usec()
+	if not _phase.is_empty():
+		var straddle_us := now - _last_us
+		if straddle_us > 0:
+			var sms := float(straddle_us) / 1000.0
+			_frame_ms.append(sms)
+			_bucket_us += straddle_us
+			if sms >= HITCH_MS and _hitch_budget > 0:
+				_hitch_budget -= 1
+				print("PERF HITCH phase=%s at_ms=%.1f ms=%.2f frame=%d straddle=1" % [
+					_phase, float(now - _phase_start_us) / 1000.0, sms, _frame_i])
 	if not _phase.is_empty() and _bucket_us > 100_000:
 		_emit_bucket()
 	_phase = p
 	_phase_t = 0
+	_phase_start_us = Time.get_ticks_usec()
 	_frame_ms.clear()
 	_scene_ms.clear()
 	_gpu_ms.clear()
@@ -649,12 +771,19 @@ func _run() -> void:
 		_fail("boot", "no scene appeared within 20s")
 		return
 	_env_line()
+	_cotenant_line()
+	if mode == "noise":
+		await _run_noise()
+		return
 	_set_phase("boot")
 	await _sleep(1.0)
 	if not await _calibrate_input():
 		_fail("input-pipeline", "synthesized mouse events do not reach the viewport")
 		return
 	_step("input-pipeline")
+	if mode == "load":
+		await _run_load()
+		return
 
 	# -- Hall of Banners ----------------------------------------------------
 	_set_phase("hall")
@@ -708,6 +837,10 @@ func _run() -> void:
 	_script_census("settled")
 	if shots:
 		_shot("settled")
+
+	if mode == "vfx":
+		await _run_vfx(game)
+		return
 
 	if mode == "ablate":
 		await _ablation_sweep(game)
@@ -802,6 +935,296 @@ func _run() -> void:
 	_script_census("final")
 	if shots:
 		_shot("final")
+	_set_phase("")
+	_finish(0)
+
+
+# ── the dracarys torrent: the heaviest VFX in the game, finally measured ───
+## THE ONLY PLACE GPUParticles3D EXIST, and it had never appeared in a single
+## perf run — every previous run played a normal opening and stopped. So the
+## most expensive thing this game can put on screen was, until now, the one
+## thing the performance harness had never looked at.
+##
+## Driven from a mate-in-1 so the ceremony is reached the way a player reaches
+## it: play the mate, let the checkmate cinematic run, and let the ashfall
+## chain off the king's death.
+##
+## PHASE-TAGGED OFF THE CEREMONY'S OWN CLOCK. `play_ashfall` bends
+## `Engine.time_scale` to 0.55, so a stopwatch would sample the wrong beats
+## entirely — a 1.5 s wait becomes 2.7 real seconds and lands two beats late.
+## Every phase below is entered when `spectator.ashfall_phase()` says so, and
+## the sampler underneath is on the wall clock regardless.
+##
+## The beats, in the order the ceremony plays them:
+##   launch  the wyrm leaves the perch          bank    the wide crossing
+##   flare   wings flare, the hall lights       inhale  the chest fills
+##   breath  THE TORRENT — six emitter layers   linger  the fire dies back
+##   return  back to the perch                  crown   the champion's beat
+const ASH_BEATS: Array[String] = [
+	"launch", "bank", "flare", "inhale", "breath", "linger", "return", "crown"]
+
+func _run_vfx(game: Node) -> void:
+	var spectator: Node = game.get("spectator")
+	if spectator == null or not is_instance_valid(spectator):
+		_fail("vfx-spectator", "no DragonSpectator — this build cannot burn anyone")
+		return
+	var state: Object = game.get("state")
+	if not await _wait_until(func():
+		return game.get("busy") == false and state.turn == false, 30.0):
+		_fail("vfx-turn", "never became the player's turn")
+		return
+	## The mate must come from the SAN'd turn moves — bare legal_moves()
+	## carries no notation, and "#" is how the mate identifies itself.
+	var mate = null
+	for m in game.get("_turn_moves"):
+		if m.notation_san != null and str(m.notation_san).ends_with("#"):
+			mate = m
+			break
+	if mate == null:
+		_fail("vfx-mate", "the FEN offers no mate-in-1 — pass --e2e-fen=<mate FEN>")
+		return
+	_step("vfx-mate-available (%s)" % mate.to_uci())
+	_set_phase("pre-mate-idle")
+	await _sleep(3.0)
+	_census("pre-ashfall")
+	if not await _select_square(game, game.sq_of(mate.from_square)):
+		_fail("vfx-select", "the mating piece never selected")
+		return
+	_set_phase("mate-cinematic")
+	await _click_square(game, game.sq_of(mate.to_square))
+	if not await _wait_until(func(): return bool(game.get("game_over")), 20.0):
+		_fail("vfx-mate-applied", "the game never ended after the mate")
+		return
+	_step("vfx-mate-applied")
+	if not await _wait_until(func():
+		return bool(spectator.call("is_ashfall_active")), 40.0):
+		_fail("vfx-ashfall", "ASHFALL never started after the checkmate")
+		return
+	_step("vfx-ashfall-started")
+	## Walk the beats. Each is entered when the ceremony announces it, and
+	## sampled until it announces the next one — so every PERF phase line
+	## under `ash-*` is that beat and nothing else.
+	for beat in ASH_BEATS:
+		if _done:
+			return
+		if not await _wait_until(func():
+			return (str(spectator.call("ashfall_phase")) == beat
+				or not bool(spectator.call("is_ashfall_active"))), 30.0):
+			print("PERF WARN ashfall beat '%s' never arrived — skipping" % beat)
+			continue
+		if not bool(spectator.call("is_ashfall_active")):
+			break
+		_set_phase("ash-" + beat)
+		if beat == "breath":
+			## THE TORRENT ITSELF. Census it WHILE it burns: particle counts
+			## and draw calls after it has finished tell you nothing.
+			await _sleep(0.4)
+			_census("torrent-burning")
+			_particle_census("torrent-burning")
+		await _wait_until(func():
+			return str(spectator.call("ashfall_phase")) != beat, 30.0)
+	_set_phase("ash-tail")
+	await _wait_until(func():
+		return not bool(spectator.call("is_ashfall_active")), 30.0)
+	_step("vfx-ashfall-finished")
+	_census("post-ashfall")
+	_particle_census("post-ashfall")
+	## THE LINGER TEST. Emitters that keep simulating after the ceremony has
+	## ended are invisible cost — the player sees a still hall and the GPU is
+	## still running six particle systems.
+	_set_phase("post-ashfall-idle")
+	await _sleep(6.0)
+	_particle_census("post-ashfall-idle")
+	_set_phase("")
+	_finish(0)
+
+
+## Particles are counted where they live: amount, emitting, and whether the
+## node is still in the tree at all.
+func _particle_census(tag: String) -> void:
+	var nodes := _all_of_type(GPUParticles3D)
+	var emitting := 0
+	var live := 0
+	var budget_all := 0        # every system's particle budget, emitting or not
+	var budget_emitting := 0
+	for n in nodes:
+		var p := n as GPUParticles3D
+		budget_all += p.amount
+		if p.emitting:
+			emitting += 1
+			budget_emitting += p.amount
+		if p.visible:
+			live += 1
+	## `amount` is reported for ALL systems, not just the emitting ones. The
+	## first version of this census summed only emitters and printed
+	## amount_sum=0 during the torrent — which reads as "no particles" when
+	## what it actually meant was "no system had `emitting` true at the
+	## instant I looked". A budget that exists is a cost that exists.
+	print(("PERF PARTICLES %s systems=%d emitting=%d visible=%d "
+		+ "amount_all=%d amount_emitting=%d") % [
+		tag, nodes.size(), emitting, live, budget_all, budget_emitting])
+
+
+# ── the match-load hitch, repeated ─────────────────────────────────────────
+## THE ONLY STALL A PLAYER OF THIS GAME ACTUALLY SEES.
+##
+## Every audited run showed one 113-152 ms frame at match load, at both
+## resolutions, in both scene versions. It is a SINGLE frame, so a per-second
+## mean buries it (18.6 ms) and only WORST_ms and the drop count ever showed
+## it at all. It is also the one number in this harness that a co-tenant
+## cannot explain away: it is the same 130 ms whether the GPU is contended or
+## idle, because it is not a rendering cost.
+##
+## This mode does the transition N times in one process and prints, for each:
+##   * the PERF LOADSTEP breakdown from inside game.gd's `_ready()`
+##   * every frame over the hitch threshold, with its offset in the phase
+##   * a PERF LOADSUM line: click -> _ready start -> _ready end -> first
+##     frame the player could see
+##
+## Repeat 1 pays first-use costs that repeats 2..N do not (shader and pipeline
+## compilation, texture decode, script class loading). That difference IS the
+## diagnosis: a hitch that vanishes after the first load is compilation, and a
+## hitch that repeats every time is construction.
+const LOAD_REPEATS := 4
+
+func _run_load() -> void:
+	for i in LOAD_REPEATS:
+		if _done:
+			return
+		if not await _wait_until(func(): return _select_screen() != null, 25.0):
+			_fail("load-hall", "the Hall of Banners never appeared (iteration %d)" % i)
+			return
+		await _sleep(1.0)
+		var sel: Control = _select_screen()
+		var crest: Node = sel.find_child("Crest_%s" % DEFAULT_HOUSE, true, false)
+		if crest == null:
+			_fail("load-crest", "no crest for house '%s'" % DEFAULT_HOUSE)
+			return
+		if not await _click_until(crest.get_node("Sigil"),
+				func(): return int(sel.get("phase")) == 1, "crest"):
+			_fail("load-house", "crest clicks never advanced")
+			return
+		var opp := _find_button(sel, "Casual")
+		if opp == null or not await _click_until(opp,
+				func(): return int(sel.get("phase")) == 2, "opponent"):
+			_fail("load-opponent", "opponent clicks never advanced")
+			return
+		var modebtn := _find_button(sel, "Single Match")
+		if modebtn == null:
+			_fail("load-mode", "no 'Single Match' button")
+			return
+		_set_phase("match-load-%d" % (i + 1))
+		var t_click := Time.get_ticks_usec()
+		print("PERF LOADMARK iter=%d step=click t_us=%d" % [i + 1, t_click])
+		await _click_control(modebtn)
+		if not await _wait_until(func(): return _game() != null, 30.0):
+			_fail("load-scene", "the game scene never appeared (iteration %d)" % i)
+			return
+		var t_visible := Time.get_ticks_usec()
+		var game := _game()
+		## THE FRAME THE PLAYER COULD SEE — THE WHOLE ARMY, not a third of it.
+		## `_game() != null` only means the node exists; it has not been drawn
+		## yet. The threshold must sit above the FULL board (853 draw calls),
+		## not merely above the Hall's ~30: a staggered spawn crosses 300 draw
+		## calls when a third of the pieces are standing, and clocking that
+		## would flatter the very change it is meant to judge.
+		var drew := await _wait_until(func():
+			return int(Performance.get_monitor(
+				Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)) >= 850, 15.0)
+		var t_drawn := Time.get_ticks_usec()
+		print(("PERF LOADSUM iter=%d click_to_node_ms=%.1f node_to_firstdraw_ms=%.1f "
+			+ "click_to_firstdraw_ms=%.1f drew=%s draws=%d prims=%d") % [
+			i + 1, float(t_visible - t_click) / 1000.0,
+			float(t_drawn - t_visible) / 1000.0,
+			float(t_drawn - t_click) / 1000.0, str(drew),
+			int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)),
+			int(Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME))])
+		_set_phase("post-load-%d" % (i + 1))
+		await _sleep(2.5)
+		if i == LOAD_REPEATS - 1:
+			break
+		## Back to the Hall for the next transition. The game's own "hall"
+		## action is the honest route — it is what the player presses.
+		_set_phase("unload-%d" % (i + 1))
+		game.get_tree().change_scene_to_file("res://scenes/main.tscn")
+		await _sleep(2.0)
+	_set_phase("")
+	_finish(0)
+
+
+# ── the noise floor, and the control for every ms in this file ─────────────
+## Frees the booted game and samples a scene holding ONE bare Node, with the
+## harness still logging every frame exactly as it does over the real game.
+##
+## This exists for two reasons, and the second one is the important one:
+##
+##   1. THE FLOOR. The harness itself allocates arrays, reads six Performance
+##      monitors and formats a line every frame. Whatever THIS reports —
+##      including its dropped frames — is instrument cost, and a threshold
+##      set below it would fail on an empty screen.
+##   2. THE CONTROL. An earlier version of this file asserted a "60 Hz macOS
+##      presentation wall" on the strength of one empty-scene run that read
+##      16.5 ms/frame. An empty scene cannot cost 16.5 ms — that reading was
+##      a co-tenant, not a wall, and the belief it produced went on to
+##      poison every millisecond the harness printed. So the empty scene is
+##      now measured on EVERY perf run, beside the game, and the number it
+##      returns is checked against the claim rather than the claim against
+##      the number.
+func _run_noise() -> void:
+	var cs := get_tree().current_scene
+	var blank := Node.new()
+	blank.name = "PerfNoiseScene"
+	get_tree().root.add_child(blank)
+	get_tree().current_scene = blank
+	if cs != null:
+		cs.free()          # immediate, not queue_free: nothing of it survives
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_step("noise-scene (game freed; one bare Node remains)")
+	_set_phase("noise-empty")
+	await _sleep(8.0)
+	## THE SECOND ARM, AND THE REASON THIS MODE HAS TWO.
+	##
+	## The bare-Node arm above reads ~60 fps / 16.67 ms with draws=0. That
+	## number is what produced the "60 Hz macOS presentation wall" belief —
+	## and taken alone it is unfalsifiable, because an empty scene has no
+	## cost to hide behind a wall. So the same process now renders ONE cube
+	## through a real Camera3D and measures again. If the cube arm also sits
+	## at 16.67 ms, the wall is real and it applies to everything. If the
+	## cube arm runs free, the "wall" is what an IDLE GPU does when it has
+	## nothing to submit, and it never applied to the game at all.
+	##
+	## One process, one window, one second apart: the co-tenant and the
+	## compositor are identical across the two arms. Only the content differs.
+	var cam := Camera3D.new()
+	cam.position = Vector3(0, 0, 3)
+	cam.current = true
+	blank.add_child(cam)
+	var cube := MeshInstance3D.new()
+	cube.mesh = BoxMesh.new()
+	blank.add_child(cube)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_step("noise-cube (one BoxMesh, one Camera3D)")
+	_set_phase("noise-cube")
+	await _sleep(8.0)
+	## THE THIRD ARM — the one that identifies the "wall".
+	## Arms 1 and 2 are both STATIC: nothing in the scene changes between
+	## frames. The real game never is (torches flicker, banners flutter,
+	## the camera breathes). If a scene that CHANGES every frame runs free
+	## while a static one sits on 16.67 ms, then the "presentation wall" is
+	## an idle-throttle that only ever applied to a still image — and every
+	## conclusion drawn from it about the game was drawn from the wrong scene.
+	var spin := 0.0
+	var spinner := func(dt: float) -> void:
+		spin += dt
+		cube.rotation = Vector3(spin, spin * 1.3, 0.0)
+	_spin_cb = spinner
+	await get_tree().process_frame
+	_step("noise-cube-spinning (same cube, mutated every frame)")
+	_set_phase("noise-spin")
+	await _sleep(8.0)
+	_spin_cb = Callable()
 	_set_phase("")
 	_finish(0)
 

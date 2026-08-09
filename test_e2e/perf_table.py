@@ -1,21 +1,54 @@
 #!/usr/bin/env python3
-"""perf_table.py — turn run_perf.sh logs into the before-table.
+"""perf_table.py — turn run_perf.sh logs into a table, and fail on a regression.
 
-Reads `PERF phase=...` lines and aggregates them per phase. Two tables:
+READ THIS BEFORE QUOTING ANY NUMBER OUT OF THESE LOGS
+=====================================================
 
-  perf logs    one row per phase, in the order the run played them
-  ablate logs  one row per ablation, each compared against the MEAN OF THE
-               TWO BASELINES THAT BRACKET IT — a cost is only credited when
-               the baselines either side of it agree, because on this machine
-               the baseline itself wanders (a live game and a 6K compositor
-               share the GPU).
+A SECOND GODOT PROCESS ON THIS GPU INVALIDATES EVERY MILLISECOND BELOW.
+Not "adds noise" — invalidates. Measured on this machine, same binary, same
+scene, same window, one variable:
 
-The headline column is p5_ms, not mean_ms. Interference can only ever ADD
-time to a frame, so the fastest frames are the uncontended ones: p5 measures
-the game, the mean measures the machine. WORST_ms stays in the table because
-it is what the player actually feels.
+    owner's live game RUNNING     this game reads ~60 fps / 16.67 ms
+    owner's live game SUSPENDED   this game reads 232-339 fps / 3-4 ms
 
-Usage:  perf_table.py <log> [<log> ...]
+Two agents in one day read the first number as a game defect and reported a
+slow game. It was the neighbour. Every run therefore prints a PERF COTENANT
+block, and this table refuses to print a headline without it.
+
+WHAT THE PREVIOUS VERSION OF THIS FILE BELIEVED, AND WHY IT WAS WRONG
+--------------------------------------------------------------------
+It asserted a "60 Hz macOS presentation wall": that `--disable-vsync` cannot
+defeat macOS presentation pacing, that mean_ms therefore sits at ~16.6 ms
+whatever the scene holds, and that milliseconds are consequently meaningless
+here. Its evidence was one empty-scene run that read 16.535 ms/frame.
+
+That evidence was a co-tenant, not a wall. The same harness has since logged
+this game at 232-339 fps at 1080p and at 6K with the neighbour suspended, and
+the empty scene is measured on every run now (mode `noise`) instead of being
+quoted from memory. There is no wall. There is a neighbour.
+
+The belief did real damage: because ms were declared meaningless, a geometry
+A/B was run under PERF_LOAD supersampling — which multiplies FILL while
+leaving draw calls, primitives and shadow submission untouched — and the
+5.12 ms it produced was a fill number wearing a geometry label. That mode is
+retired. To read a geometry change, read `prims` and `draws`.
+
+HOW TO READ THE TABLE
+---------------------
+  drops/s   frames >= 25 ms per second. The stutter a player feels. Compare
+            against the noise floor (mode `noise`), which is NOT zero: the
+            harness itself drops ~0.1-0.2 % of frames on an empty scene.
+  WORST     the worst single frame in the phase. This is the match-load
+            stall's home; a mean will never show it.
+  mean/fps  honest wall-clock frame time. Real, and comparable ONLY between
+            runs whose PERF COTENANT blocks match.
+  draws     draw calls. Deterministic — identical across runs, contention
+  prims     primitives. Deterministic. THESE ARE THE GEOMETRY RANKING, and
+            the only numbers here a busy GPU cannot move.
+
+Usage:
+  perf_table.py <log> [<log> ...]           print the tables
+  perf_table.py --gate <log> [<log> ...]    print, then exit 1 on a breach
 """
 import re
 import sys
@@ -26,13 +59,63 @@ FIELDS = ("frames", "min_ms", "p5_ms", "mean_ms", "median_ms", "p95_ms",
           "gpu_ms_worst", "rcpu_ms", "drops", "drops50", "objs", "draws",
           "prims", "vram_mb", "nodes")
 
+# ── THE THRESHOLDS ─────────────────────────────────────────────────────────
+# A harness that only prints cannot fail, and a check that cannot fail is not
+# a gate. These are set from measured behaviour with a margin, NOT from
+# aspiration — every one of them passes on the current build and would have
+# caught the regression it is named for.
+#
+# They are deliberately split: the deterministic counters are hard ceilings
+# (a busy GPU cannot move a draw call), while the frame-timing ceilings are
+# only enforced on a QUIET run, because a co-tenant makes them meaningless.
+GATE = {
+    # Geometry. The sun's cascade regression (4 PSSM splits over 100 m) put
+    # these at 855 draws / 1.02 M prims; one split over 30 m brought them to
+    # 853 / 454 k. A ceiling here catches a cascade being restored, a shadow
+    # caster being added to the hall, or a piece gaining surfaces.
+    "draws_max": 900,
+    "prims_max": 520_000,
+    # Stutter, steady state only (idle / settle / hover phases). The empty
+    # scene drops ~0.1 frames per second all by itself, so 2.0 is a real
+    # ceiling and not a rounding of zero.
+    "drops_per_sec_max": 2.0,
+    # The match-load stall, WARM (loads 2..N in one process). Measured at
+    # 164-193 ms on this build. The first load of a process is excluded and
+    # gated separately: it additionally pays ~347 ms of one-time asset
+    # construction that loads 2..N do not, and folding the two together would
+    # either let a warm regression hide under the cold ceiling or make every
+    # run red.
+    "load_worst_ms_max": 320.0,
+    # The match-load stall, COLD (the first load in a process). Measured at
+    # 543-550 ms. Deliberately loose: this is the number to WATCH, not to
+    # police, until the Hall-of-Banners preload lands.
+    "load_cold_worst_ms_max": 800.0,
+}
+STEADY_PHASES = ("idle", "settle", "hover")
+
 
 def parse(path):
     phases = OrderedDict()
     env = ""
+    cotenants = []
+    hitches = []
+    loadsteps = []
+    particles = []
     for line in open(path, encoding="utf-8", errors="replace"):
         if line.startswith("PERF ENV"):
             env = line.strip()
+            continue
+        if line.startswith("PERF COTENANT"):
+            cotenants.append(line.strip())
+            continue
+        if line.startswith("PERF HITCH"):
+            hitches.append(dict(re.findall(r"(\w+)=([-\w.]+)", line)))
+            continue
+        if line.startswith("PERF LOADSTEP"):
+            loadsteps.append(dict(re.findall(r"(\w+)=([-\w.]+)", line)))
+            continue
+        if line.startswith("PERF PARTICLES"):
+            particles.append(line.strip())
             continue
         if not line.startswith("PERF phase="):
             continue
@@ -41,7 +124,7 @@ def parse(path):
         if not ph:
             continue
         phases.setdefault(ph, []).append(kv)
-    return env, phases
+    return env, phases, cotenants, hitches, loadsteps, particles
 
 
 def agg(rows):
@@ -51,8 +134,6 @@ def agg(rows):
         if not vals:
             out[f] = 0.0
             continue
-        # min/p5 aggregate as a MINIMUM across seconds (the cleanest frame in
-        # the phase); everything else as a mean, WORST as a maximum.
         if f in ("min_ms", "p5_ms"):
             out[f] = min(vals)
         elif f in ("WORST_ms", "scene_ms_worst", "gpu_ms_worst"):
@@ -62,22 +143,14 @@ def agg(rows):
     return out
 
 
-## DROPS is the headline, not mean_ms. `--disable-vsync` does not defeat
-## macOS presentation pacing: an EMPTY scene renders 600 frames in 9.921 s
-## (60.5 fps, 16.535 ms/frame) on this machine, so the frame clock in a
-## visible window measures the display and nothing else. mean_ms therefore
-## sits at ~16.6 whatever the scene contains, and it is printed only so the
-## wall stays visible. What survives the wall is a MISSED vsync: `drops` =
-## frames >= 25 ms in that second. That is the stutter the player feels, and
-## it is the number an optimization has to move.
-HDR = (f'{"phase":<20}{"s":>3}{"drops/s":>8}{"WORST":>8}{"mean":>7}{"fps":>6}'
+HDR = (f'{"phase":<20}{"s":>3}{"drops/s":>8}{"WORST":>9}{"mean":>7}{"fps":>7}'
        f'{"rCPU":>7}{"scene":>7}{"draws":>7}{"prims":>10}{"objs":>7}')
 
 
 def row(name, a):
     fps = 1000.0 / a["mean_ms"] if a["mean_ms"] else 0.0
     return (f'{name:<20}{a["secs"]:>3}{a["drops"]:>8.2f}'
-            f'{a["WORST_ms"]:>8.2f}{a["mean_ms"]:>7.2f}{fps:>6.1f}'
+            f'{a["WORST_ms"]:>9.2f}{a["mean_ms"]:>7.2f}{fps:>7.1f}'
             f'{a["rcpu_ms"]:>7.2f}{a["scene_ms_mean"]:>7.3f}'
             f'{int(a["draws"]):>7}{int(a["prims"]):>10}{int(a["objs"]):>7}')
 
@@ -96,9 +169,9 @@ def ablation_table(phases):
         return
     print()
     print("ABLATION — interleaved A/B, medians of 1-second samples taken seconds apart")
-    print("  cost_ms = median(ablated frame ms) subtracted from median(baseline frame ms);")
-    print("  spread = baseline max-min across its own samples — a cost smaller than")
-    print("  its own baseline spread is NOISE, not a finding.")
+    print("  Rank on d_prims / d_draws: they are deterministic and a co-tenant")
+    print("  cannot move them. cost_ms is real but only trustworthy when the run")
+    print("  was quiet AND the cost exceeds the baseline's own spread.")
     print(f'{"ablation":<16}{"b_drops":>9}{"a_drops":>9}{"d_drops":>9}'
           f'{"base_ms":>9}{"abl_ms":>9}{"cost_ms":>9}{"b_spread":>10}'
           f'{"d_draws":>9}{"d_prims":>10}')
@@ -109,8 +182,6 @@ def ablation_table(phases):
             continue
         bms = [float(r["mean_ms"]) for r in phases[bk]]
         ams = [float(r["mean_ms"]) for r in phases[k]]
-        bfps = [float(r["fps"]) for r in phases[bk]]
-        afps = [float(r["fps"]) for r in phases[k]]
         bdr = med([float(r["draws"]) for r in phases[bk]])
         adr = med([float(r["draws"]) for r in phases[k]])
         bpr = med([float(r["prims"]) for r in phases[bk]])
@@ -119,34 +190,113 @@ def ablation_table(phases):
         adp = med([float(r.get("drops", 0.0)) for r in phases[k]])
         b, a = med(bms), med(ams)
         spread = max(bms) - min(bms) if bms else 0.0
-        pct = 100.0 * (b - a) / b if b else 0.0
-        # THE 60 Hz CEILING. A screen-sized window on macOS gets its
-        # presentation hard-synced to the display no matter what
-        # --disable-vsync says; every frame then measures 16.66-16.67 ms
-        # whatever is in it. In the 6K sweep, hiding all 32 pieces (-660 draw
-        # calls, -970 k primitives) moved the number by 0.00 ms — that is not
-        # "the pieces are free", that is the clock being a wall. Any row whose
-        # BASELINE sits on the ceiling carries no information about cost.
-        # The frame clock is pinned to the refresh rate on this machine, so a
-        # baseline sitting on 16.67 ms says nothing about cost — but the GPU
-        # timer underneath it still does. Flag the wall, rank on dGPU_ms.
         flag = ""
-        if abs(b - 16.667) < 0.35:
-            flag = "  (mean at the 60Hz wall: read d_drops / d_prims)"
-        elif spread > abs(b - a):
+        if spread > abs(b - a):
             flag = "  <-- cost below its own baseline spread: NOISE"
         print(f'{nm:<16}{bdp:>9.2f}{adp:>9.2f}{bdp - adp:>9.2f}'
               f'{b:>9.2f}{a:>9.2f}{b - a:>9.2f}{spread:>10.2f}'
               f'{int(bdr - adr):>9}{int(bpr - apr):>10}{flag}')
 
 
+def load_table(loadsteps, hitches):
+    """The match-load breakdown — the one stall a player of this game sees."""
+    if not loadsteps:
+        return
+    print()
+    print("MATCH LOAD — inside game.gd::_ready(), wall clock, per iteration")
+    iters = []
+    cur = None
+    for s in loadsteps:
+        if s.get("step") == "init->enter_tree":
+            cur = OrderedDict()
+            iters.append(cur)
+        if cur is not None:
+            cur[s.get("step", "?")] = float(s.get("ms", 0.0))
+    if not iters:
+        return
+    steps = list(iters[0].keys())
+    print(f'{"step":<34}' + "".join(f'{"iter%d" % (i + 1):>10}' for i in range(len(iters))))
+    for st in steps:
+        print(f'{st:<34}' + "".join(f'{it.get(st, 0.0):>10.2f}' for it in iters))
+    print(f'{"TOTAL _ready + children":<34}'
+          + "".join(f'{sum(it.values()):>10.2f}' for it in iters))
+    worst = [h for h in hitches if h.get("phase", "").startswith("match-load")]
+    if worst:
+        print("  worst frames in match-load: "
+              + ", ".join("%.0f ms" % float(h["ms"]) for h in worst))
+        print("  (iteration 1 pays first-use asset construction; 2..N do not —")
+        print("   a cost that vanishes after the first load is construction, not")
+        print("   rendering, and it happens before any draw)")
+
+
+def gate(path, phases, cotenants, hitches):
+    """Return a list of breach strings. Empty means the run is green."""
+    breaches = []
+    quiet = True
+    for c in cotenants:
+        m = re.match(r"PERF COTENANT count=(\d+)", c)
+        if m and int(m.group(1)) > 0:
+            quiet = False
+    for name, rows in phases.items():
+        if name.startswith(("BASE-", "ABL-")) or name == "warm":
+            continue
+        a = agg(rows)
+        if a["draws"] > GATE["draws_max"]:
+            breaches.append("%s: %d draw calls > ceiling %d"
+                            % (name, int(a["draws"]), GATE["draws_max"]))
+        if a["prims"] > GATE["prims_max"]:
+            breaches.append("%s: %d primitives > ceiling %d"
+                            % (name, int(a["prims"]), GATE["prims_max"]))
+        if name.startswith(STEADY_PHASES):
+            if not quiet:
+                continue          # a co-tenant makes frame timing meaningless
+            if a["drops"] > GATE["drops_per_sec_max"]:
+                breaches.append("%s: %.2f drops/s > ceiling %.2f"
+                                % (name, a["drops"], GATE["drops_per_sec_max"]))
+    # COLD vs WARM. `load` mode tags its transitions match-load-1..N; every
+    # other mode loads the match exactly once and tags it plain `match-load`,
+    # which is therefore ALWAYS the cold one. Treating that bare phase as
+    # warm is how a 543 ms first load once tripped the warm ceiling.
+    cold, warm = [], []
+    for h in hitches:
+        ph = h.get("phase", "")
+        m = re.match(r"match-load(?:-(\d+))?$", ph)
+        if not m:
+            continue
+        n = int(m.group(1)) if m.group(1) else 1
+        (warm if n >= 2 else cold).append(float(h["ms"]))
+    if warm and max(warm) > GATE["load_worst_ms_max"]:
+        breaches.append("match load (warm): %.0f ms worst frame > ceiling %.0f"
+                        % (max(warm), GATE["load_worst_ms_max"]))
+    if cold and max(cold) > GATE["load_cold_worst_ms_max"]:
+        breaches.append("match load (cold, first of process): %.0f ms worst "
+                        "frame > ceiling %.0f"
+                        % (max(cold), GATE["load_cold_worst_ms_max"]))
+    if not quiet:
+        breaches.append("NOT A QUIET RUN — frame-timing gates were SKIPPED "
+                        "(a second Godot was rendering; see PERF COTENANT)")
+    return breaches
+
+
 def main():
-    for path in sys.argv[1:]:
-        env, phases = parse(path)
+    args = [a for a in sys.argv[1:] if a != "--gate"]
+    gating = "--gate" in sys.argv[1:]
+    rc = 0
+    for path in args:
+        env, phases, cotenants, hitches, loadsteps, particles = parse(path)
         print("=" * 118)
         print(path.split("/")[-1])
         if env:
             print(env)
+        # THE CO-TENANCY LINE IS NOT OPTIONAL. It is printed before the table
+        # so it cannot be scrolled past, and it is printed even when empty so
+        # that "nobody checked" and "nobody was there" never look alike.
+        if cotenants:
+            for c in cotenants:
+                print(c)
+        else:
+            print("PERF COTENANT <ABSENT> — this log predates co-tenancy "
+                  "recording; its milliseconds are UNATTRIBUTABLE")
         print(HDR)
         tot_drops = 0.0
         tot_frames = 0.0
@@ -159,14 +309,35 @@ def main():
             for r in v:
                 tot_drops += float(r.get("drops", 0.0))
                 tot_frames += float(r.get("frames", 0.0))
-                if k.startswith("idle"):
+                if k.startswith("idle") or k.startswith("noise"):
                     idle_drops += float(r.get("drops", 0.0))
                     idle_secs += 1
         if tot_frames:
             print(f'  TOTAL dropped frames {int(tot_drops)} / {int(tot_frames)} '
                   f'({100.0 * tot_drops / tot_frames:.2f}%)   '
                   f'IDLE drops/s {idle_drops / max(idle_secs, 1):.2f}')
+        for p in particles:
+            print("  " + p)
+        load_table(loadsteps, hitches)
         ablation_table(phases)
+        if gating:
+            breaches = gate(path, phases, cotenants, hitches)
+            # A skipped timing gate is a WARNING, not a failure: refusing to
+            # measure beside a co-tenant is the correct behaviour, and making
+            # it red would train people to ignore red.
+            hard = [b for b in breaches if not b.startswith("NOT A QUIET RUN")]
+            soft = [b for b in breaches if b.startswith("NOT A QUIET RUN")]
+            print()
+            if hard:
+                print("GATE: FAIL")
+                for b in hard:
+                    print("  - " + b)
+                rc = 1
+            else:
+                print("GATE: PASS (deterministic ceilings held)")
+            for b in soft:
+                print("  ! " + b)
+    sys.exit(rc)
 
 
 if __name__ == "__main__":

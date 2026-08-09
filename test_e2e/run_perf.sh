@@ -31,37 +31,54 @@
 #   ablate-1080p  controlled A/B sweep at 1080p (measured cost ranking)
 #   ablate-6k     controlled A/B sweep at 6K
 #
-# THE 60 Hz WALL — read this before quoting any millisecond from these logs.
-# `--disable-vsync` does NOT defeat macOS presentation pacing on this machine.
-# Measured: a scene holding ONE Node and no 3D renders 600 frames in 9.921 s
-# (60.5 fps, 16.535 ms/frame). An empty scene cannot cost 16.5 ms — so a
-# wall-clock frame timer in a visible window measures the DISPLAY, and it
-# reports mean_ms ~16.6 whether the scene carries 1.02 M primitives or 454 k.
-# Godot's per-viewport GPU timer would be the way out and returns 0.0000 under
-# the Metal backend (the CPU half of the same API works, so the measurement is
-# enabled and the timestamps are simply absent).
+# THERE IS NO 60 Hz WALL. THERE IS A NEIGHBOUR.
 #
-# Therefore, in order of trustworthiness:
-#   1. draws / prims        deterministic, identical across runs — the ranking
-#   2. drops (>=25 ms)      a MISSED vsync; the stutter the player feels
-#   3. mean_ms              ONLY meaningful under PERF_LOAD (see below)
+# This header used to assert a "60 Hz macOS presentation wall" — that
+# `--disable-vsync` cannot defeat macOS presentation pacing, so every
+# millisecond here is a display measurement and no optimization can move it.
+# It cited one empty-scene run reading 16.535 ms/frame as proof.
+#
+# That was not a wall. It was the owner's live Godot game rendering on the
+# same GPU. Same binary, same scene, same window, one variable:
+#
+#     owner's live game RUNNING     ~60 fps / 16.67 ms
+#     owner's live game SUSPENDED   232-339 fps / 3-4 ms  (1080p AND 6K)
+#
+# The 232-339 fps runs are in test_e2e/artifacts/perf/ from 2026-08-09 07:55
+# to 08:10, and one of them recorded the mechanism in its own cotenants.txt:
+# a `kill -CONT <pid>` sleeper, i.e. the neighbour had been SIGSTOPped to get
+# a quiet machine. DO NOT DO THAT — see the rule below.
+#
+# Consequences, and they are the whole point of this file:
+#   * milliseconds ARE real and ARE reported. They are comparable only
+#     between runs whose PERF COTENANT blocks match.
+#   * draws / prims stay the ranking for anything geometric: they are
+#     deterministic and a busy GPU cannot move them.
+#   * drops (>= 25 ms) is the stutter the player feels. Its floor is NOT
+#     zero — run `./run_perf.sh noise` and read the instrument's own cost.
+#
+# THE RULE: never take a timing measurement without recording what else was
+# rendering, and never quiet the machine by suspending or killing a process
+# you did not start. The owner's game is the owner's.
+#
+# PERF_LOAD IS RETIRED. It supersampled the 3D target to lift the frame clear
+# of the (imaginary) refresh wall so that a GEOMETRY A/B could be read in ms.
+# Supersampling multiplies FILL and leaves draw calls, primitives, skinning
+# and shadow submission untouched — so it measured the wrong axis by
+# construction, and the 5.12 ms it attributed to the sun's cascade was a fill
+# number wearing a geometry label. To read a geometry change, read prims.
 #
 # Env knobs:
 #   PERF_ABL=a,b,c   sweep only these ablation levers (default: all ten)
-#   PERF_LOAD=N      supersample the 3D target by N during an ablate sweep.
-#                    Fill only — draw calls, primitives, skinning and shadow
-#                    submission are untouched — so it lifts the frame clear of
-#                    the refresh interval and lets a GEOMETRY A/B be read in
-#                    real milliseconds. Absolute ms under load is meaningless;
-#                    the DELTA between arms is the measurement. N=2.0 at 1080p
-#                    put the frame at ~20.8 ms with a 2.3 ms spread, which is
-#                    where the sun-cascade cost was finally readable.
 #
 # Usage:
 #   ./run_perf.sh                       # preflight 1080p 6k contaminated
-#   ./run_perf.sh 1080p                 # one configuration
+#   ./run_perf.sh noise                 # the instrument's own floor + control
+#   ./run_perf.sh load                  # the match-load stall, 4 transitions
+#   ./run_perf.sh vfx                   # the dracarys torrent / ashfall
+#   ./run_perf.sh gate                  # the regression gate (exit 1 on breach)
 #   ./run_perf.sh ablate-6k --force
-#   PERF_ABL=pssm4 PERF_LOAD=2.0 ./run_perf.sh ablate-1080p --once
+#   PERF_ABL=pssm4 ./run_perf.sh ablate-1080p --once
 #
 # Logs land in test_e2e/artifacts/perf/<stamp>/ and the summary prints the
 # per-phase table straight out of them.
@@ -81,6 +98,12 @@ RUN_DIR="$OUT_ROOT/$STAMP"
 # and the worst moment.
 PERF_FEN="rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2"
 
+# THE CEREMONY'S POSITION. Mate-in-1 (Ra1-a8#) with three loser pawns still
+# standing, so the ashfall has bodies to burn — the same FEN the dragon-live
+# e2e scenario uses, for the same reason. Rxa8# ends it, the checkmate
+# cinematic runs, and the dracarys torrent chains off the king's death.
+VFX_FEN="6k1/5ppp/8/8/8/8/8/R3K3 w - - 0 1"
+
 # macOS reports window sizes in POINTS; this display draws 2 device pixels per
 # point. --resolution therefore takes half the pixels we actually want. The
 # harness measures the real framebuffer and this script asserts it, so if the
@@ -93,15 +116,24 @@ PX_6K=$((6016 * 3384))
 
 REPEATS=2
 FORCE=0
+GATED=0
 STEPS=()
 for a in "$@"; do
   case "$a" in
     --force)   FORCE=1 ;;
     --once)    REPEATS=1 ;;
+    --gate)    GATED=1 ;;
     *)         STEPS+=("$a") ;;
   esac
 done
 [ ${#STEPS[@]} -eq 0 ] && STEPS=(preflight 1080p 6k contaminated)
+## `gate` is the regression step: the shortest run that still exercises the
+## board, the match load and the steady state, with the ceilings enforced.
+if [ "${STEPS[0]}" = "gate" ]; then
+  STEPS=(preflight noise load 1080p)
+  REPEATS=1
+  GATED=1
+fi
 
 mkdir -p "$RUN_DIR"
 note() { printf '[perf] %s\n' "$*"; }
@@ -128,13 +160,28 @@ run_with_timeout() {
 ## Godot processes running THIS project count — the owner's other games are
 ## their business, but they are also recorded, because a number taken beside
 ## one deserves that footnote.
+## MATCH THE EXECUTABLE, NEVER THE COMMAND TEXT.
+## This used to be `pgrep -fl "Godot.*great-houses-chess"`, which matches the
+## WHOLE command line of every process — including a sibling agent's shell
+## running a heredoc that merely MENTIONS Godot and this project path. It
+## reported 47 co-tenants when the true answer was 0, and refused to measure.
+## A monitor that matches on text matches the people talking about it, so the
+## test is on `comm` (the executable) and the project is looked for only in
+## that process's own arguments.
+godot_procs() {   # -> "<pid> <args>" per line, real Godot processes only
+  ## argv[0], NOT `comm`: macOS truncates comm to the column width
+  ## ("/Applications/Go"), so matching on it silently finds nothing.
+  ps -Ao pid=,%cpu=,args= | awk '$3 ~ /\/Godot$/'
+}
+
 guard_cotenants() {
-  local mine
-  mine=$(pgrep -fl "Godot.*great-houses-chess" | grep -v run_perf | wc -l | tr -d ' ')
-  local others
-  others=$(pgrep -fl "Godot" | grep -v "great-houses-chess" | wc -l | tr -d ' ')
+  local all mine others
+  all=$(godot_procs)
+  mine=$(printf '%s\n' "$all" | grep -c "great-houses-chess" || true)
+  others=$(printf '%s\n' "$all" | grep -v "great-houses-chess" | grep -c . || true)
+  mine=${mine:-0}; others=${others:-0}
   echo "cotenants_same_project=$mine cotenants_other=$others" > "$RUN_DIR/cotenants.txt"
-  pgrep -fl "Godot" >> "$RUN_DIR/cotenants.txt" 2>/dev/null
+  printf '%s\n' "$all" >> "$RUN_DIR/cotenants.txt" 2>/dev/null
   if [ "$mine" -gt 0 ]; then
     if [ "$FORCE" -eq 1 ]; then
       note "WARNING: $mine other Godot process(es) on this project — FORCED, numbers are contaminated"
@@ -181,17 +228,16 @@ run_one() {
   # The co-tenant's load is part of the evidence, not a footnote: a Godot game
   # already rendering on this GPU is the single largest uncontrolled variable
   # in every number below.
-  ps -Ao pid,%cpu,command | grep '[G]odot' > "$RUN_DIR/$label.cotenant-before.txt"
+  ps -Ao pid=,%cpu=,args= | awk '$3 ~ /\/Godot$/' > "$RUN_DIR/$label.cotenant-before.txt"
   HOME="$home" run_with_timeout "$tmo" "$log" \
     "$GODOT" --path "$PROJ" --scene res://test_e2e/perf_boot.tscn \
     --resolution "${w}x${h}" --position 0,0 \
     --disable-vsync --max-fps 0 --delta-smoothing disable \
     -- "--perf=$mode" "--perf-label=$label" "--perf-timeout=$((tmo - 15))" \
-       "--e2e-fen=$PERF_FEN" ${PERF_ABL:+"--perf-abl=$PERF_ABL"} \
-       ${PERF_LOAD:+"--perf-load=$PERF_LOAD"} \
+       "--e2e-fen=${RUN_FEN:-$PERF_FEN}" ${PERF_ABL:+"--perf-abl=$PERF_ABL"} \
        "${shot_args[@]+"${shot_args[@]}"}"
   local rc=$?
-  ps -Ao pid,%cpu,command | grep '[G]odot' > "$RUN_DIR/$label.cotenant-after.txt"
+  ps -Ao pid=,%cpu=,args= | awk '$3 ~ /\/Godot$/' > "$RUN_DIR/$label.cotenant-after.txt"
   if grep -Eq 'SCRIPT ERROR|Parse Error' "$log"; then
     note "FAIL $label: SCRIPT ERROR/Parse Error (log: $log)"
     return 1
@@ -224,6 +270,21 @@ note "run dir: $RUN_DIR"
 for step in "${STEPS[@]}"; do
   case "$step" in
     preflight) run_preflight || RC=1 ;;
+    noise)
+      guard_cotenants || { RC=1; continue; }
+      run_one "noise-1080p" noise "$W1080" "$H1080" "$PX_1080" 0 90 || RC=1 ;;
+    load)
+      guard_cotenants || { RC=1; continue; }
+      run_one "load-1080p" load "$W1080" "$H1080" "$PX_1080" 0 240 || RC=1 ;;
+    vfx)
+      guard_cotenants || { RC=1; continue; }
+      RUN_FEN="$VFX_FEN" run_one "vfx-1080p" vfx "$W1080" "$H1080" "$PX_1080" 0 240 || RC=1 ;;
+    vfx-6k)
+      guard_cotenants || { RC=1; continue; }
+      RUN_FEN="$VFX_FEN" run_one "vfx-6k" vfx "$W6K" "$H6K" "$PX_6K" 0 300 || RC=1 ;;
+    load-6k)
+      guard_cotenants || { RC=1; continue; }
+      run_one "load-6k" load "$W6K" "$H6K" "$PX_6K" 0 300 || RC=1 ;;
     1080p)
       guard_cotenants || { RC=1; continue; }
       for i in $(seq 1 $REPEATS); do
@@ -251,5 +312,17 @@ for step in "${STEPS[@]}"; do
 done
 
 note "──── logs in $RUN_DIR ────"
+
+## THE GATE. Until now this harness could only ever print; a regression could
+## walk straight past it because nothing it produced was allowed to be red.
+## perf_table.py --gate reads the same logs and exits 1 on a breached ceiling.
+if [ "$GATED" -eq 1 ]; then
+  echo
+  for f in "$RUN_DIR"/*.log; do
+    case "$f" in *preflight-import.log|*CONTAMINATED*) continue ;; esac
+    python3 "$SCRIPT_DIR/perf_table.py" --gate "$f" || RC=1
+  done
+fi
+
 echo "$RUN_DIR"
 exit "$RC"

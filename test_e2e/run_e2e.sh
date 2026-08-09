@@ -298,12 +298,22 @@ for step in "${STEPS[@]}"; do
     net-hall)  SCENARIO_TIMEOUT=120 run_scenario net-hall "--e2e-timeout=100" \
                  || SUITE_RC=1 ;;
                  # the unreachable-host error takes ENet's own connect timeout
+    ## THE PERFORMANCE GATE. Not part of the default sequence: it is the one
+    ## step whose numbers a co-tenant can invalidate, so it is opt-in
+    ## (`./run_e2e.sh perf`) and it refuses to measure beside another Godot
+    ## on this project rather than producing a number nobody can trust. Its
+    ## deterministic ceilings (draw calls, primitives, the match-load stall)
+    ## are enforced even on a busy machine; the frame-timing ones are skipped
+    ## and SAID to be skipped.
+    perf)      "$SCRIPT_DIR/run_perf.sh" gate || SUITE_RC=1
+               record perf "$([ "$SUITE_RC" -eq 0 ] && echo PASS || echo FAIL)" \
+                 "run_perf.sh gate (ceilings enforced; see its own run dir)" ;;
     showcase)  SCENARIO_TIMEOUT=170 run_scenario showcase "--e2e-fen=$DUEL_FEN" \
                  "--e2e-timeout=150" || SUITE_RC=1 ;;
                  # 45 s soak + tableau is ~56 s alone but needs headroom at
                  # the tail of a full sequential run (watchdogged at 90 s
                  # under end-of-suite load, 2026-08-08)
-    *) note "unknown step '$step' (use preflight|tests|boot|orientation|board-truth|board-moves|move|duel|castle|enpassant|promote|slowmo|music|banter|dragon-live|tournament|oracle-mock|oracle-modes|undo|net-hall|fullgame|showcase)"; SUITE_RC=1 ;;
+    *) note "unknown step '$step' (use preflight|tests|boot|orientation|board-truth|board-moves|move|duel|castle|enpassant|promote|slowmo|music|banter|dragon-live|tournament|oracle-mock|oracle-modes|undo|net-hall|fullgame|showcase|perf)"; SUITE_RC=1 ;;
   esac
 done
 

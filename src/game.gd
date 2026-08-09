@@ -154,7 +154,66 @@ var _victory_pending := ""
 var _victory_held := false
 
 
+## ── THE MATCH-LOAD BREAKDOWN ───────────────────────────────────────────────
+## The one stall a player of this game actually sees is at match load: a
+## single frozen frame the moment the Hall hands over to the board, in every
+## audited run, at both resolutions, in both scene versions.
+##
+## It measures ~180 ms on a warm load and ~550 ms on the first load of a
+## process. (Thirteen earlier runs reported 113-152 ms; that was the harness
+## discarding the real frame at a phase boundary — see perf_driver.gd's
+## `_set_phase`. The stall was always worse than the number.)
+##
+## A per-second summary can say "match-load hitched"; it can never say WHICH
+## part of `_ready()` did it, and "somewhere in match-load" is not a fix.
+##
+## So `_ready()` is bracketed step by step on the WALL clock. The lines only
+## exist when the perf harness is in the tree (it sets the `perf_trace` meta
+## before main.tscn boots) — a shipped launch never creates that node, so the
+## player pays one `has_meta` per match load and nothing else.
+var _perf_trace := false
+var _perf_t0 := 0
+var _perf_step_us := 0
+
+
+func _lt(step: String) -> void:
+	if not _perf_trace:
+		return
+	var now := Time.get_ticks_usec()
+	print("PERF LOADSTEP step=%s ms=%.2f cum_ms=%.2f t_us=%d" % [
+		step, float(now - _perf_step_us) / 1000.0,
+		float(now - _perf_t0) / 1000.0, now])
+	_perf_step_us = now
+
+
+## THE THREE MARKS THAT SPLIT A SCENE SWAP. `_ready()` alone cannot see the
+## work that happens BEFORE it: the PackedScene is parsed, every node is
+## constructed, and every CHILD's `_ready()` runs (children are readied before
+## their parent) — the Great Hall builds its whole room in there. Marking
+## `_init` and `_enter_tree` turns "somewhere in the scene swap" into three
+## named intervals:
+##   load+construct   the swap frame up to _init  (ResourceLoader + node build)
+##   construct->tree  _init -> _enter_tree
+##   children-ready   _enter_tree -> _ready       (GreatHall, BoardView, camera)
+var _perf_init_us := 0
+var _perf_tree_us := 0
+
+
+func _init() -> void:
+	_perf_init_us = Time.get_ticks_usec()
+
+
+func _enter_tree() -> void:
+	_perf_tree_us = Time.get_ticks_usec()
+
+
 func _ready() -> void:
+	_perf_trace = Engine.has_meta("perf_trace")
+	_perf_t0 = _perf_init_us
+	_perf_step_us = _perf_init_us
+	_lt("init->enter_tree")
+	_perf_step_us = _perf_tree_us
+	_lt("children-ready (GreatHall+Board+camera)")
 	var fen := ""
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--difficulty="):
@@ -173,9 +232,11 @@ func _ready() -> void:
 		# the wire in match_ready, so the joiner never reads its own flag.
 		fen = Session.net_start_fen
 		_undos_left = 0             # take-backs are off online (see _request_undo)
+	_lt("args+identity")
 	state = ChessState.new()
 	if not fen.is_empty() and not state.set_fen(fen):
 		push_error("invalid --e2e-fen '%s' — using the standard lineup" % fen)
+	_lt("chess-state")
 	duel_director = DuelDirector.new()
 	duel_director.name = "DuelDirector"
 	add_child(duel_director)
@@ -186,7 +247,9 @@ func _ready() -> void:
 	duel_director.cinematic_finished.connect(func(_kind: String) -> void:
 		Music.unduck()
 		_chrome_for_cinematic(false))
+	_lt("duel-director")
 	_setup_spectator()
+	_lt("spectator")
 	if Session.configured and str(Session.opponent.get("kind", "")) == "ds4_oracle":
 		oracle = Ds4Opponent.new()
 		oracle.name = "Oracle"
@@ -197,16 +260,51 @@ func _ready() -> void:
 		oracle.oracle_stumbled.connect(_on_oracle_stumbled)
 		oracle.retry_attempted.connect(_on_oracle_retry)
 		oracle.oracle_reason.connect(_on_oracle_reason)
+	_lt("oracle")
 	_build_hud()
+	_lt("hud")
+	## ── WHY THIS IS STILL ONE FRAME, AND WHAT IT COSTS ────────────────────
+	## Everything from here to the end of `_ready()` runs inside the SAME
+	## frame as the scene swap, and that frame is the one stall a player of
+	## this game actually feels. Measured at 1080p over four consecutive
+	## loads in one process (`run_perf.sh load`, PERF LOADSTEP lines):
+	##
+	##   dress-hall        58 ms on EVERY load — it never warms up
+	##   spawn-32-pieces  362 ms on the first load, 15 ms on every load after
+	##                    (first use builds each type x house mesh/material
+	##                    pair into the PieceAssets cache — CPU construction,
+	##                    not shader compilation: it completes before any draw)
+	##
+	## Spreading this across frames was tried, measured, and REVERTED. It
+	## works (worst frame 181 -> 153 ms warm, 550 -> 343 ms cold) but it
+	## breaks a contract this game makes everywhere else: `e2e_driver.gd`'s
+	## `_boot_game()` checks `views.size()` against the engine's piece count
+	## the instant `_game()` is non-null, and eighteen scenarios depend on it.
+	## A staggered board is empty for those frames. Deferring the spawn means
+	## renegotiating "the board is complete when the scene exists", which is a
+	## coordinated change to the harness, not a local one.
+	##
+	## The fix that does NOT break that contract is to warm `game.tscn` during
+	## the Hall of Banners: `main.gd::_on_selection_complete` already waits
+	## 0.75 s ("let the 'rides to war' banner breathe") before
+	## `change_scene_to_file`, and a `ResourceLoader.load_threaded_request()`
+	## fired into that dead time would take the load out of the swap frame for
+	## free. See docs/PERF.md.
 	_dress_hall()
+	_lt("dress-hall")
 	Music.play_game()   # idempotent; crossfades out whatever the menu left playing
+	_lt("music")
 	_setup_banter()     # after the HUD — the opening pool line arrives synchronously
+	_lt("banter")
 	_spawn_from_state()
+	_lt("spawn-32-pieces")
 	_refresh_turn_moves()
+	_lt("turn-moves")
 	_setup_network()    # after the state exists — the host hands it to NetMatch
 	_update_turn_label()
 	board.square_clicked.connect(_on_square_clicked)
 	board.square_hovered.connect(_on_square_hovered)
+	_lt("net+wiring")
 	var args := OS.get_cmdline_user_args()
 	if args.has("--debug-coords"):
 		_build_debug_coords()
@@ -216,6 +314,7 @@ func _ready() -> void:
 		_dump_tree()
 	if net == null and state.turn != player_color and not game_over:
 		_kick_ai_opening()
+	_lt("ready-exit")
 
 
 # -- head-to-head wiring ----------------------------------------------------
@@ -378,6 +477,15 @@ static func idx_of(sq: Vector2i) -> int:
 # -- setup -----------------------------------------------------------------
 
 
+## SYNCHRONOUS, DELIBERATELY. This is the single most expensive call in a
+## match load — 362 ms the first time, 15 ms after — and it stays on the swap
+## frame on purpose: every caller of this game assumes a board that is either
+## complete or absent, never half-raised. `e2e_driver.gd::_boot_game()` checks
+## `views.size()` the instant the scene exists, and `_perform_undo()` rebuilds
+## the board mid-game where a progressive reassembly under the player's hand
+## would be a worse bug than the stall. See the note in `_ready()` and
+## docs/PERF.md for the measured cost and the fix that does not need this to
+## move.
 func _spawn_from_state() -> void:
 	_hovered_view = null   # the freed views take any hover reveal with them
 	for sq in views:
