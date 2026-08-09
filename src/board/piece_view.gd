@@ -128,6 +128,37 @@ const KILL_STYLES := {
 ## Approach/timing/follow-through variants per style — see each _kill_* func.
 const KILL_VARIANTS := 3
 
+## TWO FIGHTERS MUST READ AS TWO FIGURES — the closest a kill may bring two
+## bodies, in world units, centre to centre.
+##
+## game.gd walks every capturing piece to `target - dir * 0.55`, and the pawn's
+## stab then stepped another 0.30 INSIDE that. A quarter of a world unit between
+## two chibi bodies whose helms alone are ~0.3 across is not a duel, it is one
+## silhouette: the shipped frame (kills/02_kill_pawn, 2026-08-09) came back as
+## "a tangle of interpenetrating meshes — the blue pawn's helm inside the gold
+## pawn's torso", and the showcase reel picked that frame. It is also the kill a
+## player sees more than any other, because a pawn taking a pawn is the most
+## frequent capture in chess.
+##
+## So no kill CLOSES any more. The ones that used to now WIND UP and lunge to a
+## line they may not cross — the blade arrives, the man does not — and the
+## follow-through carries them apart again. The floor is per-killer because a
+## destrier is not a man: STAND_OFF is a body plus a blade, MOUNTED_STAND_OFF
+## adds the horse's chest and head in front of the rider.
+##
+## Both numbers were settled by rendering the six kills and LOOKING at them
+## (render → look → adjust), which is the only instrument that answers "do these
+## two read as two men". Anything that changes them must re-render kills/.
+const STAND_OFF := 0.66
+const MOUNTED_STAND_OFF := 0.92
+## How far the ensemble gathers BACKWARD before a charge. A mounted charge is
+## the run, not the contact: at the old 0.34 the horse covered 0.13 world units
+## between gather and impact, which is a shuffle no amount of camera can sell.
+const KNIGHT_CHARGE_GATHER := 1.05
+## How far a crushed body is driven along its own back as the weight lands, so
+## it comes to rest CLEAR of the footprint that killed it (see _die_crushed).
+const CRUSH_SHOVE := 0.44
+
 ## How the VICTIM goes down. Passed by the killer to die(); the empty string
 ## is the legacy path (Hit_A -> Death_A), which stays byte-for-byte what it
 ## was because checkmate and the costume suite both call `die()` bare.
@@ -494,83 +525,152 @@ func die(style: String = "") -> void:
 # ── the six kills ─────────────────────────────────────────────────────────
 
 
-## PAWN — THE SHORT BRUTAL STAB. He does not wind up: he steps inside the
-## guard where a sword is useless, puts it in low, and steps back out.
+## PAWN — THE LUNGE. It used to be "he steps INSIDE the guard", and inside the
+## guard is where two chibi bodies become one lump of geometry (see STAND_OFF).
+## The verb is the same brutal one; the staging is the opposite. He drops back
+## into a low guard — which opens real ground, so what follows is a MOVEMENT and
+## not a nudge — then throws himself forward behind the point and stops at the
+## stand-off line. The reach is the blade's; the bodies never touch.
 ## Variants: 0 straight thrust · 1 off-line (he slips to a flank first) ·
-## 2 the double tap (a jab, a beat, then the one that lands).
+## 2 the double tap (a jab short, a beat, then the one that lands).
 func _kill_stab(victim: PieceView) -> void:
 	var dir := _flat_dir_to(victim)
 	var home := position
 	var flank := Vector3.ZERO
 	if kill_variant == 1:
-		flank = dir.cross(Vector3.UP).normalized() * (0.2 if randf() < 0.5 else -0.2)
-	var inside := home + dir * (0.22 if kill_variant == 2 else 0.3) + flank
+		flank = dir.cross(Vector3.UP).normalized() * (0.24 if randf() < 0.5 else -0.24)
+	var guard := home - dir * 0.30 + flank
+	var mark := _mark_off(victim, STAND_OFF) + flank
 	if _anim != null:
 		_anim.play(ANIM_THROW, 0.04)
 		_anim.speed_scale = 1.9 if kill_variant == 0 else 2.1
-	var step := create_tween()
-	step.tween_property(self, "position", inside, 0.15) \
-		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	await step.finished
-	_strike_flash(victim.global_position, {"height": 0.34, "scale": 0.72, "life": 0.34})
+	var wind := create_tween()
+	wind.tween_property(self, "position", guard, 0.16) \
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	await wind.finished
 	if kill_variant == 2:
-		await _beat(0.11)
-		var jab := create_tween()
-		jab.tween_property(self, "position", inside + dir * 0.14, 0.09) \
-			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
-		await jab.finished
-		_strike_flash(victim.global_position, {"height": 0.3, "scale": 0.8, "life": 0.4})
+		# The feint: a short jab that stops well short, then the real one.
+		var feint := create_tween()
+		feint.tween_property(self, "position", guard.lerp(mark, 0.45), 0.09) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		await feint.finished
+		await _beat(0.1)
+	var lunge := create_tween()
+	lunge.tween_property(self, "position", mark, 0.11) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	await lunge.finished
+	# The arc lands ON him, not halfway back to the man who threw it — the gap
+	# between the two is the whole point of the staging above.
+	_strike_flash(victim.global_position, {"height": 0.36, "scale": 0.78, "life": 0.36,
+		"at": global_position.lerp(victim.global_position, 0.74)})
 	await victim.die(DEATH_BLADE)
 	_settle_attacker()
 	var back := create_tween()
-	back.tween_property(self, "position", home, 0.2) \
+	back.tween_property(self, "position", home, 0.22) \
 		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 	await back.finished
 
 
-## KNIGHT — THE MOUNTED CHARGE. The ensemble gathers backwards, the horse
-## gallops in with the rider's sword out, and the victim is TRAMPLED — thrown
-## off his feet rather than cut. The mount is a static mesh, so the gallop is
-## the canter bob from move_to, run hard.
+## KNIGHT — THE MOUNTED CHARGE, sold by the ENSEMBLE rather than by the horse's
+## legs. The mount is a static mesh (PieceAssets.HORSE — its rig corrupts at
+## piece scale), so a gallop can never come from the animal itself; it has to
+## come from everything around it. Three things do the work, and the shipped
+## charge had none of them:
+##
+##  1. THE HORSE TURNS ONTO HIM. At rest the mount stands broadside to the root
+##     (KNIGHT_MODEL_YAW) so a chess piece reads as cavalry from the head-on
+##     gameplay camera. But the duel camera films ACROSS the duel line, and
+##     broadside-to-the-root is square to THAT lens: the shipped frame was a
+##     horse facing the camera with all four legs planted and a rider looking
+##     past his own victim. A charging horse points where it charges — the
+##     ensemble squares up for the run (which puts the animal in true PROFILE
+##     for the duel camera, the shot that sells a charge) and re-seats after.
+##  2. A REAL RUN. It gathers a full KNIGHT_CHARGE_GATHER backwards and covers
+##     that ground in the same third of a second the old 0.13-unit shuffle took,
+##     so the speed is in the picture even in one frame.
+##  3. DUST AND CARRY. Hooves scuff at the gather, throw a bank on the run, and
+##     the ensemble carries a stride PAST the man it rode down before wheeling
+##     home — a charge that stops dead on contact is a step.
+##
+## The victim is TRAMPLED and launched, never cut.
 ## Variants: 0 straight down the file · 1 a wide approach that converges ·
-## 2 a rear-up, then a shorter, heavier slam.
+## 2 a deeper rear-up and a heavier slam.
 func _kill_charge(victim: PieceView) -> void:
 	var dir := _flat_dir_to(victim)
 	var home := position
-	var gap := _flat_gap_to(victim)
 	var flank := dir.cross(Vector3.UP).normalized()
-	var gather := home - dir * (0.46 if kill_variant == 2 else 0.34) \
-		+ flank * (0.3 if kill_variant == 1 else 0.0)
+	_mount_yaw(0.0, 0.0, 0.22)   # concurrent: horse and rider square onto him
+	var gather := home - dir * (KNIGHT_CHARGE_GATHER + (0.22 if kill_variant == 2 else 0.0)) \
+		+ flank * (0.34 if kill_variant == 1 else 0.0)
 	var rear := create_tween().set_parallel(true)
-	rear.tween_property(self, "position", gather, 0.24) \
+	rear.tween_property(self, "position", gather, 0.26) \
 		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 	if _model != null:
-		rear.tween_property(_model, "rotation:x", -0.24 if kill_variant == 2 else -0.1,
-			0.24).set_trans(Tween.TRANS_QUAD)
+		rear.tween_property(_model, "rotation:x", -0.32 if kill_variant == 2 else -0.16,
+			0.26).set_trans(Tween.TRANS_QUAD)
 	await rear.finished
+	_dust_puff(global_position, 18, 0.42)   # the hooves dig in
 	if _anim != null:
 		_anim.play(ANIM_THROW, 0.04)   # the sword comes out, extended
 		_anim.speed_scale = 1.6
-	var impact := home + dir * maxf(gap - 0.42, 0.06)
+	var impact := _mark_off(victim, MOUNTED_STAND_OFF)
 	var from := position
+	var run := maxf(from.distance_to(impact), 0.01)
+	var strides := maxf(2.0, roundf(run * 2.2))
+	var scuffed := {"n": 0}
 	var charge := create_tween()
 	var gallop := func(t: float) -> void:
-		position = from.lerp(impact, t) + Vector3.UP * absf(sin(t * PI * 2.0)) * 0.05
+		position = from.lerp(impact, t) \
+			+ Vector3.UP * absf(sin(t * PI * strides)) * 0.08
 		if _model != null:
-			_model.rotation.x = sin(t * PI * 4.0) * 0.08 - 0.03 * (1.0 - t)
-	charge.tween_method(gallop, 0.0, 1.0, 0.3 if kill_variant == 2 else 0.34) \
+			_model.rotation.x = sin(t * PI * strides * 2.0) * 0.1 - 0.05 * (1.0 - t)
+		# Dust thrown BEHIND the run, at two marks along it — the trail is what
+		# says "this covered ground" in a single frame.
+		if t > 0.32 and int(scuffed["n"]) < 1:
+			scuffed["n"] = 1
+			_dust_puff(from.lerp(impact, 0.3), 14, 0.5)
+		elif t > 0.66 and int(scuffed["n"]) < 2:
+			scuffed["n"] = 2
+			_dust_puff(from.lerp(impact, 0.62), 14, 0.55)
+	charge.tween_method(gallop, 0.0, 1.0, 0.34 if kill_variant == 2 else 0.32) \
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 	await charge.finished
 	if _model != null:
 		_model.rotation.x = 0.0
-	_strike_flash(victim.global_position, {"height": 0.72, "scale": 1.25, "life": 0.42})
-	_dust_puff(victim.global_position, 22, 0.5)   # hooves on stone
-	await victim.die(DEATH_LAUNCH)
+	_strike_flash(victim.global_position, {"height": 0.8, "scale": 1.35, "life": 0.44,
+		"at": global_position.lerp(victim.global_position, 0.7)})
+	_dust_puff(victim.global_position, 30, 0.72)   # hooves on stone
+	# The trample and the carry-through run TOGETHER: he is thrown off his feet
+	# while the ensemble is still moving over the ground he stood on.
+	var gone := _fell(victim, DEATH_LAUNCH)
+	var carry := create_tween()
+	carry.tween_property(self, "position", impact + dir * 0.26, 0.18) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	await carry.finished
+	await _await_death(gone, victim)
 	_settle_attacker()
+	_mount_yaw(KNIGHT_MODEL_YAW, -KNIGHT_RIDER_COUNTER_YAW, 0.3)   # back to the reins
 	var wheel := create_tween()
-	wheel.tween_property(self, "position", home, 0.34) \
+	wheel.tween_property(self, "position", home, 0.36) \
 		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	await wheel.finished
+
+
+## Turn the mounted ensemble: the horse to `model_deg` off the root's forward,
+## the rider to `rider_deg` off the horse. Fire-and-forget, so it runs under
+## whatever beat calls it. A no-op on every rank that is not cavalry.
+## The two rest values are KNIGHT_MODEL_YAW / -KNIGHT_RIDER_COUNTER_YAW; a
+## charge takes both to zero (everyone points at the victim) and puts them back.
+func _mount_yaw(model_deg: float, rider_deg: float, sec: float) -> void:
+	if piece_type != Type.KNIGHT:
+		return
+	var tw := create_tween().set_parallel(true)
+	if _model != null:
+		tw.tween_property(_model, "rotation:y", deg_to_rad(model_deg), sec) \
+			.set_trans(Tween.TRANS_SINE)
+	if _rider != null:
+		tw.tween_property(_rider, "rotation:y", deg_to_rad(rider_deg), sec) \
+			.set_trans(Tween.TRANS_SINE)
 
 
 ## BISHOP — NO CONTACT. He gives ground rather than closing, raises the staff,
@@ -614,16 +714,31 @@ func _kill_bolt(victim: PieceView) -> void:
 	await ret.finished
 
 
-## ROOK — THE GRIND. A watchtower has no arms: it comes forward over the
-## square and what is standing on it is under it. Dust, not blood — and the
-## tower ends the duel standing where the victim stood.
+## ROOK — THE GRIND, and THE CRUSH IS ON SCREEN NOW. A watchtower has no arms:
+## it comes forward over the square and what is standing on it goes under it.
+##
+## The shipped frame (kills/05_kill_rook, 2026-08-09) was "a tower alone on a
+## square with no victim, no crush and no debris" — the whole verb was invisible,
+## for three compounding reasons, each fixed here or in _die_crushed:
+##   * the tower ROLLED ONTO the man and stopped on top of him, so the only
+##     witness to the kill was hidden under the thing that did it. He is DRIVEN
+##     ALONG the tower's line now (_die_crushed's shove) and comes to rest just
+##     beyond its leading face, flattened on the stone in full view;
+##   * the death squashed him to a 12 % pancake — nothing left to see at duel
+##     distance. He is laid out, not erased;
+##   * one puff of dust in the middle of a tower is one puff of dust. The bite
+##     throws a LOW WIDE BANK across the leading face (_dust_bank), and the
+##     tower shudders as the weight comes down — the masonry judder is doubled
+##     at the moment of contact and it drops into its own footing after.
+## Dust, not blood — and the tower still ends the duel standing on the square it
+## took (test_kill_styles asserts exactly that).
 ## Variants: 0 a steady roll · 1 a heavy lean into it · 2 rise, then drop on
 ## him first and grind through.
 func _kill_grind(victim: PieceView) -> void:
 	var dir := _flat_dir_to(victim)
 	var home := position
 	var over := victim.position
-	var stop := over + dir * 0.08
+	var stop := over + dir * 0.1
 	if kill_variant == 2:
 		var rise := create_tween()
 		rise.tween_property(self, "position", home + Vector3.UP * 0.16, 0.16) \
@@ -631,30 +746,55 @@ func _kill_grind(victim: PieceView) -> void:
 		rise.tween_property(self, "position", home, 0.1) \
 			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 		await rise.finished
-		_dust_puff(global_position, 16, 0.35)
-	var lean: float = 0.13 if kill_variant == 1 else 0.06
+		_dust_bank(global_position, dir, 12)
+	var lean: float = 0.15 if kill_variant == 1 else 0.08
 	var start := position
+	var bite := {"hit": false}
 	var grind := create_tween()
 	var roll := func(u: float) -> void:
-		position = start.lerp(stop, u) + Vector3.UP * absf(sin(u * PI * 3.0)) * 0.028
-		rotation.z = sin(u * PI * 7.0) * 0.02          # masonry judder
+		position = start.lerp(stop, u) + Vector3.UP * absf(sin(u * PI * 3.0)) * 0.03
+		# The judder doubles from the moment the leading face takes the man.
+		var shake: float = 0.02 if not bool(bite["hit"]) else 0.045
+		rotation.z = sin(u * PI * 7.0) * shake         # masonry judder
 		rotation.x = -lean * sin(u * PI)               # it leans into the weight
 	grind.tween_method(roll, 0.0, 1.0, 0.62 if kill_variant == 1 else 0.55) \
 		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-	await _beat(0.24)   # the shadow reaches him
+	await _beat(0.22)   # the shadow reaches him
+	bite["hit"] = true
+	# The bank is thrown across the LEADING FACE, on the near side of the man —
+	# in front of the mass, where the eye is already looking.
+	_dust_bank(victim.global_position - dir * 0.2, dir, 16)
 	var gone := _fell(victim, DEATH_CRUSH)
-	_dust_puff(victim.global_position, 34, 0.7)
 	await grind.finished
 	rotation.x = 0.0
 	rotation.z = 0.0
-	_dust_puff(global_position, 18, 0.45)
+	# It settles into its own footing: a short drop, and the last of the dust.
+	var settle := create_tween()
+	settle.tween_property(self, "position", stop - Vector3.UP * 0.05, 0.09) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	settle.tween_property(self, "position", stop, 0.16) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	_dust_bank(global_position, dir, 16)
+	await settle.finished
 	await _await_death(gone, victim)
 
 
-## QUEEN — THE BOW. She never leaves her square: she draws, looses, and the
-## arrow takes him in the chest.
-## Variants: 0 a flat fast shot · 1 a lobbed arc · 2 two arrows, the second
-## before the first has landed.
+## QUEEN — THE BOW. She never closes: she draws, looses, and the arrow takes him
+## in the chest.
+##
+## THE ARROW LANDS BEFORE HE FALLS, and until 2026-08-09 it did not. The shipped
+## frame (kills/06_kill_queen) caught "arrows hanging in mid-air BEHIND an
+## already-fallen victim" — the timing read inverted, the kill read as a
+## coincidence. Two causes, both closed:
+##   * variant 2 loosed its first arrow FIRE-AND-FORGET and only awaited the
+##     second, so one shaft was still in the air when the man went down. Both
+##     are awaited now: arrow, arrow, a beat, THEN the fall;
+##   * every shaft flew at a chest point sampled once, before the shot, so an
+##     arrow that arrived a frame late arrived where the chest USED to be and
+##     stuck to nothing. _loose_arrow re-reads the victim's live chest every
+##     frame — it follows him down and buries itself in the body.
+## Variants: 0 a flat fast shot · 1 a lobbed arc · 2 two shafts, the second on
+## the heels of the first.
 func _kill_arrow(victim: PieceView) -> void:
 	# SHE OPENS THE RANGE FIRST. game.gd walks every capturing piece to
 	# `target - dir*0.55`, which puts an archer close enough to hand the man
@@ -671,11 +811,11 @@ func _kill_arrow(victim: PieceView) -> void:
 		_anim.speed_scale = 1.0 if kill_variant == 1 else 1.3
 	await open_range.finished
 	await _beat(0.16)
-	var chest := victim.global_position + Vector3.UP * _chest_height(victim)
 	if kill_variant == 2:
-		_loose_arrow(victim, chest + Vector3(randf_range(-0.06, 0.06), 0.08, 0.0), 0.0)
-		await _beat(0.13)
-	await _loose_arrow(victim, chest, 0.34 if kill_variant == 1 else 0.0)
+		await _loose_arrow(victim, 0.0, Vector3(randf_range(-0.07, 0.07), 0.1, 0.0))
+		await _beat(0.1)
+	await _loose_arrow(victim, 0.34 if kill_variant == 1 else 0.0)
+	await _beat(0.12)   # the shaft is IN him, and read, before he goes
 	await victim.die(DEATH_ARROW)
 	_settle_attacker()
 	var close_range := create_tween()
@@ -695,8 +835,13 @@ func _kill_execution(victim: PieceView) -> void:
 		_anim.play(ANIM_THROW, 0.06)
 		_anim.speed_scale = 0.5        # THE RAISE — deliberately slow
 	if kill_variant == 1:
+		# THE STEP STOPS AT THE STAND-OFF LINE. It used to be a flat +0.24 from
+		# wherever he happened to be standing, which on gameplay's 0.55 approach
+		# put a king 0.31 world units from his victim — the pawn's
+		# interpenetration defect, one rank up and not yet photographed. A blow
+		# needs the room to fall through; the two bodies do not need to touch.
 		var step := create_tween()
-		step.tween_property(self, "position", home + dir * 0.24, 0.36) \
+		step.tween_property(self, "position", _mark_off(victim, STAND_OFF), 0.36) \
 			.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	await _beat(0.55)
 	if _anim != null:
@@ -708,7 +853,7 @@ func _kill_execution(victim: PieceView) -> void:
 	else:
 		_strike_flash(victim.global_position,
 			{"height": 0.78, "scale": 1.2, "life": 0.5, "tilt": PI * 0.5})
-	_dust_puff(victim.global_position, 26, 0.6)
+	_dust_puff(victim.global_position, 16, 0.6)
 	await victim.die(DEATH_BLADE if kill_variant == 2 else DEATH_CRUSH)
 	_settle_attacker()
 	if kill_variant == 1:
@@ -737,10 +882,30 @@ func _flat_dir_to(victim: Node3D) -> Vector3:
 	return d.normalized() if d.length() > 0.001 else Vector3.FORWARD
 
 
-func _flat_gap_to(victim: Node3D) -> float:
-	var d := victim.position - position
-	d.y = 0.0
-	return d.length()
+## NOTE `_flat_gap_to` is GONE. Its only caller was the charge's old
+## `impact = home + dir * max(gap - 0.42, 0.06)` — a distance measured from
+## where the attacker happened to be standing, which is exactly the reasoning
+## _mark_off replaces: the stand-off is a property of the VICTIM's square, not
+## of the killer's approach. Leaving a second way to compute a strike point
+## behind is how two kills end up disagreeing about where a body is.
+
+
+## THE STAND-OFF LINE: the point `d` world units short of the victim, on the
+## duel line, at this attacker's own height. Every kill that used to close on a
+## body now stops here instead — see STAND_OFF for the frame that earned the
+## rule. It is an absolute mark, not a step: a lunge that overshoots its target
+## by a hand still lands on the line.
+func _mark_off(victim: Node3D, d: float) -> Vector3:
+	var dir := _flat_dir_to(victim)
+	var v := victim.position
+	return Vector3(v.x - dir.x * d, position.y, v.z - dir.z * d)
+
+
+## Where an arrow is aiming THIS frame: the victim's chest, live.
+func _arrow_aim(victim: PieceView, offset: Vector3) -> Vector3:
+	if not is_instance_valid(victim):
+		return global_position
+	return victim.global_position + Vector3.UP * _chest_height(victim) + offset
 
 
 ## Roughly where a piece's chest is, in world units above its feet — the
@@ -1101,28 +1266,44 @@ func _die_launched() -> void:
 	await _beat(window)
 
 
-## CRUSHED under the tower (or under the king's blow): he collapses and then
-## the weight lands — the model squashes, dust goes up, and there is no blood
-## in it at all.
+## CRUSHED under the tower (or under the king's blow): he collapses and then the
+## weight lands — dust goes up, and there is no blood in it at all.
+##
+## HE IS DRIVEN OUT FROM UNDER IT. Twice over, this death used to leave nothing
+## to look at: the weight came down on the man's own square, and the man was
+## squashed to a 12 % pancake ON that square — so the rook's kill frame shipped
+## as a tower standing alone with no victim anywhere in it. He now goes down
+## ALONG HIS OWN BACK (he faces his killer, so -Z is the way the mass throws
+## him) far enough to clear the footprint, and he is LAID OUT rather than
+## erased: a body-length silhouette on the stone is what reads at duel distance.
 func _die_crushed() -> void:
 	death_anim = ANIM_DEATH
 	_anim.speed_scale = 1.5
 	_anim.play(ANIM_DEATH, 0.05)
 	if piece_type == Type.KNIGHT:
 		_mounted_fall(PieceAssets.anim_length(ANIM_DEATH) / 1.5)
-	await _beat(0.16)
+	# The direction the weight throws him: away from whoever he is facing.
+	var away := -global_transform.basis.z
+	away.y = 0.0
+	away = away.normalized() if away.length() > 0.01 else Vector3.BACK
+	var p0 := global_position
+	await _beat(0.14)
 	if _model != null:
-		var flat := Vector3(_model.scale.x * 1.3, _model.scale.y * 0.12,
-			_model.scale.z * 1.3)
+		var flat := Vector3(_model.scale.x * 1.24, _model.scale.y * 0.34,
+			_model.scale.z * 1.24)
 		var tw := create_tween().set_parallel(true)
-		tw.tween_property(_model, "scale", flat, 0.24) \
+		tw.tween_property(_model, "scale", flat, 0.26) \
 			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 		tw.tween_property(_model, "rotation:y",
-			_model.rotation.y + randf_range(-0.3, 0.3), 0.24)
-		_dust_puff(global_position, 30, 0.62)
+			_model.rotation.y + randf_range(-0.3, 0.3), 0.26)
+		var shove := func(u: float) -> void:
+			global_position = p0 + away * (CRUSH_SHOVE * u)
+		tw.tween_method(shove, 0.0, 1.0, 0.26) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		_dust_bank(global_position, away, 12)
 		await tw.finished
 	else:
-		await _beat(0.24)
+		await _beat(0.26)
 
 
 ## BURNED. The bishop's bolt does not touch him: it lights him. Every surface
@@ -1250,6 +1431,20 @@ func _dust_puff(world_pos: Vector3, amount: int, spread_scale: float) -> void:
 	p.emitting = true
 
 
+## A LOW WIDE BANK of it — what a mass coming down actually throws, and what a
+## single puff in the middle of a watchtower cannot be. Three emitters spread
+## ACROSS the line of travel (so the bank is wider than the thing that made it)
+## rather than one bigger emitter, because "one bigger emitter" is precisely the
+## white hemisphere _dust_puff's own note was written about: the per-puff tuning
+## that keeps dust a haze is preserved, and only the footprint grows.
+func _dust_bank(world_pos: Vector3, along: Vector3, amount: int) -> void:
+	var side := along.cross(Vector3.UP)
+	side = side.normalized() if side.length() > 0.01 else Vector3.RIGHT
+	for i in 3:
+		_dust_puff(world_pos + side * (float(i) - 1.0) * 0.52
+			+ along * randf_range(-0.11, 0.11), amount, 0.6)
+
+
 ## A soft round particle mask — dust with a hard rectangular edge is a
 ## rectangle, which is the exact defect the weapon trail already paid for.
 func _soft_dot() -> GradientTexture2D:
@@ -1338,48 +1533,69 @@ func _spawn_world_effect(node: Node3D, world_pos: Vector3, life: float) -> void:
 ## an arrow that despawns on contact leaves a man who simply fell over. On
 ## impact it is re-parented to the victim and rides the body down — and is
 ## freed with him, since he owns it now.
-func _loose_arrow(victim: PieceView, target: Vector3, arc: float) -> void:
+##
+## IT AIMS AT THE MAN, NOT AT A REMEMBERED POINT. The target used to be sampled
+## once by the caller; a shaft that arrived after he had begun to move arrived
+## where his chest had been, and hung there. It now re-reads his live chest every
+## frame of the flight, so the arrow cannot miss a man who is standing still and
+## cannot orphan itself off one who is not. `offset` nudges the aim (the second
+## shaft of a double), `arc` lifts the flight for the lobbed variant.
+func _loose_arrow(victim: PieceView, arc: float, offset: Vector3 = Vector3.ZERO) -> void:
 	var bow := find_child("Gear_bow", true, false) as Node3D
 	var from := bow.global_position if bow != null \
 		else global_position + Vector3.UP * _chest_height(self)
 	var shaft := MeshInstance3D.new()
 	shaft.name = "Arrow"
 	# Scaled to the CAST, not to a real arrow: these fighters are 0.78-1.2 world
-	# units tall, so a 0.42 m shaft crossed the frame like a spear.
+	# units tall, so a 0.42 m shaft crossed the frame like a spear. Nudged up
+	# from 0.24 x 0.008 on 2026-08-09: at the duel camera's distance that was a
+	# 15-pixel splinter, and an arrow nobody can find is not the queen's
+	# signature — it is a man who fell over for no visible reason.
 	var cyl := CylinderMesh.new()
-	cyl.top_radius = 0.008
-	cyl.bottom_radius = 0.008
-	cyl.height = 0.24
+	cyl.top_radius = 0.011
+	cyl.bottom_radius = 0.011
+	cyl.height = 0.3
 	shaft.mesh = cyl
+	# LIGHT WOOD, NOT NEAR-BLACK. The shaft was 0.22,0.16,0.1 — against a dark
+	# leather torso on a dark square it was invisible, so a kill whose whole
+	# signature is the arrow shipped a frame with no arrow findable in it. Pale
+	# ash reads against both armies and both colours of flagstone.
 	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.22, 0.16, 0.1)
-	mat.roughness = 0.9
+	mat.albedo_color = Color(0.62, 0.48, 0.3)
+	mat.roughness = 0.85
 	shaft.material_override = mat
 	shaft.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var head := MeshInstance3D.new()
 	head.name = "ArrowHead"
 	var tip := CylinderMesh.new()
 	tip.top_radius = 0.0
-	tip.bottom_radius = 0.018
-	tip.height = 0.07
+	tip.bottom_radius = 0.023
+	tip.height = 0.085
 	head.mesh = tip
 	var hmat := StandardMaterial3D.new()
 	hmat.albedo_color = Color(0.6, 0.62, 0.66)
 	hmat.metallic = 0.9
 	hmat.roughness = 0.35
 	head.material_override = hmat
-	head.position = Vector3(0.0, 0.14, 0.0)
+	head.position = Vector3(0.0, 0.17, 0.0)
 	head.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	shaft.add_child(head)
+	_fletch(shaft)   # the tail the eye actually finds at duel distance
 	var holder := get_parent()
 	if holder == null:
 		holder = self
 	holder.add_child(shaft)
-	var flight := clampf(from.distance_to(target) * 0.14, 0.12, 0.26)
+	# The aim is LIVE: `last` is only the memory of it, for the frame after he
+	# is freed.
+	var last := {"t": _arrow_aim(victim, offset)}
+	var flight := clampf(from.distance_to(last["t"]) * 0.14, 0.12, 0.26)
 	var fly := create_tween()
 	var travel := func(u: float) -> void:
 		if not is_instance_valid(shaft):
 			return
+		if is_instance_valid(victim) and not victim.is_queued_for_deletion():
+			last["t"] = _arrow_aim(victim, offset)
+		var target: Vector3 = last["t"]
 		var p := from.lerp(target, u) + Vector3.UP * (sin(u * PI) * arc)
 		var nxt := from.lerp(target, minf(u + 0.05, 1.0)) \
 			+ Vector3.UP * (sin(minf(u + 0.05, 1.0) * PI) * arc)
@@ -1399,6 +1615,7 @@ func _loose_arrow(victim: PieceView, target: Vector3, arc: float) -> void:
 			shaft.global_position = p
 	fly.tween_method(travel, 0.0, 1.0, flight).set_trans(Tween.TRANS_LINEAR)
 	await fly.finished
+	var target: Vector3 = last["t"]
 	# Anchored ON the chest it hit — a flash halfway back to the archer is not
 	# an impact, it is a decoration.
 	_strike_flash(target, {"at": target, "height": 0.0, "scale": 0.45,
@@ -1406,14 +1623,51 @@ func _loose_arrow(victim: PieceView, target: Vector3, arc: float) -> void:
 	if not is_instance_valid(shaft):
 		return
 	if is_instance_valid(victim) and not victim.is_queued_for_deletion():
+		# IT RIDES HIS CHEST BONE, NOT HIS FEET.
+		#
+		# This used to re-parent to the victim's ROOT, and a PieceView's root
+		# does not move when the man dies — the death clip animates the skeleton
+		# inside the model. So the body went down and the arrow stayed exactly
+		# where the chest had been: a shaft hanging in the air a body's height
+		# above a corpse, which is the "arrows hang in mid-air BEHIND an
+		# already-fallen victim" the critic read as inverted timing. Mounted on
+		# the rig's chest bone (the quiver's own mount, and the crown-attach
+		# pattern generally) it falls with him, and it is freed with him.
 		var xf := shaft.global_transform
+		var host: Node3D = victim._bone_mount("chest", "ArrowMount")
+		if host == null:
+			host = victim
 		shaft.get_parent().remove_child(shaft)
-		victim.add_child(shaft)
+		host.add_child(shaft)
 		shaft.global_transform = xf
-		# Buried to the fletching rather than resting on the surface.
+		# Buried to the fletching rather than resting on the surface: a shaft
+		# that only touches a man reads as a shaft floating beside him.
 		shaft.global_position -= xf.basis.y.normalized() * 0.07
 	else:
 		shaft.queue_free()
+
+
+## THE FLETCHING. Two crossed vanes at the tail — the part of an arrow that is
+## always OUTSIDE the man, and the part the eye finds first. A buried shaft is a
+## dark line against dark leather; a pale cross standing off his chest is
+## unmistakably an arrow, at duel distance, in one frame.
+func _fletch(shaft: MeshInstance3D) -> void:
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.93, 0.91, 0.86)
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	for i in 2:
+		var vane := MeshInstance3D.new()
+		vane.name = "Fletch%d" % i
+		var q := QuadMesh.new()
+		q.size = Vector2(0.075, 0.05)
+		vane.mesh = q
+		vane.material_override = mat
+		vane.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		# The shaft's long axis is +Y; the vanes lie ALONG it at the tail.
+		vane.position = Vector3(0.0, -0.115, 0.0)
+		vane.rotation = Vector3(PI * 0.5, PI * 0.5 * float(i), 0.0)
+		shaft.add_child(vane)
 
 
 # ── the bishop's bolt (DRACARYS at staff scale) ────────────────────────────

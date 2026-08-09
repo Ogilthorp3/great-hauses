@@ -48,6 +48,7 @@ func _main() -> void:
 	await _test_rook_exemption()
 	_test_exemption_is_towers_only()
 	_test_every_kill_has_a_frame()
+	_test_frame_contains_the_fight()
 	await _test_checkmate_facing()
 	await _test_skip_still_rests()
 	check("final: time_scale is 1.0", true, is_equal_approx(Engine.time_scale, 1.0))
@@ -216,7 +217,7 @@ func _test_every_kill_has_a_frame() -> void:
 	for t in 6:
 		var frame = DD.DUEL_FRAMES.get(t)
 		check("frame: type %d has one" % t, true,
-				frame != null and (frame as Array).size() == 3)
+				frame != null and (frame as Array).size() == 4)
 		if frame == null:
 			continue
 		check("frame: type %d fov is sane" % t, true,
@@ -225,6 +226,65 @@ func _test_every_kill_has_a_frame() -> void:
 		# is the bug where every rank was filmed from the clamp floor.
 		check("frame: type %d stands off the fight" % t, true,
 				float(frame[0]) >= 1.5 and float(frame[0]) <= 6.0)
+		# REACH is what the rank's choreography needs along the duel line. Zero
+		# would mean "the fight is exactly the two men standing still", which is
+		# true of no kill in the game and was false-by-a-metre for the charge.
+		check("frame: type %d declares its reach" % t, true,
+				float(frame[3]) >= 0.5 and float(frame[3]) <= 4.0)
+	check("frame: the knight's charge reserves the most room of any rank", true,
+			float(DD.DUEL_FRAMES[2][3]) == _max_reach())
+	check("frame: every rank has a regalia height", 6, DD.FIGHTER_TOP.size())
+
+
+func _max_reach() -> float:
+	var m := 0.0
+	for t in DD.DUEL_FRAMES:
+		m = maxf(m, float(DD.DUEL_FRAMES[t][3]))
+	return m
+
+
+## THE FRAME MUST CONTAIN THE FIGHT — geometrically, per rank, before any
+## pixel is rendered. The critic's two failures were a queen cropped at the
+## right edge and a king whose crown was cut off the top, and both are the
+## same defect: a camera placed at a FIXED distance knows nothing about how
+## tall the fighters are or how far the choreography travels.
+##
+## This stands the two fighters up at the real duel separation (game.gd walks a
+## capturing piece to `target - dir*0.55`), asks the director for the frame it
+## would compose, and checks every corner the action can reach — the attacker's
+## windup point, the victim, and the top of the taller man's regalia — against
+## the camera's own half-angles. Headless has no viewport, so the aspect falls
+## back to the VERTICAL half-fov alone, which is the strictly harder test.
+func _test_frame_contains_the_fight() -> void:
+	var d := _fast_director()
+	var names := ["PAWN", "ROOK", "KNIGHT", "BISHOP", "QUEEN", "KING"]
+	for t in 6:
+		var frame: Array = DD.DUEL_FRAMES[t]
+		var a := Vector3.ZERO
+		var v := Vector3(0.0, 0.0, 0.55)
+		var axis := Vector3(0.0, 0.0, 1.0)
+		var top: float = maxf(DD.FIGHTER_TOP[t], DD.FIGHTER_TOP[0])
+		var fit: Dictionary = d._duel_fit(a, v, axis, float(frame[3]), top, float(frame[2]))
+		var focus: Vector3 = fit["focus"]
+		var back: float = maxf(float(fit["back"]), float(frame[0]))
+		var cam := focus + Vector3(1.0, 0.0, 0.0) * back + Vector3.UP * float(frame[1])
+		var fwd := (focus - cam).normalized()
+		var half := deg_to_rad(float(frame[2])) * 0.5
+		# Everything the fight can occupy: both men's feet and heads, and the
+		# far ends of the reach the rank declared.
+		var reach: float = float(frame[3])
+		var pts: Array[Vector3] = [
+			a, a + Vector3.UP * top, v, v + Vector3.UP * top,
+			a - axis * (reach * 0.55), a - axis * (reach * 0.55) + Vector3.UP * top,
+			v + axis * (reach * 0.45), v + axis * (reach * 0.45) + Vector3.UP * top,
+		]
+		var worst := 0.0
+		for p in pts:
+			worst = maxf(worst, fwd.angle_to(p - cam))
+		check("frame: %s contains the whole fight (%.1f deg of %.1f)"
+				% [names[t], rad_to_deg(worst), rad_to_deg(half)],
+				true, worst < half)
+	d.free()
 
 
 func _test_checkmate_facing() -> void:

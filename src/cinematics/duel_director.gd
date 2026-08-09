@@ -75,6 +75,14 @@ const HOUSE_KEYS: Array[String] = ["FROST", "EMBER"]
 @export var championship_cam_offset := Vector3(1.9, 0.1, -7.2)
 @export var failsafe_wall_sec := 8.0    ## force-restore if a sequence overruns
 @export var handheld_amp := 0.035       ## handheld noise amplitude (world units)
+## THE BLOW LANDS IN THE LENS. A kill whose only witness is the victim's own
+## animation reads as a man deciding to lie down — every rank's strike now
+## kicks the camera at the instant the kill lands, which is the one beat the
+## director can detect without knowing a thing about the choreography it wraps
+## (the victim's `death_style` goes non-empty on the first line of die()).
+## Folded into the framing fit, so a kick can never shake a fighter out of shot.
+@export var impact_shake_mult := 3.2    ## x handheld_amp at the moment of death
+@export var impact_shake_wall := 0.45   ## wall seconds before it settles back
 @export var duel_fov := 42.0
 @export var face_off_wall := 0.22       ## combatants turn to meet (ease-out)
 @export var face_rest_wall := 0.25      ## survivor eases back to his rest yaw
@@ -167,6 +175,7 @@ func play_duel(attacker: Node3D, victim: Node3D, meta: Dictionary = {},
 			strike_done["done"] = true
 		runner.call()
 	_face_hold(seq, attacker, victim, strike_done)   # concurrent yaw lock
+	_impact_shake(seq, victim)                       # concurrent: kick on the kill
 	await _wall_lerp(seq, _set_ts, Engine.time_scale, duel_slow_scale, duel_ramp_down_wall)
 	_show_caption(line, seq)
 	await _wall_wait(seq, duel_slow_hold_wall)
@@ -456,6 +465,33 @@ func _face_rest(survivor: Node3D) -> void:
 		await tree.process_frame
 
 
+## THE KICK. Watches the victim for the first frame of his death — duck-read
+## `death_style`, which PieceView sets on die()'s opening line, so this works
+## for a stab, a bolt, a tower and an arrow without the director knowing which
+## one it is filming — then throws the lens for `impact_shake_wall` and settles
+## it back to the handheld baseline. Concurrent and fire-and-forget: it aborts
+## on skip/supersede and cannot outlive its sequence.
+func _impact_shake(seq: int, victim: Node3D) -> void:
+	var runner := func() -> void:
+		while _seq == seq and not _skip:
+			if not is_instance_valid(victim):
+				return
+			var ds = victim.get("death_style")
+			if typeof(ds) == TYPE_STRING and not str(ds).is_empty():
+				break
+			var tree := get_tree()
+			if tree == null:
+				return
+			await tree.process_frame
+		if _seq != seq or _skip or not _cam_on:
+			return
+		_shake_target = handheld_amp * impact_shake_mult
+		await _wall_wait(seq, impact_shake_wall)
+		if _seq == seq and not _skip:
+			_shake_target = handheld_amp
+	runner.call()
+
+
 ## The piece the king dies facing: meta["attacker"] when the integrator
 ## passes one, else the nearest enemy piece on the board (duck-typed side/
 ## piece_type ints — the checkmating piece is almost always the closest).
@@ -696,19 +732,50 @@ func _process(_delta: float) -> void:
 ## (game.gd walks a capturing piece to `target - dir*0.55`), so every product
 ## fell under the clamp floor and all six ranks were filmed from the same
 ## distance — the frames came back with a queen's hood filling half the
-## picture and the tower a featureless grey wall. Metres, then, plus a small
-## term for the separation:  back = dist*0.5 + standoff.
-##   [standoff (m), camera height (m), fov (deg)]
+## picture and the tower a featureless grey wall. Metres, then.
+##
+## ...AND A STANDOFF ALONE STILL DOES NOT CONTAIN A FIGHT (critic, 2026-08-09:
+## "it crops the queen at the right edge and cuts the king's crown off the top;
+## every rank's framing must contain both fighters"). A fixed distance is an
+## opinion about a shot, not a guarantee about what is IN it, and the two ranks
+## that broke it broke it for the two different reasons a fixed distance always
+## breaks: the queen GIVES GROUND as she draws, so she leaves a frame composed
+## around where she was standing; the king is the tallest thing in the game and
+## wears a crown deliberately widened to out-top his own skull, so the vertical
+## extent of "a king" is not the vertical extent of any other rank.
+##
+## So each rank now declares what its kill actually needs in shot, and
+## _cam_enter_duel FITS the frame to it (see _duel_fit): the standoff is a
+## FLOOR that keeps each rank's character, and the fit overrides it whenever the
+## action is bigger than the opinion. REACH is how much room the choreography
+## takes along the duel line beyond the two fighters — the attacker's windup or
+## gather behind him, plus the follow-through and the launched body past the
+## victim. Mirror of the numbers in PieceView's six kills; the e2e `kills`
+## scenario re-derives the truth from rendered pixels every run
+## (`kills-*-in-frame`), so a drift here fails a gate rather than shipping a
+## cropped hero frame.
+##   [standoff floor (m), camera height (m), fov (deg), reach along the line (m)]
 const DUEL_FRAMES := {
-	0: [1.9, 0.42, 40.0],   # PAWN — inside the guard: close, near eye level
-	1: [3.2, 1.35, 48.0],   # ROOK — high and back, looking DOWN at the square
-	                        #        it rolls over; at eye level the tower is
-	                        #        simply a grey wall filling the picture
-	2: [3.1, 0.8, 50.0],    # KNIGHT — the charge needs its run-up in shot
-	3: [2.7, 0.6, 46.0],    # BISHOP — the gap the bolt crosses IS the shot
-	4: [2.6, 0.7, 44.0],    # QUEEN — the arrow's whole flight in frame
-	5: [2.2, 0.55, 42.0],   # KING — a hero angle under the raised blade
+	0: [1.9, 0.42, 40.0, 0.80],   # PAWN — a lunge: guard behind, blade ahead
+	1: [3.2, 1.35, 48.0, 0.85],   # ROOK — high and back, looking DOWN at the
+	                              #        square it rolls over; at eye level the
+	                              #        tower is a grey wall filling the frame
+	2: [3.1, 0.80, 50.0, 2.30],   # KNIGHT — the gather, the run AND the man it
+	                              #        throws all have to be in one picture
+	3: [2.7, 0.60, 46.0, 0.90],   # BISHOP — the gap the bolt crosses IS the shot
+	4: [2.6, 0.70, 44.0, 1.15],   # QUEEN — she opens the range; the frame follows
+	5: [2.2, 0.55, 42.0, 0.75],   # KING — a hero angle under the raised blade
 }
+## Slack left around the fitted action sphere: nothing may sit ON the edge of
+## the picture, and the handheld noise and the impact shake both move the lens
+## after the frame is composed.
+const FRAME_SAFETY := 1.16
+## Design heights (PieceAssets.TYPE_HEIGHT) plus the headroom a rank's REGALIA
+## takes above its grade — the king's spiked crown, the bishop's mitre, the
+## rider's crest. The director duck-types its fighters (a bare Node3D is a legal
+## fighter, and the headless suites hand it exactly that), so it cannot ask the
+## asset layer; it carries its own copy, indexed by PieceView.Type.
+const FIGHTER_TOP := [0.95, 1.24, 1.52, 1.18, 1.40, 1.58]
 
 
 ## Swoop from the current viewport camera to a low side angle framing both
@@ -718,26 +785,66 @@ func _cam_enter_duel(attacker: Node3D, victim: Node3D, seq: int) -> void:
 		return
 	var a := attacker.global_position if is_instance_valid(attacker) else Vector3.ZERO
 	var v := victim.global_position if is_instance_valid(victim) else a + Vector3.FORWARD
-	var frame: Array = DUEL_FRAMES.get(_fighter_type(attacker), [2.0, 0.42, duel_fov])
+	var frame: Array = DUEL_FRAMES.get(_fighter_type(attacker),
+		[2.0, 0.42, duel_fov, 0.8])
 	# A small per-duel jitter on top of the type's frame: the same rank killing
 	# twice in a row is filmed from two slightly different places.
 	var lift: float = float(frame[1]) + randf_range(-0.08, 0.16)
-	var mid := (a + v) * 0.5 + Vector3.UP * (0.55 + lift * 0.3)
 	var axis := v - a
 	axis.y = 0.0
 	axis = axis.normalized() if axis.length() > 0.01 else Vector3.FORWARD
 	var side := axis.cross(Vector3.UP).normalized()
-	var back := clampf(a.distance_to(v) * 0.5 + float(frame[0]) * randf_range(0.94, 1.08),
-		1.8, 5.5)
-	# Slide a little along the duel line too — never past the fighters, so both
-	# stay comfortably inside the frame.
-	var along := axis * randf_range(-0.25, 0.25) * back * 0.2
-	var p1 := mid + side * back + Vector3.UP * lift + along
-	var p2 := mid - side * back + Vector3.UP * lift + along
+	var fov: float = float(frame[2])
+	var fit := _duel_fit(a, v, axis, float(frame[3]),
+		maxf(_fighter_top(attacker), _fighter_top(victim)), fov)
+	var focus: Vector3 = fit["focus"]
+	var back := clampf(maxf(float(fit["back"]), float(frame[0]) * randf_range(0.97, 1.06)),
+		1.8, 7.5)
+	var p1 := focus + side * back + Vector3.UP * lift
+	var p2 := focus - side * back + Vector3.UP * lift
 	var from := _cam_base.origin
 	var cam_pos := p1 if from.distance_to(p1) <= from.distance_to(p2) else p2
-	var target := Transform3D(Basis.looking_at(mid - cam_pos, Vector3.UP), cam_pos)
-	await _cam_glide(seq, target, float(frame[2]), swoop_wall, 0.35)
+	var target := Transform3D(Basis.looking_at(focus - cam_pos, Vector3.UP), cam_pos)
+	await _cam_glide(seq, target, fov, swoop_wall, 0.35)
+
+
+## FIT THE FRAME TO THE FIGHT. The action of a duel is a box: `reach` of room
+## along the duel line beyond the two fighters (windup behind the attacker,
+## follow-through and a launched body past the victim) by `top` of height. This
+## returns the point to aim at — the centre of that box, NOT the midpoint
+## between two pairs of feet, which is what let a queen who gives ground walk
+## herself out of her own shot — and the distance at which the box's bounding
+## sphere fits inside the narrower of the two frustum half-angles.
+##
+## The narrower one is the VERTICAL half-angle at every sane aspect, which is
+## the whole reason the king's crown was being cut: a frame fitted on width has
+## no opinion about height at all.
+func _duel_fit(a: Vector3, v: Vector3, axis: Vector3, reach: float,
+		top: float, fov: float) -> Dictionary:
+	var lo := a - axis * (reach * 0.55)   # the attacker's windup / gather
+	var hi := v + axis * (reach * 0.45)   # the follow-through and the body
+	var span := lo.distance_to(hi)
+	var focus := (lo + hi) * 0.5 + Vector3.UP * (top * 0.5)
+	# Bounding sphere of the box, plus the room the lens itself moves in
+	# (handheld noise, and the impact shake that fires when the kill lands).
+	var radius := 0.5 * sqrt(span * span + top * top) \
+		+ handheld_amp * (impact_shake_mult + 1.0)
+	var half_v := deg_to_rad(fov) * 0.5
+	var half := half_v
+	var vp := get_viewport()
+	if vp != null:
+		var size := vp.get_visible_rect().size
+		if size.x > 1.0 and size.y > 1.0:
+			half = minf(half_v, atan(tan(half_v) * (size.x / size.y)))
+	return {"focus": focus, "back": radius / maxf(sin(half), 0.08) * FRAME_SAFETY}
+
+
+## How tall this fighter stands, regalia included (FIGHTER_TOP).
+static func _fighter_top(n: Node3D) -> float:
+	var t := _fighter_type(n)
+	if t >= 0 and t < FIGHTER_TOP.size():
+		return FIGHTER_TOP[t]
+	return 1.2
 
 
 ## The fighter's PieceView.Type, duck-read (-1 when it is not a piece).

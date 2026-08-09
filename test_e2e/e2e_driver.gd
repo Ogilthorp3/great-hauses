@@ -286,6 +286,29 @@ func _sleep(sec: float) -> void:
 func _sleep_wall(sec: float) -> void:
 	await get_tree().create_timer(sec, true, false, true).timeout   # ignore_time_scale
 
+## THE SAME SCAR ONE LAYER DOWN — a sleep measured on the OS clock rather than
+## on a SceneTreeTimer's accumulated deltas.
+##
+## MEASURED, in the kills scenario, 2026-08-09: `_sleep_wall(1.0)` returned
+## after 0.299 s of Time.get_ticks_msec() at time_scale 1.0, right after the
+## match finished loading. An ignore_time_scale SceneTreeTimer counts down by
+## the frame delta the engine hands it, and under load that delta is not the
+## wall clock — so a shot "taken 2.2 s into the cinematic" was landing anywhere
+## from 0.7 s to 2.2 s in, which is a beat and a half of a five-second duel.
+## That is the same class of defect as the scaled sleep documented on
+## _sleep_wall, and it is why a kill frame could be photographed before its own
+## verb (or, as the rook's shipped frame was, long after it).
+##
+## Time.get_ticks_msec() is the monotonic OS clock; it cannot be bent by
+## time_scale, by frame deltas, or by a stall. Every timing that decides WHICH
+## FRAME OF A CINEMATIC ends up on disk uses this one.
+func _sleep_ticks(sec: float) -> void:
+	var deadline := Time.get_ticks_msec() + int(sec * 1000.0)
+	while Time.get_ticks_msec() < deadline:
+		if _done:
+			return
+		await get_tree().process_frame
+
 ## Wait for a genuinely drawn frame — BOUNDED. Under full window occlusion
 ## macOS stops drawing while process frames continue, so an unbounded
 ## `await RenderingServer.frame_post_draw` wedges the scenario until the
@@ -2168,21 +2191,72 @@ func _scenario_slowmo() -> void:
 # it, which is exactly the edge game.gd walks a capturing piece to.
 #
 # [PieceView.Type, label, expected kill_style, expected death_style(s),
-#  wall seconds from cinematic start at which THIS kill's frame is taken]
+#  wall seconds from cinematic start at which THIS kill's frame is taken,
+#  the kill VARIANT this rank is pinned to]
 #
 # The last column is per-kill on purpose: the six do not peak together. A stab
 # is over almost as soon as the slow-mo hold starts; the king's whole point is
 # a raise slow enough to read, and under the 0.25 dip that raise alone spends
 # ~2.2 s of wall clock — photographed on the pawn's schedule he is caught
 # standing there with his sword still down, which is a frame of nothing.
+#
+# RE-TIMED 2026-08-09 against the re-staged kills. Two of the six were being
+# photographed AFTER their own verb had finished — the rook's frame caught an
+# empty square because the victim had already been crushed, shoved and sunk,
+# and the king's caught him alone because his man was gone. A frame taken late
+# is indistinguishable from a beat that never happened, which is how "the verb
+# is invisible" reached the reel.
+#
+# THE VARIANT IS PINNED, and that is what finally makes these six frames mean
+# something. Each kill picks one of three variants at random, and the three do
+# not take the same time — the queen's double shot runs a second longer than her
+# flat one — so a fixed delay measured from the cinematic's start photographed a
+# different beat on every run: an arrow in flight, then a body already sunk,
+# then nothing at all. A showcase frame that is a different frame each run
+# cannot be a gate, and cannot be evidence about the code that produced it.
+#
+# `kill_variant_force` is the seam the class doc reserves for exactly this
+# ("nothing in src/ writes it"), so pinning costs no coverage: the headless
+# suite still walks ALL THREE variants of ALL SIX kills (test_kill_styles, 18
+# duels), and gameplay still picks at random. This scenario pins the one that
+# photographs its rank's verb most plainly, and the delay is then a property of
+# a known choreography rather than of a coin toss.
 const KILL_MATRIX := [
-	[PieceView.Type.PAWN, "pawn", "stab", ["blade"], 2.2],
-	[PieceView.Type.KNIGHT, "knight", "charge", ["launch"], 2.0],
-	[PieceView.Type.BISHOP, "bishop", "bolt", ["burn"], 2.6],
-	[PieceView.Type.ROOK, "rook", "grind", ["crush"], 2.2],
-	[PieceView.Type.QUEEN, "queen", "arrow", ["arrow"], 3.0],
-	[PieceView.Type.KING, "king", "execution", ["crush", "blade"], 2.8],
+	[PieceView.Type.PAWN, "pawn", "stab", ["blade"], 2.55, 0],      # straight thrust
+	[PieceView.Type.KNIGHT, "knight", "charge", ["launch"], 2.3, 0],# straight down the file
+	[PieceView.Type.BISHOP, "bishop", "bolt", ["burn"], 2.6, 0],    # one bolt
+	[PieceView.Type.ROOK, "rook", "grind", ["crush"], 1.7, 1],      # the heavy lean
+	[PieceView.Type.QUEEN, "queen", "arrow", ["arrow"], 2.8, 0],    # the flat fast shot
+	[PieceView.Type.KING, "king", "execution", ["crush", "blade"], 2.4, 0],  # overhead
 ]
+
+## THE FRAMING GATE, in pixels rather than in opinion (critic, 2026-08-09:
+## "it crops the queen at the right edge and cuts the king's crown off the top;
+## every rank's framing must contain both fighters").
+##
+## While the duel camera is live, this projects the corners of BOTH fighters —
+## feet and the top of the head, regalia included — through the camera that is
+## actually drawing, every frame, and records the worst excursion. A fighter
+## behind the lens, off an edge, or inside the margin fails the rank.
+##
+## The margin is a fraction of the frame, not a pixel count, so it survives a
+## resolution change. 3 % is about a crown's width at duel distance: the king's
+## points were clipping the top edge by less than that when the frame shipped.
+const FRAME_MARGIN := 0.03
+## Sampled only once the swoop has ARRIVED — the glide legitimately passes
+## through poses that do not contain the fight, on its way to the one that does.
+## Arrival is read off the CAMERA, not off a clock — a timer would have been a
+## second thing to get wrong (see _sleep_ticks). Two conditions, because either
+## one alone has a false positive: the lens has to be at the rank's own
+## DUEL_FRAMES fov, AND the body has to have stopped moving. The fov alone
+## passes on frame ZERO for the knight, whose 50 deg duel lens happens to be the
+## gameplay camera's fov as well — so the gate opened while the camera was still
+## nine units up in the air, and reported the swoop's own fly-through as a
+## cropped kill. The swoop covers metres per frame; settled, only the handheld
+## noise and the impact kick move the lens, and both move it in millimetres.
+const FRAME_GATE_FOV_EPS := 0.4
+const FRAME_GATE_STILL := 0.04    ## world units of camera travel per frame
+const FRAME_GATE_STILL_FRAMES := 2
 
 func _scenario_kills() -> void:
 	if not await _navigate_select(DEFAULT_HOUSE, "Casual", "Single Match"):
@@ -2230,12 +2304,19 @@ func _one_signature_kill(game: Node, dd: Node, spec: Array) -> bool:
 	if attacker == null or victim == null:
 		await _fail("kills-%s-spawn" % label, "could not stand the duellists up")
 		return false
+	attacker.kill_variant_force = int(spec[5])   # see KILL_MATRIX: reproducible frames
 	# Read at `died`: the view frees itself the moment the corpse is gone.
-	var fell := {"died": false, "style": "", "anim": ""}
+	var fell := {"died": false, "style": "", "anim": "", "arrow": false}
 	victim.died.connect(func() -> void:
 		fell["died"] = true
 		fell["style"] = victim.death_style
-		fell["anim"] = victim.death_anim)
+		fell["anim"] = victim.death_anim
+		# "IT STAYS IN HIM" is a claim about the corpse, so it is read OFF the
+		# corpse, at the last instant one exists. The queen's shaft used to be
+		# re-parented to the victim's ROOT — which does not move when a man
+		# dies — and stranded in mid-air over the body; mounted on his chest
+		# bone it rides him down and is still on him when he is freed.
+		fell["arrow"] = victim.find_child("Arrow", true, false) != null)
 	var done := {"v": false}
 	var t0 := Time.get_ticks_msec()
 	var runner := func() -> void:
@@ -2248,10 +2329,14 @@ func _one_signature_kill(game: Node, dd: Node, spec: Array) -> bool:
 	if not await _wait_until(func(): return dd.is_active(), 6.0):
 		await _fail("kills-%s-cinematic" % label, "the duel director never took over")
 		return false
-	# WALL CLOCK — the cinematic is bending Engine.time_scale under us, and a
-	# scaled sleep here would land the frame somewhere else entirely (the scar
-	# _sleep_wall exists for). The delay is per kill — see KILL_MATRIX.
-	await _sleep_wall(float(spec[4]))
+	var framing := _watch_framing(dd, attacker, victim, int(spec[0]),
+		PieceView.Type.PAWN, label)   # concurrent: measures the camera every frame
+	# THE OS CLOCK — the cinematic bends Engine.time_scale under us AND a
+	# SceneTreeTimer's deltas are not the wall clock under load (both scars are
+	# written up on _sleep_wall / _sleep_ticks). Which frame of a cinematic ends
+	# up on disk is decided here, so it is decided on ticks. Per kill — see
+	# KILL_MATRIX.
+	await _sleep_ticks(float(spec[4]))
 	await _shot("kill_%s" % label)
 	if not await _wait_until(func(): return done["v"], 25.0):
 		await _fail("kills-%s-finished" % label, "the duel never returned")
@@ -2279,6 +2364,10 @@ func _one_signature_kill(game: Node, dd: Node, spec: Array) -> bool:
 	if str(fell["anim"]).is_empty():
 		await _fail("kills-%s-death-anim" % label, "no death clip was named")
 		return false
+	if str(spec[2]) == "arrow" and not bool(fell["arrow"]):
+		await _fail("kills-%s-arrow-stays-in-him" % label,
+			"the victim died carrying no Arrow — the shaft did not land in him")
+		return false
 	if is_instance_valid(victim) and not victim.is_queued_for_deletion():
 		await _fail("kills-%s-victim-consumed" % label, "the victim view is still standing")
 		return false
@@ -2286,12 +2375,167 @@ func _one_signature_kill(game: Node, dd: Node, spec: Array) -> bool:
 		await _fail("kills-%s-timescale" % label,
 			"time_scale=%f after the duel" % Engine.time_scale)
 		return false
-	_pass("kills-%s (%s -> %s/%s, variant %d)" % [label, str(attacker.kill_style),
+	# THE FRAMING GATE — settled camera, both fighters, every frame they were
+	# both alive (see _watch_framing). Reported with its numbers either way, so
+	# a later reader can see how much room the shot actually had.
+	if int(framing["samples"]) < 3:
+		await _fail("kills-%s-in-frame" % label,
+			"the framing watcher never sampled a settled camera")
+		return false
+	if not bool(framing["ok"]):
+		await _fail("kills-%s-in-frame" % label,
+			"%s left the frame: %s (margin %.0f%%, %d samples)"
+			% [str(framing["who"]), str(framing["where"]), FRAME_MARGIN * 100.0,
+			int(framing["samples"])])
+		return false
+	_pass("kills-%s-in-frame (both fighters, %d samples, worst %.2f/%.2f of frame)"
+		% [label, int(framing["samples"]), float(framing["worst_x"]),
+		float(framing["worst_y"])])
+	if int(attacker.kill_variant) != int(spec[5]):
+		await _fail("kills-%s-variant" % label,
+			"pinned variant %d, got %d — the frame is not reproducible"
+			% [int(spec[5]), int(attacker.kill_variant)])
+		return false
+	_pass("kills-%s (%s -> %s/%s, variant %d pinned)" % [label, str(attacker.kill_style),
 		str(fell["style"]), str(fell["anim"]), int(attacker.kill_variant)])
 	if is_instance_valid(attacker):
 		attacker.queue_free()
 	await _sleep(0.4)   # let the director's camera return before the next one
 	return true
+
+
+## THE FRAMING GATE. Fire-and-forget: it returns a result dict it keeps filling
+## in while the duel plays, and _one_signature_kill reads it after the duel ends.
+##
+## It measures the camera that is ACTUALLY DRAWING (the director swaps its own
+## CineCam in and out of the viewport), projects four points per fighter — the
+## two feet corners of his footprint and the top of his head with regalia — and
+## records the worst normalized excursion in each axis. This is the instrument
+## the last round did not have: "the queen is cropped at the right edge" was a
+## human reading a PNG, and by the time a human reads a PNG the frame has
+## already shipped.
+##
+## Deliberately forgiving in three places, so it fails only on real crops:
+##   * nothing is sampled until the swoop has ARRIVED (FRAME_GATE_FOV_EPS +
+##     FRAME_GATE_STILL, read off the camera rather than off a clock) —
+##     the glide passes through poses that do not contain the fight;
+##   * a fighter stops being sampled once he is dead (freed, or his corpse is
+##     sinking through the floor on its way out of the scene);
+##   * the victim's footprint is his own rank's, not the attacker's.
+func _watch_framing(dd: Node, attacker: Node, victim: Node,
+		attacker_type: int, victim_type: int, label: String) -> Dictionary:
+	# worst_x/worst_y are the TIGHTEST margins seen, as a fraction of the frame:
+	# how close the fight ever came to an edge. They are the number a later
+	# reader wants — "it passed" says nothing about whether it passed by a hair.
+	var out := {"ok": true, "samples": 0, "worst_x": 1.0, "worst_y": 1.0,
+		"who": "", "where": ""}
+	var t_gate := Time.get_ticks_msec()
+	var want_fov: float = float(DuelDirector.DUEL_FRAMES[attacker_type][2])
+	var last_pos := Vector3(1e9, 1e9, 1e9)
+	var still := 0
+	# ...and STILL is only meaningful after the lens has been seen to MOVE. The
+	# cine camera adopts the gameplay pose the instant it takes the viewport, so
+	# "it has not moved for two frames" is true of the frames BEFORE the swoop
+	# as well as the frames after it — which is how the knight's gate opened
+	# nine units up in the air.
+	var swooped := false
+	var runner := func() -> void:
+		while is_instance_valid(dd) and dd.is_active() and not _done:
+			# THE WINDOW IS THE FIGHT, and only the fight. Two boundaries, both
+			# learned by watching this gate fail on frames that were never the
+			# shot: the duel camera has to be the one drawing (the director hands
+			# the viewport back at the end, and the gameplay camera has no duty
+			# to frame two duellists), and there have to be two fighters — once
+			# the victim is gone the lens is legitimately flying home, and a
+			# survivor sliding out of a returning frame is not a cropped kill.
+			var cam := get_viewport().get_camera_3d()
+			if cam == null:
+				break
+			if not is_instance_valid(victim) or (victim as Node3D).is_queued_for_deletion() \
+					or (victim as Node3D).global_position.y < -0.2:
+				break
+			# Not the duel camera, or the duel camera still in flight: the shot
+			# under test is the one it is flying TO.
+			var travel := cam.global_position.distance_to(last_pos)
+			last_pos = cam.global_position
+			if travel > FRAME_GATE_STILL and travel < 1e6:
+				swooped = true
+			still = still + 1 if travel < FRAME_GATE_STILL else 0
+			if cam.name != "CineCam" or absf(cam.fov - want_fov) > FRAME_GATE_FOV_EPS \
+					or not swooped or still < FRAME_GATE_STILL_FRAMES:
+				await get_tree().process_frame
+				continue
+			var size := get_viewport().get_visible_rect().size
+			if int(out["samples"]) == 0:
+				# The SETTLED duel pose, per rank, in the run log — the number a
+				# later reader needs to reason about a frame without re-rendering
+				# it (companion to E2E DUELWALL).
+				print("E2E DUELCAM %-8s t=%.2fs cam=%.2f,%.2f,%.2f fov=%.1f attacker=%.2f,%.2f,%.2f"
+					% [label, float(Time.get_ticks_msec() - t_gate) / 1000.0,
+					cam.global_position.x, cam.global_position.y,
+					cam.global_position.z, cam.fov, (attacker as Node3D).global_position.x,
+					(attacker as Node3D).global_position.y,
+					(attacker as Node3D).global_position.z])
+			# UNTYPED on purpose: a duellist is freed the instant his corpse
+			# finishes sinking, and assigning a freed instance to a `Node`-typed
+			# local is a hard SCRIPT ERROR, not a null. Validity is checked
+			# before the value is ever given a type.
+			for who in [["attacker", attacker, attacker_type],
+					["victim", victim, victim_type]]:
+				if not is_instance_valid(who[1]):
+					continue
+				var n := who[1] as Node3D
+				if n == null or n.is_queued_for_deletion():
+					continue
+				# A corpse on its way through the floor is out of the fight, not
+				# out of the frame.
+				if n.global_position.y < -0.2:
+					continue
+				var top: float = KILL_FIGHTER_TOP[int(who[2])]
+				var pts: Array[Vector3] = [
+					n.global_position + Vector3(0.22, 0.02, 0.0),
+					n.global_position + Vector3(-0.22, 0.02, 0.0),
+					n.global_position + Vector3(0.0, 0.02, 0.22),
+					n.global_position + Vector3(0.0, top, 0.0),
+				]
+				for p in pts:
+					if cam.is_position_behind(p):
+						out["ok"] = false
+						out["who"] = str(who[0])
+						out["where"] = "behind the lens"
+						continue
+					var s := cam.unproject_position(p)
+					var nx := minf(s.x / size.x, 1.0 - s.x / size.x)
+					var ny := minf(s.y / size.y, 1.0 - s.y / size.y)
+					out["worst_x"] = minf(float(out["worst_x"]), nx)
+					out["worst_y"] = minf(float(out["worst_y"]), ny)
+					if nx < FRAME_MARGIN or ny < FRAME_MARGIN:
+						if bool(out["ok"]):
+							# The pose that failed, printed once — a framing bug
+							# is a geometry bug, and the geometry is what a later
+							# reader needs to reproduce it without a screenshot.
+							print("E2E DUELCAM %-8s t=%.2fs FELL OUT cam=%.2f,%.2f,%.2f fov=%.1f %s=%.2f,%.2f,%.2f pt=%.2f,%.2f,%.2f at %.3f,%.3f"
+								% [label, float(Time.get_ticks_msec() - t_gate) / 1000.0,
+								cam.global_position.x, cam.global_position.y,
+								cam.global_position.z, cam.fov, str(who[0]),
+								n.global_position.x, n.global_position.y,
+								n.global_position.z, p.x, p.y, p.z,
+								s.x / size.x, s.y / size.y])
+						out["ok"] = false
+						out["who"] = str(who[0])
+						out["where"] = "at %.3f,%.3f of the frame" \
+							% [s.x / size.x, s.y / size.y]
+			out["samples"] = int(out["samples"]) + 1
+			await get_tree().process_frame
+	runner.call()
+	return out
+
+
+## Regalia-inclusive fighter heights, mirroring DuelDirector.FIGHTER_TOP — the
+## gate measures the same silhouette the director framed for, so a disagreement
+## between the two tables shows up as a failing rank rather than as a cropped
+## crown nobody notices.
+const KILL_FIGHTER_TOP := [0.95, 1.24, 1.52, 1.18, 1.40, 1.58]
 
 
 ## A duellist standing in the real hall but OUTSIDE game.views — the engine's
