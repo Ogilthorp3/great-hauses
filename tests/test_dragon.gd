@@ -81,6 +81,7 @@ func _main() -> void:
 	_test_origin_moved()
 	await _test_slumber_pose()
 	await _test_rest_and_stir()
+	await _test_rest_clears_the_table()
 	await _test_the_wake()
 	await _test_rig_contract()
 	await _test_fire_wiring()
@@ -315,7 +316,8 @@ func _test_rest_and_stir() -> void:
 	await process_frame
 	check("stir: asleep before anything happens", true, sp.is_asleep())
 	check("stir: a capture is allowed", true, sp.react_capture(Vector3(1.0, 0.0, 1.0)))
-	check("stir: it plays the flinch", "HitReact", sp.rig.anim.assigned_animation)
+	check("stir: it never leaves Perch_Idle", "Perch_Idle",
+			sp.rig.anim.assigned_animation)
 	var floor_w: float = sp.stir_slumber_floor
 	var lowest := {"v": 1.0}
 	var sampler := func() -> void:
@@ -333,8 +335,81 @@ func _test_rest_and_stir() -> void:
 			func() -> bool: return sp.slumber_weight() > 0.9, 3.0)
 	check("stir: it settles back into the coil", true, settled)
 	check("stir: back on Perch_Idle", "Perch_Idle", sp.rig.anim.assigned_animation)
+	check("stir: and back to the sleeper's breathing rate", true,
+			absf(sp.rig.anim.speed_scale - sp.rest_idle_speed) < 0.01)
 	sp.free()
 	await process_frame
+
+
+## THE SPRAWL THAT WAS PHOTOGRAPHED (critic blocker, 2026-08-09). duel/04 and
+## showcase/07-08 shipped the wyrm unfolded flat with a bench passing THROUGH
+## its wing — every one of them a post-capture frame, and the pose in every one
+## of them was a reaction CLIP playing over the coil. The coil cannot undo it:
+## its own wing terms are 12 deg and 22 deg while `HitReact` swings them through
+## a right angle (DragonSpectator._react carries the full table).
+##
+## This is that measurement, kept: with the wyrm at its resting place, the
+## furthest bone of a DISTURBED sleeper must stay inside the coiled sleeper's
+## own envelope, and clear of the east feast table by a real margin. Two
+## negative controls, because a gate that fires on nothing is not a gate: play
+## the two clips the stir used to play and the same measurement must go red.
+const TABLE_EAST_X := 8.35     ## GreatHall._build_tables, measured world AABB
+const TABLE_CLEARANCE := 0.30  ## …and the daylight the wyrm must leave it
+const SPRAWL_BONES: Array[String] = ["Wing1.L", "Wing2.L", "Wing3.L",
+	"Wing1.R", "Wing2.R", "Wing3.R", "Head", "Head_end", "Tail6", "Tail8"]
+
+
+func _test_rest_clears_the_table() -> void:
+	var s := _fast_spectator()
+	await process_frame
+	await process_frame
+	var coil = s.get("_slumber")
+	if coil == null:
+		check("sprawl: the coil exists to measure", true, false)
+		return
+	coil.sample_bones = SPRAWL_BONES
+	await process_frame
+	await process_frame
+	var rest_x: float = await _furthest_x(s, coil)
+	check("sprawl: the coiled sleeper clears the east table (max x %.2f < %.2f)"
+			% [rest_x, TABLE_EAST_X - TABLE_CLEARANCE], true,
+			rest_x < TABLE_EAST_X - TABLE_CLEARANCE)
+	# THE STIR, as it now plays: coil eased to the floor, clip untouched. The
+	# ramp takes 0.35 s — measure once it has ARRIVED, or this reads the coiled
+	# pose back and proves nothing.
+	s.react_capture(Vector3(1.0, 0.0, 1.0))
+	var eased: bool = await _wait_until(func() -> bool:
+			return s.slumber_weight() <= s.stir_slumber_floor + 0.02, 2.0)
+	check("sprawl: the stir eased the coil to its floor", true, eased)
+	var stir_x: float = await _furthest_x(s, coil)
+	check("sprawl: a stir stays inside the table's daylight (max x %.2f)" % stir_x,
+			true, stir_x < TABLE_EAST_X - TABLE_CLEARANCE)
+	check("sprawl: …and does not unfold the beast (%.2f vs %.2f at rest)"
+			% [stir_x, rest_x], true, stir_x - rest_x < 0.75)
+	# CONTROLS — the two clips that shipped the defect.
+	for clip in ["HitReact", "Yes"]:
+		s.rig.play_once(clip, 0.7, 0.0)
+		s._set_slumber(s.stir_slumber_floor)
+		for _i in 6:
+			await process_frame
+		var bad_x: float = await _furthest_x(s, coil)
+		check("sprawl control: '%s' over the coil DOES sprawl into the table (%.2f)"
+				% [clip, bad_x], true, bad_x >= TABLE_EAST_X - TABLE_CLEARANCE)
+	s.free()
+	await process_frame
+
+
+## World x of the furthest sampled bone. Read from `Slumber.sampled`, which is
+## written from INSIDE the modifier stack — `get_bone_global_pose()` reports the
+## clip's pose, not the coiled one (see DragonRig.Slumber).
+func _furthest_x(s: DragonSpectator, coil) -> float:
+	await process_frame
+	var xf: Transform3D = s.rig.global_transform
+	var worst := -99.0
+	for b in SPRAWL_BONES:
+		if (coil.sampled as Dictionary).has(b):
+			worst = maxf(worst, (xf * ((coil.sampled as Dictionary)[b] as Vector3)).x)
+	return worst
 
 
 ## THE WAKE — the beat the whole match builds to. Order is the contract:
@@ -425,7 +500,13 @@ func _test_rate_limit_and_gate() -> void:
 			s.rig.anim.assigned_animation)
 
 	check("rate: first reaction allowed", true, s.react_brilliant())
-	check("rate: reaction plays Yes", "Yes", s.rig.anim.assigned_animation)
+	# THE SLEEPER KEEPS ITS CLIP. 'Yes' is a standing nod that throws the wings
+	# out; a disturbed sleeper changes its BREATHING, not its animation — see
+	# DragonSpectator._react and _test_stir_never_spreads_the_wings.
+	check("rate: a reaction never swaps the sleeper's clip", "Perch_Idle",
+			s.rig.anim.assigned_animation)
+	check("rate: …it quickens the breath instead", true,
+			s.rig.anim.speed_scale > s.rest_idle_speed * 1.5)
 	check("rate: immediate second suppressed", false, s.react_blunder())
 	s.notice_move(Vector3.ZERO)
 	check("rate: still suppressed after 1 move", false, s.react_blunder())
@@ -440,7 +521,8 @@ func _test_rate_limit_and_gate() -> void:
 	check("gate: blocked while duel-cam active", false, s.react_capture(Vector3.ZERO))
 	dd.active = false
 	check("gate: allowed when duel-cam idle", true, s.react_capture(Vector3(1.0, 0.0, 1.0)))
-	check("gate: capture plays HitReact", "HitReact", s.rig.anim.assigned_animation)
+	check("gate: a capture never swaps the sleeper's clip", "Perch_Idle",
+			s.rig.anim.assigned_animation)
 
 	s.free()
 	dd.free()

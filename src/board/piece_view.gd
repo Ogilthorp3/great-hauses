@@ -209,6 +209,34 @@ const KNIGHT_FALL_OFFSET := Vector3(1.6, -1.55, -0.2)
 ## Head-bone mount for house crests (crown-attach pattern): sits above the
 ## crown line so king crest + crown coexist.
 const CREST_MOUNT_POS := Vector3(0.0, 1.04, 0.0)
+
+## ── A CREST MAY NOT SWALLOW THE BAND (critic blocker, 2026-08-09) ──────────
+##
+## "Winterfang's queen wears no tiara": measured on the shipped gameplay frame,
+## ZERO pixels of either regalia tone. Reproduced off the meshes rather than off
+## the frame — ray-cast every tiara triangle toward the gameplay camera and count
+## the ones the crest does not block (tests/test_costumes.gd::_test_royal_band_reads,
+## and it is the same instrument here):
+##
+##   winterfang 0.0 %  ·  duskfire 55.6 %  ·  thornvale 68.5 %  ·  tidegrip 74.0 %
+##   silverbrook 79.6 %  ·  swiftcrest 84.7 %  ·  ashwyrm 87.4 %  ·  goldclaw 89.6 %
+##   hartcrown 90.4 %                                     (near-army direction)
+##
+## The cause was not the tiara. It was that Winterfang's crest is the one pack
+## whose crest is a DRAPE — a wolf pelt hanging off the skull — so where the other
+## eight sit ON the head (their lowest geometry lands at bone y 0.96..1.06, at or
+## above the skull crown at 0.945) hers hung down to y 0.63 and the band at
+## y 0.86..1.09 lived INSIDE it. It is also the tallest by far (0.99 against
+## 0.22..0.54), which is the same fact from the other end.
+##
+## So a crest is now FITTED rather than trusted: measured on instantiation, scaled
+## down if it is taller than the rank's headroom allows, and lifted until its
+## lowest geometry stands on the crest line. One rule, applied to all nine, and
+## eight of them barely move — the outlier is the only thing that had to.
+## The band stays exactly where it was: a tiara belongs on a head, and moving it
+## up to escape a crest is how you get a circlet floating in mid-air.
+const CREST_FLOOR_Y := 1.10        ## no crest geometry below this (bone space)
+const CREST_MAX_HEIGHT := 0.62     ## …and none taller than the tallest of the nine
 ## Head-bone mount for the PAWN half-helm (ISSUES.md #3). 0.095 BELOW the
 ## crest line, because a crest sits ABOVE the skull while a helm WRAPS it:
 ## 0.945 is the measured bone-space Y of the skull crown. One transform, no
@@ -795,6 +823,9 @@ func _kill_grind(victim: PieceView) -> void:
 ##     frame — it follows him down and buries itself in the body.
 ## Variants: 0 a flat fast shot · 1 a lobbed arc · 2 two shafts, the second on
 ## the heels of the first.
+##
+## AND THE BOW IS DRAWN WHILE SHE DOES IT — see _bow_draw for why the shot had
+## no drawn bow in it at all until 2026-08-09, and for the measurement.
 func _kill_arrow(victim: PieceView) -> void:
 	# SHE OPENS THE RANGE FIRST. game.gd walks every capturing piece to
 	# `target - dir*0.55`, which puts an archer close enough to hand the man
@@ -803,6 +834,7 @@ func _kill_arrow(victim: PieceView) -> void:
 	# so the arrow is in the air long enough to be seen.
 	var dir := _flat_dir_to(victim)
 	var home := position
+	var draw := _bow_draw(victim)   # limbs up, arrow on the string
 	var open_range := create_tween()
 	open_range.tween_property(self, "position", home - dir * 0.62, 0.26) \
 		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
@@ -810,11 +842,20 @@ func _kill_arrow(victim: PieceView) -> void:
 		_anim.play(ANIM_THROW, 0.05)   # draw and loose
 		_anim.speed_scale = 1.0 if kill_variant == 1 else 1.3
 	await open_range.finished
-	await _beat(0.16)
+	# The windup has run; park the clip on its archer pose (BOW_DRAW_FRAME) and
+	# hold there. _settle_attacker's Idle is what lets her move again.
+	if _anim != null and _anim.current_animation == ANIM_THROW:
+		_anim.seek(BOW_DRAW_FRAME, true)
+		_anim.pause()
+	await _beat(0.16)   # HELD at full draw — the beat the silhouette lives in
+	draw["nocked"] = false   # the string is empty from here: the shaft is flying
 	if kill_variant == 2:
 		await _loose_arrow(victim, 0.0, Vector3(randf_range(-0.07, 0.07), 0.1, 0.0))
+		draw["nocked"] = true    # the second shaft, on the heels of the first
 		await _beat(0.1)
+		draw["nocked"] = false
 	await _loose_arrow(victim, 0.34 if kill_variant == 1 else 0.0)
+	draw["nocked"] = true   # …and she has already drawn again
 	await _beat(0.12)   # the shaft is IN him, and read, before he goes
 	await victim.die(DEATH_ARROW)
 	_settle_attacker()
@@ -822,6 +863,7 @@ func _kill_arrow(victim: PieceView) -> void:
 	close_range.tween_property(self, "position", home, 0.24) \
 		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	await close_range.finished
+	draw["live"] = false   # …and only now does the bow go back to her side
 
 
 ## KING — THE EXECUTION. Two hands, a slow raise the eye has time to read,
@@ -1544,43 +1586,7 @@ func _loose_arrow(victim: PieceView, arc: float, offset: Vector3 = Vector3.ZERO)
 	var bow := find_child("Gear_bow", true, false) as Node3D
 	var from := bow.global_position if bow != null \
 		else global_position + Vector3.UP * _chest_height(self)
-	var shaft := MeshInstance3D.new()
-	shaft.name = "Arrow"
-	# Scaled to the CAST, not to a real arrow: these fighters are 0.78-1.2 world
-	# units tall, so a 0.42 m shaft crossed the frame like a spear. Nudged up
-	# from 0.24 x 0.008 on 2026-08-09: at the duel camera's distance that was a
-	# 15-pixel splinter, and an arrow nobody can find is not the queen's
-	# signature — it is a man who fell over for no visible reason.
-	var cyl := CylinderMesh.new()
-	cyl.top_radius = 0.011
-	cyl.bottom_radius = 0.011
-	cyl.height = 0.3
-	shaft.mesh = cyl
-	# LIGHT WOOD, NOT NEAR-BLACK. The shaft was 0.22,0.16,0.1 — against a dark
-	# leather torso on a dark square it was invisible, so a kill whose whole
-	# signature is the arrow shipped a frame with no arrow findable in it. Pale
-	# ash reads against both armies and both colours of flagstone.
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.62, 0.48, 0.3)
-	mat.roughness = 0.85
-	shaft.material_override = mat
-	shaft.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	var head := MeshInstance3D.new()
-	head.name = "ArrowHead"
-	var tip := CylinderMesh.new()
-	tip.top_radius = 0.0
-	tip.bottom_radius = 0.023
-	tip.height = 0.085
-	head.mesh = tip
-	var hmat := StandardMaterial3D.new()
-	hmat.albedo_color = Color(0.6, 0.62, 0.66)
-	hmat.metallic = 0.9
-	hmat.roughness = 0.35
-	head.material_override = hmat
-	head.position = Vector3(0.0, 0.17, 0.0)
-	head.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	shaft.add_child(head)
-	_fletch(shaft)   # the tail the eye actually finds at duel distance
+	var shaft := _make_arrow()
 	var holder := get_parent()
 	if holder == null:
 		holder = self
@@ -1645,6 +1651,191 @@ func _loose_arrow(victim: PieceView, arc: float, offset: Vector3 = Vector3.ZERO)
 		shaft.global_position -= xf.basis.y.normalized() * 0.07
 	else:
 		shaft.queue_free()
+
+
+## ONE ARROW, built once and used twice: the shaft on the string at full draw
+## and the shaft in flight are the same object, so a critic can never catch the
+## nocked one and the loosed one disagreeing about what an arrow looks like.
+## Long axis +Y, head at +0.17, fletching at the tail; unparented.
+func _make_arrow() -> MeshInstance3D:
+	var shaft := MeshInstance3D.new()
+	shaft.name = "Arrow"
+	# Scaled to the CAST, not to a real arrow: these fighters are 0.78-1.2 world
+	# units tall, so a 0.42 m shaft crossed the frame like a spear. Nudged up
+	# from 0.24 x 0.008 on 2026-08-09: at the duel camera's distance that was a
+	# 15-pixel splinter, and an arrow nobody can find is not the queen's
+	# signature — it is a man who fell over for no visible reason.
+	var cyl := CylinderMesh.new()
+	cyl.top_radius = 0.011
+	cyl.bottom_radius = 0.011
+	cyl.height = 0.3
+	shaft.mesh = cyl
+	# LIGHT WOOD, NOT NEAR-BLACK. The shaft was 0.22,0.16,0.1 — against a dark
+	# leather torso on a dark square it was invisible, so a kill whose whole
+	# signature is the arrow shipped a frame with no arrow findable in it. Pale
+	# ash reads against both armies and both colours of flagstone.
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.62, 0.48, 0.3)
+	mat.roughness = 0.85
+	shaft.material_override = mat
+	shaft.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var head := MeshInstance3D.new()
+	head.name = "ArrowHead"
+	var tip := CylinderMesh.new()
+	tip.top_radius = 0.0
+	tip.bottom_radius = 0.023
+	tip.height = 0.085
+	head.mesh = tip
+	var hmat := StandardMaterial3D.new()
+	hmat.albedo_color = Color(0.6, 0.62, 0.66)
+	hmat.metallic = 0.9
+	hmat.roughness = 0.35
+	head.material_override = hmat
+	head.position = Vector3(0.0, 0.17, 0.0)
+	head.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	shaft.add_child(head)
+	_fletch(shaft)   # the tail the eye actually finds at duel distance
+	return shaft
+
+
+## A basis whose +Y runs along `dir` — the shaft's own long axis. (look_at
+## would aim -Z, which is the wrong axis for a cylinder.)
+static func _shaft_basis(dir: Vector3) -> Basis:
+	var ay := dir.normalized()
+	var ax := ay.cross(Vector3.UP)
+	if ax.length() < 0.001:
+		ax = ay.cross(Vector3.FORWARD)
+	ax = ax.normalized()
+	return Basis(ax, ay, ax.cross(ay).normalized())
+
+
+## ── THE DRAW (critic blocker, 2026-08-09) ─────────────────────────────────
+##
+## "The single most legible thing about an archer is the drawn bow in profile."
+## There was no drawn bow. `Gear_bow` is a rigid mount on the `handslot.l` bone
+## and the queen's kill borrows the shared `Throw` clip, which is an OVERHAND
+## THROW — so through the whole shot the bow lay HORIZONTAL across her shins at
+## the height the throw happens to leave her off hand (measured on the shipped
+## kills/06_kill_queen: limbs across the frame at ankle level, string below the
+## boots). No camera angle rescues that, because the shape was never there: the
+## rank that kills at range was reading as a woman standing next to a bow.
+##
+## The rig cannot be asked for the pose — the pack ships no archery clip, and a
+## cross-vendor retarget is the excursion play_capture already declined. So the
+## PROP is driven instead, which is cheap and exact: while the shot is live this
+## overrides the bow's global BASIS only (never its position — it stays in her
+## fist, carried by the animation) so the limbs stand UP and the bow's plane
+## contains the shot line. The bow mesh is 1.98 model units from tip to tip,
+## about the queen's own height, so upright it is the largest readable shape in
+## the frame — which is what an archer's silhouette is supposed to be.
+##
+## Bow axes, measured off `bow_withString.gltf` at its mount: long axis local Z
+## (length 1.984), riser depth local X (0.494, the limbs sweeping back toward
+## -X), thin in local Y (0.156). So local Z -> world UP and local X -> the shot
+## direction puts the limbs vertical, the string toward the archer and the plane
+## edge-on to nobody.
+##
+## The nocked arrow is the SAME `_make_arrow()` the loose flies, drawn back over
+## `BOW_DRAW_WALL` and hidden the instant she looses — so "the arrow leaves the
+## string" is one object moving, not two objects swapping.
+##
+## AND THE NEXT SHAFT IS ALREADY ON THE STRING. The override, and the nock,
+## outlive the loose on purpose, and this is the part that decides whether the
+## kill reads at all: the frame the suite ships (and the one a player remembers)
+## is taken while the VICTIM IS FALLING, roughly a second after the arrow left.
+## An archer photographed in that second is not empty-handed — she has drawn
+## again and is covering the field. Without it the shipped frame is a cloaked
+## figure standing beside a bow, which is the defect in one sentence; with it,
+## every frame from the first beat of the kill to the last carries the drawn
+## bow in profile. The bow only goes back to her side when she closes the range.
+##
+## …AND THE CLIP IS PARKED WHILE SHE AIMS. The bow rides `handslot.l`, so where
+## it sits in the frame is decided by the borrowed throw, and the throw leaves
+## her off hand DOWN: at the clip's end (which is where the shipped frame caught
+## it) the hand is at bone y 0.637 and z -0.019 — a bow across her shins, over
+## her own dark cloak, which is the low-contrast squiggle the first re-render
+## still shipped. Sampled across the whole 1.367 s clip, the hand is highest and
+## furthest forward at t = 0.55 (y 0.842, z +0.392 — a fifth of a body up and
+## half a body forward of where it ends), which is the one pose in the clip that
+## is ALSO an archer's: arm out, weight forward. So the clip runs its windup and
+## then HOLDS there for the aim, the loose and the re-nock, and only resumes when
+## she settles. An archer at full draw is meant to be still; and it puts the bow
+## out over open flagstone instead of over her own robe.
+##
+## The last of it is a LIFT. The bow is 1.98 model units tip to tip — about the
+## queen's own height — so hung off a hand that even the clip's best pose leaves
+## at 0.40 of her height, its lower limb ends BELOW the flagstones and the arrow
+## crosses her at the belt. Raised by 0.13 of her height the whole bow stands
+## clear of the stone and the shaft crosses her chest, at the cost of her fist
+## sitting on the lower limb instead of dead on the grip — which is a hand ON a
+## bow either way, and reads as one at duel distance.
+const BOW_DRAW_PULL := 0.30      ## how far the nock comes back from the grip
+const BOW_DRAW_WALL := 0.30      ## wall seconds from nocked to full draw
+const BOW_DRAW_FRAME := 0.55     ## the `Throw` clip's own archer pose (seconds)
+const BOW_DRAW_LIFT := 0.13      ## x piece height: the lower limb clears the floor
+
+
+## Start the draw. Returns a handle: set `nocked` false at the loose, `live`
+## false to give the bow back to the animation. Safe on a piece with no bow
+## (every rank but the queen) — the handle is inert.
+func _bow_draw(victim: PieceView) -> Dictionary:
+	var bow := find_child("Gear_bow", true, false) as Node3D
+	var state := {"live": bow != null, "nocked": bow != null}
+	if bow == null:
+		return state
+	var nock := _make_arrow()
+	nock.name = "NockedArrow"
+	add_child(nock)
+	nock.top_level = true   # driven in world space, like the loosed shaft
+	# The prop inherits the model's height-grading scale; an orthonormal basis
+	# would strip it and ship a bow twice the queen's size.
+	var gear_scale: float = bow.global_basis.get_scale().x
+	var mount := bow.get_parent() as Node3D   # the BoneAttachment3D = her fist
+	var lift := Vector3.UP * (PieceAssets.piece_height(piece_type) * BOW_DRAW_LIFT)
+	var t0 := Time.get_ticks_msec()
+	# A raised bow may never outlive its duel: an abandoned kill (a freed
+	# victim, a torn-down scene) must hand the prop back on its own.
+	var deadline := t0 + 12000
+	var runner := func() -> void:
+		var pull_t0 := t0
+		var was_nocked := true
+		while bool(state["live"]) and is_instance_valid(self) and is_instance_valid(bow) \
+				and Time.get_ticks_msec() < deadline:
+			var aim := _arrow_aim(victim, Vector3.ZERO) \
+				if is_instance_valid(victim) and not victim.is_queued_for_deletion() \
+				else global_position + Vector3.UP * _chest_height(self)
+			var grip := (mount.global_position if is_instance_valid(mount)
+				else bow.global_position) + lift
+			var flat := Vector3(aim.x - grip.x, 0.0, aim.z - grip.z)
+			var fwd := flat.normalized() if flat.length() > 0.001 \
+				else global_transform.basis.z.normalized()
+			# limbs up (local Z -> UP), riser toward the target (local X -> fwd)
+			bow.global_basis = Basis(fwd * gear_scale,
+				Vector3.UP.cross(fwd).normalized() * gear_scale,
+				Vector3.UP * gear_scale)
+			bow.global_position = grip
+			var nocked := bool(state["nocked"])
+			if nocked and not was_nocked:
+				pull_t0 = Time.get_ticks_msec()   # a fresh shaft, drawn again
+			was_nocked = nocked
+			if is_instance_valid(nock):
+				nock.visible = nocked
+				if nocked:
+					var shot := (aim - grip)
+					shot = shot.normalized() if shot.length() > 0.001 else fwd
+					var u := clampf(float(Time.get_ticks_msec() - pull_t0)
+						/ (BOW_DRAW_WALL * 1000.0), 0.0, 1.0)
+					var pull := BOW_DRAW_PULL * (1.0 - pow(1.0 - u, 3.0))
+					nock.global_transform = Transform3D(_shaft_basis(shot),
+						grip - shot * (pull - 0.15))
+			var tree := get_tree()
+			if tree == null:
+				return
+			await tree.process_frame
+		if is_instance_valid(nock):
+			nock.queue_free()
+	runner.call()
+	return state
 
 
 ## THE FLETCHING. Two crossed vanes at the tail — the part of an arrow that is
@@ -2075,9 +2266,43 @@ func _attach_crest() -> void:
 		return
 	var crest: Node3D = packed.instantiate()
 	crest.name = "Crest"
-	crest.position = CREST_MOUNT_POS
+	_fit_crest(crest)
 	att.add_child(crest)
 	_dress(crest)
+
+
+## Sit the crest ON the head instead of around it — see CREST_FLOOR_Y for the
+## measurement. Uniform scale first (so a tall crest keeps its proportions),
+## then the lift that puts its lowest vertex on the crest line. A crest whose
+## mesh cannot be measured keeps the plain mount, exactly as before.
+func _fit_crest(crest: Node3D) -> void:
+	crest.position = CREST_MOUNT_POS
+	var box := _mesh_bounds(crest)
+	if box.size.y <= 0.0001:
+		return
+	var s := minf(1.0, CREST_MAX_HEIGHT / box.size.y)
+	crest.scale = Vector3.ONE * s
+	crest.position.y = CREST_FLOOR_Y - box.position.y * s
+
+
+## Union AABB of every mesh under `node`, in `node`'s OWN space (its own
+## transform excluded — this is measured before the node is mounted).
+static func _mesh_bounds(node: Node3D) -> AABB:
+	var out := AABB()
+	var first := true
+	for mi: MeshInstance3D in node.find_children("*", "MeshInstance3D", true, false):
+		var chain := mi.transform
+		var p := mi.get_parent()
+		while p != null and p != node:
+			chain = (p as Node3D).transform * chain
+			p = p.get_parent()
+		var box: AABB = chain * mi.mesh.get_aabb()
+		if first:
+			out = box
+			first = false
+		else:
+			out = out.merge(box)
+	return out
 
 
 ## THE ENSEMBLE TRIMS AS ONE (critic defect #3, 2026-08-09). The rank's value

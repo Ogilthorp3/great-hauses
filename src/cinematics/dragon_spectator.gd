@@ -25,8 +25,10 @@ extends Node3D
 ##   STIR     a blunder / brilliancy / capture is a sleeping animal being
 ##            DISTURBED, never a wakening: the coil eases back only to
 ##            `stir_slumber_floor` (never 0), the head comes up, the coals
-##            blink, the clip plays slow, and it settles back. Same rate
+##            blink, the breathing quickens, and it settles back. Same rate
 ##            limit and duel-cam gate as before.
+##            A SLEEPING BEAST NEVER SWAPS ITS CLIP (critic blocker,
+##            2026-08-09 — see _react for the measurement that earned it).
 ##   WAKE     checkmate only. Head rises and the coals kindle -> it hauls
 ##            itself up (`Land_Settle` run BACKWARDS) and unfurls -> it
 ##            ROARS on the ground (`Roar`) -> only THEN the wings go
@@ -38,11 +40,13 @@ extends Node3D
 ## when the reaction actually played):
 ##   notice_move(world_pos)     call once per ply — feeds the rate limiter
 ##                              and the idle glance target
-##   react_blunder()            'No' head-shake, slowed
-##   react_brilliant()          'Yes' nod, slowed
-##   react_capture(square)      'HitReact' flinch + look at the square
+##   react_blunder()            a disturbed grumble (asleep: coil + coals)
+##   react_brilliant()          a disturbed stir  (asleep: coil + coals)
+##   react_capture(square)      a flinch + look at the square
 ##                              (square: Vector3 world pos, or Vector2i via
 ##                              the `board` reference)
+## The clip names those three carry ('No' / 'Yes' / 'HitReact') are played
+## only when the wyrm is NOT asleep — see _react.
 ## Rate limit: max ONE reaction per `reaction_every_moves` moves (default
 ## 2), and NEVER while the duel-cam runs (`duel_director.is_active()`).
 ##
@@ -176,6 +180,15 @@ const ASHFALL_LINES: Array[String] = [
 ##     the whole animal read as a folded umbrella; in profile the neck, the
 ##     mantled wing and the curled tail are three separate readable shapes.
 ##     Checked on the rendered boot frame, not reasoned about.
+##
+## IT DOES NOT OVERLAP THE TABLE — the second half of the sprawl blocker
+## (2026-08-09), and it is a FALSIFIED hypothesis rather than a fix. The east
+## feast table stands at x 8.35..9.65 (GreatHall._build_tables, measured). The
+## coiled sleeper's furthest bone reaches x 7.34 at rest and x 7.81 at the stir
+## floor — 1.01 m and 0.54 m of daylight. Nothing was moved: the furniture was
+## never the problem, the reaction CLIP was (see _react), and it reached x 8.74.
+## tests/test_dragon.gd::_test_rest_clears_the_table keeps the daylight honest,
+## so a later re-tune of the pose cannot walk the wyrm into the benches again.
 ## No hall anchor exists for this yet (GreatHall is another module's file) —
 ## see INTEGRATION-dragon.md for the `GreatHall.dragon_rest()` request.
 @export var rest_position := Vector3(6.6, -0.3, 0.6)   ## y = GreatHall.FLOOR_Y
@@ -412,13 +425,46 @@ func react_capture(square: Variant = null) -> bool:
 
 ## THE STIR — a sleeping beast disturbed, never woken. The coil eases back
 ## only as far as `stir_slumber_floor` (the head lifts, the shoulders come
-## off the stone, the tail stays curled), the throat coals blink, the clip
-## runs at roughly half its authored speed, and then it settles back down.
-## The floor is the contract: NOTHING that happens on the board — not a
-## queen taken, not a mate threat — fully wakes it. Only checkmate does.
+## off the stone, the tail stays curled), the throat coals blink, the
+## breathing quickens, and then it settles back down. The floor is the
+## contract: NOTHING that happens on the board — not a queen taken, not a
+## mate threat — fully wakes it. Only checkmate does.
+##
+## ── A SLEEPING BEAST NEVER SWAPS ITS CLIP (critic blocker, 2026-08-09) ────
+## Until now the stir also PLAYED a reaction clip — `HitReact` / `Yes` / `No`
+## — over the coil. Those clips are authored for a beast that is standing up:
+## they throw the wings out. The coil cannot put back what a full-body clip
+## spreads, because the coil's own wing terms are 12 deg and 22 deg (see
+## DragonRig.SLUMBER_WING1/2) while the clip moves them through a right
+## angle. Measured on the live rig, world x of the wing/tail bones at rest
+## position, coil at the stir floor (0.62):
+##
+##   Perch_Idle  coil 1.00   x-span 1.10   max x 7.34   ← the coiled sleeper
+##   Perch_Idle  coil 0.62   x-span 2.16   max x 7.81   ← head up, wings in
+##   HitReact    coil 0.62   x-span 3.19   max x 8.74   ← the right wing OUT
+##   Yes / No    coil 0.62   x-span 2.49   max x 8.06   ← wings up in the air
+##
+## The east feast table stands at x 8.35..9.65 (GreatHall._build_tables), so
+## `HitReact` did not merely unfold the wyrm — it drove a wing membrane 0.4 m
+## THROUGH the furniture, which is exactly what duel/04_post_duel and
+## showcase/07-08 photographed. Both defects, one cause: a capture is the last
+## thing that happens before the post-duel frame is taken, so the frame caught
+## the flinch every time.
+##
+## So a stir is now the coil, the coals and the breath, and nothing else:
+## `Perch_Idle` keeps running (quickened by `stir_idle_rush` — what a disturbed
+## sleeper actually changes is the RATE of its breathing), the head lifts
+## because the coil eases, and the silhouette stays a folded animal in every
+## frame. Awake — after a championship, on the throne — the clips are still
+## the right instrument and still play.
+@export var stir_hold_wall := 1.05    ## how long a coil-only stir holds
+@export var stir_idle_rush := 2.4     ## x rest_idle_speed while disturbed
+
+
 func _react(clip: String, speed: float, look_pos: Vector3) -> bool:
 	if not can_react():
 		return false
+	var asleep := is_asleep()
 	_moves_since_reaction = 0
 	_reacting = true
 	if look_pos.is_finite():
@@ -426,9 +472,14 @@ func _react(clip: String, speed: float, look_pos: Vector3) -> bool:
 		_gaze_pulse(look_pos, 0.9, 0.8)
 	_slumber_ramp(stir_slumber_floor, 0.35)
 	_ember_blink()
-	var dur := rig.play_once(clip, speed)
+	var dur := stir_hold_wall
+	if asleep:
+		# The breath quickens; the pose does not change hands.
+		rig.play_loop("Perch_Idle", rest_idle_speed * stir_idle_rush, 0.25)
+	else:
+		dur = maxf(rig.play_once(clip, speed), 0.1)
 	var runner := func() -> void:
-		await _wall_sleep(maxf(dur, 0.1))
+		await _wall_sleep(dur)
 		if is_instance_valid(self) and is_inside_tree():
 			_reacting = false
 			if not _ash_active:

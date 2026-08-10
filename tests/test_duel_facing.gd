@@ -216,10 +216,18 @@ func _test_exemption_is_towers_only() -> void:
 func _test_every_kill_has_a_frame() -> void:
 	for t in 6:
 		var frame = DD.DUEL_FRAMES.get(t)
+		# Four fields are the contract; a 5th (where the lens is square to the
+		# duel line) is the archer's opt-in — see DUEL_FRAMES.
 		check("frame: type %d has one" % t, true,
-				frame != null and (frame as Array).size() == 4)
+				frame != null and (frame as Array).size() >= 4
+				and (frame as Array).size() <= 5)
 		if frame == null:
 			continue
+		if (frame as Array).size() > 4:
+			# It slides the EYE along the duel line, so it is measured in metres
+			# from the attacker and must stay inside the action it is framing.
+			check("frame: type %d squares the lens near the fight" % t, true,
+					absf(float(frame[4])) <= 1.0)
 		check("frame: type %d fov is sane" % t, true,
 				float(frame[2]) > 25.0 and float(frame[2]) < 75.0)
 		# Metres, not multipliers — see DUEL_FRAMES: a standoff under a metre

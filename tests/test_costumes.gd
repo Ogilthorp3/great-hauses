@@ -74,6 +74,7 @@ func _main() -> void:
 	_test_pawn_helms()
 	_test_mounted_knight()
 	_test_royal_silhouette()
+	_test_royal_band_reads()
 	_test_royal_metal()
 	_test_bishop_mitre()
 	_test_glyph_medallion()
@@ -536,6 +537,122 @@ func _test_royal_silhouette() -> void:
 				crown_r > tiara_r * 1.6)
 		king.free()
 		queen.free()
+
+
+## THE QUEEN WHO WORE NO TIARA (critic blocker, 2026-08-09).
+##
+## _test_royal_silhouette above measures the tiara against the HEAD and passed
+## nine times over on an army whose queen showed zero pixels of either regalia
+## tone: it never asks whether anything is standing in front of the band. Her
+## own house CREST was — Winterfang's is a wolf pelt that hangs off the skull
+## rather than sitting on it, and the circlet lived inside it.
+##
+## So this is the missing question, asked the way the defect was found: cast a
+## ray from every tiara triangle toward the gameplay camera and count the ones
+## the crest does not block. Both directions, because either army can field any
+## house — the near army's queen is seen from behind the head, the far army's
+## from in front, and a crest that clears one can swallow the other.
+##
+## Measured before the fix (near / far): winterfang 0.0/0.0, duskfire 55.6/65.4,
+## thornvale 68.5/62.6, tidegrip 74.0/70.1, silverbrook 79.6/95.7, swiftcrest
+## 84.7/93.7, ashwyrm 87.4/96.6, goldclaw 89.6/91.3, hartcrown 90.4/87.1.
+## After PieceView's crest fit, winterfang reads 55.2/61.1 and no house lost
+## ground. The floor is set under the pack, not under winterfang: a house that
+## drops below it has hidden its own regalia, whichever house it is.
+##
+## The negative control is the defect itself — put a crest back where Winterfang's
+## used to hang and this must go red.
+const BAND_VISIBLE_FLOOR := 0.25
+## game.tscn's camera: pivot (0, 0.4, 0), yaw PI, pitch -0.85 -> forward
+## (0, -0.7513, 0.6600). The direction from a piece TOWARD the lens is its
+## negation; the far army (yaw PI) sees it mirrored in Z.
+const BAND_VIEW_NEAR := Vector3(0.0, 0.7513, -0.6600)
+const BAND_VIEW_FAR := Vector3(0.0, 0.7513, 0.6600)
+
+
+func _test_royal_band_reads() -> void:
+	var worst := 2.0
+	var worst_hid := ""
+	for hid in registry.house_ids():
+		var queen := _spawn(T_QUEEN, FROST, hid)
+		var crest: Node3D = queen.find_child("Crest", true, false)
+		var tiara: Node3D = queen.find_child("Tiara", true, false)
+		check("band %s: she has a crest and a tiara to measure" % hid, true,
+				crest != null and tiara != null)
+		if crest == null or tiara == null:
+			queen.free()
+			continue
+		var blockers: PackedVector3Array = _tris(crest)
+		var band: PackedVector3Array = _tris(tiara)
+		for view in [["near", BAND_VIEW_NEAR], ["far", BAND_VIEW_FAR]]:
+			var seen: float = _unblocked(band, blockers, view[1])
+			if seen < worst:
+				worst = seen
+				worst_hid = "%s (%s)" % [hid, str(view[0])]
+			check("band %s: the tiara reads from the %s army (%.0f%% clear)"
+					% [hid, str(view[0]), seen * 100.0], true,
+					seen >= BAND_VISIBLE_FLOOR)
+		queen.free()
+	check("band: worst house %s at %.0f%%" % [worst_hid, worst * 100.0], true,
+			worst >= BAND_VISIBLE_FLOOR)
+	# CONTROL — hang a crest where Winterfang's used to, and the gate must fire.
+	var probe := _spawn(T_QUEEN, FROST, "winterfang")
+	var c: Node3D = probe.find_child("Crest", true, false)
+	var t: Node3D = probe.find_child("Tiara", true, false)
+	if c != null and t != null:
+		c.scale = Vector3.ONE
+		c.position = Vector3(0.0, 1.04, 0.0)   # the mount that shipped the defect
+		var buried: float = _unblocked(_tris(t), _tris(c), BAND_VIEW_NEAR)
+		check("band control: the old drape mount buries the band (%.0f%%)"
+				% (buried * 100.0), true, buried < BAND_VISIBLE_FLOOR)
+	probe.free()
+
+
+## Every triangle under `node`, in the BoneAttachment3D's space (crest, tiara
+## and crown are siblings there, so their coordinates are directly comparable).
+func _tris(node: Node3D) -> PackedVector3Array:
+	var out := PackedVector3Array()
+	if node == null:
+		return out
+	for mi: MeshInstance3D in node.find_children("*", "MeshInstance3D", true, false):
+		var chain := mi.transform
+		var p := mi.get_parent()
+		while p != null and p != node:
+			chain = (p as Node3D).transform * chain
+			p = p.get_parent()
+		var xf: Transform3D = node.transform * chain
+		for v in mi.mesh.get_faces():
+			out.append(xf * v)
+	return out
+
+
+## Fraction of sample points on `probe`'s triangles from which a ray along
+## `dir` escapes without hitting one of `blockers`' triangles.
+func _unblocked(probe: PackedVector3Array, blockers: PackedVector3Array,
+		dir: Vector3) -> float:
+	if probe.is_empty():
+		return 0.0
+	var seen := 0
+	var total := 0
+	var i := 0
+	while i + 2 < probe.size():
+		var g: Vector3 = (probe[i] + probe[i + 1] + probe[i + 2]) / 3.0
+		for pt in [g, probe[i].lerp(g, 0.1), probe[i + 1].lerp(g, 0.1),
+				probe[i + 2].lerp(g, 0.1)]:
+			total += 1
+			var origin: Vector3 = (pt as Vector3) + dir * 0.002
+			var hit := false
+			var j := 0
+			while j + 2 < blockers.size():
+				if Geometry3D.ray_intersects_triangle(origin, dir,
+						blockers[j], blockers[j + 1], blockers[j + 2]) != null:
+					hit = true
+					break
+				j += 3
+			if not hit:
+				seen += 1
+		i += 3
+	return float(seen) / maxf(float(total), 1.0)
 
 
 ## THE KING WORE THE ENEMY'S COLOUR (art critic, 2026-08-09).
