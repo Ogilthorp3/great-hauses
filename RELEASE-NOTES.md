@@ -418,7 +418,20 @@ Ordered by how likely they are to bite you.
     owner's rule is "offer it, don't force it") and delete the `_is_tournament()`
     guard in `TrialBridge._refuse_reason`.
 
-14. **The trial's music ships as 34.5 MB of WAV.** Correct and licence-free, but
+14. **The `trial` e2e moves one clock, and only one.** Every fuse, blast speed and
+    king step in that scenario is the shipping value. The exception, stated because
+    it would otherwise be a hidden asterisk on "the dragon is proven": once the
+    organic beats are in (the walk, a keg burning a crate, a boon taken) the test
+    brings the wyrm's `sudden_death_at` forward rather than waiting out the real
+    70 seconds. The reason is measured, not stylistic — a king who kills himself at
+    second 11 ends the duel 59 seconds before the dragon is due, and the minigame's
+    own notes put AI kings dying "to their own kegs, to each other, and to the wyrm,
+    in all three proportions". Waiting made the assertion a one-in-three coin flip
+    (it failed exactly that way on the fifth run). What the ring does once it wakes
+    is entirely the game's own code. **A human has still never watched the 70-second
+    version arrive on its own.**
+
+15. **The trial's music ships as 34.5 MB of WAV.** Correct and licence-free, but
     heavier than it needs to be: `ffmpeg` is not in this machine's shell allowlist, so
     an OGG encode (~10x smaller, no audible cost) could not be made, and hand-rolling
     a resampler in Python to fake a smaller file would have been a silent quality
@@ -485,7 +498,7 @@ binary fell into.
 |---|---|---|
 | minigame-suite | PASS | exit 0 · 98 checks (27 AI-vs-AI matches) |
 | trial-wiring-suite | PASS | exit 0 · 88 checks |
-| trial | PASS | 26 steps · real pacing, 88 s duel |
+| trial | PASS | 28 steps · measured 5/5 green, ~23 s |
 | trial-concede | PASS | 21 steps |
 | trial-win | PASS | 22 steps |
 

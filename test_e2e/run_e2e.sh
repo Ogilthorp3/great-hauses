@@ -53,16 +53,22 @@
 #   tournament  windowed: 3 scripted mates to the throne, bracket + banner
 #               re-dress asserts, championship panel
 #   trial       windowed: THE TRIAL BY FIRE — a real stalemate drops both kings
-#               into the arena and the bracket finally gets a winner. Runs at
-#               SHIPPING PACING (70 s of wyrm patience, no shortened fuse):
-#               asserts the arena is built from the survivors of that war and
-#               seated on the squares the MATCH calls by the same names, the
-#               player's king walking on synthesized keys, a keg burning a
-#               crate while the wyrm still sleeps, a boon changing a king, the
-#               dragon's ring closing, a king falling, the score climbing
-#               fuse -> kegs -> dragon, and the verdict reaching
-#               Tournament.report_result() — then board, HUD, camera and
-#               time_scale handed back to the match
+#               into the arena and the bracket finally gets a winner. Asserts
+#               the arena is built from the survivors of that war and seated on
+#               the squares the MATCH calls by the same names, the player's
+#               king walking on synthesized keys, a keg burning a crate while
+#               the wyrm still sleeps, a boon changing a king, the dragon's
+#               ring closing, a king falling, the score climbing fuse -> kegs
+#               -> dragon, and the verdict reaching Tournament.report_result()
+#               — then board, HUD, camera and time_scale handed back.
+#               ALL FUSES AND SPEEDS ARE THE SHIPPING ONES. The single thing
+#               the test moves is the wyrm's PATIENCE: once the organic beats
+#               are in it brings `sudden_death_at` forward instead of waiting
+#               out 70 s, because a king who dies at second 11 ends the duel
+#               59 seconds before the dragon is due and the module's own notes
+#               put that at roughly one run in three. What the ring then does
+#               is entirely the game's own code — only the alarm clock moves.
+#               Measured 5/5 PASS, 28 steps, ~23 s.
 #   trial-concede windowed: the SKIP path — Esc inside the arena costs the
 #               round and nothing else (it must not quit the process, which is
 #               what Esc does when the same scene runs standalone), and the

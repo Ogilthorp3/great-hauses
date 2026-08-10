@@ -65,14 +65,17 @@
 ##               scripted mates; asserts bracket advance, banner re-dress
 ##               each round, and the championship panel
 ##   trial       THE TRIAL BY FIRE. A real stalemate (clicked, not injected)
-##               hands the round to the minigame; the whole chain is asserted
-##               at SHIPPING PACING — arena built from that war's survivors and
-##               seated on squares the match agrees with, the player's king
-##               walked on synthesized keys, a keg burning a crate while the
-##               wyrm still sleeps, a boon changing a king, the dragon's ring,
-##               a king falling, the score climbing fuse → kegs → dragon, the
-##               verdict landing in Tournament.report_result(), and the frame
-##               and clock handed back
+##               hands the round to the minigame; the whole chain is asserted —
+##               arena built from that war's survivors and seated on squares
+##               the match agrees with, the player's king walked on synthesized
+##               keys, a keg burning a crate while the wyrm still sleeps, a
+##               boon changing a king, the dragon's ring, a king falling, the
+##               score climbing fuse → kegs → dragon, the verdict landing in
+##               Tournament.report_result(), and the frame and clock handed
+##               back. Every fuse and speed is the shipping one; the ONLY thing
+##               the test moves is the wyrm's patience (see the note in
+##               `_scenario_trial`), because waiting out 70 s makes the dragon
+##               a one-in-three coin flip and a flaky gate is worse than none
 ##   trial-concede the SKIP path: Esc concedes the round and nothing more
 ##   trial-win   the ADVANCE path: the rival king's death is injected through
 ##               the grid's own kill (a scripted duel cannot be relied on to
@@ -2870,27 +2873,35 @@ func _scenario_trial(mode: String) -> void:
 	# the test playing badly, not the game misbehaving, and the fix is to play
 	# the way the mode asks you to.
 	#
-	# Cut two set ONE jar with a long escape and still died at ~10 s. The player
-	# in this scenario is not here to win the duel — he is here to prove the
-	# keyboard reaches the arena and then to STAY ALIVE long enough for the
-	# game's own 70 s clock to produce the dragon. So he now throws NO jars at
-	# all: the rival is a Seasoned brain that seeks crates and kegs them without
-	# any help, and every crate it burns is still a crate burned by a keg while
-	# the wyrm sleeps, which is the thing being asserted.
+	# Cut two set ONE jar with a long escape and still died at ~10 s, so cut
+	# three threw no jars at all and parked. That passed four runs and then
+	# failed the fifth — not because the player died, but because the RIVAL
+	# killed itself at t=11.1 s and ended the duel 59 seconds before the dragon
+	# was due. Waiting out a 70 s clock is not a gate: the module's own notes
+	# say AI kings die "to their own kegs, to each other, and to the wyrm, in
+	# all three proportions", which makes the dragon roughly a one-in-three
+	# coin flip and a flaky assertion a worse lie than no assertion.
 	#
-	# PHASE 1 walks INWARD (from the spawn corner both W and A go toward the
-	# middle) for a few legs — the input-path proof — and parks around the
-	# second ring. PHASE 2 takes the hands off the keyboard. The ring opens on
-	# the two spawn CORNERS (outer ring first, in antipodal pairs), so parking
-	# off the rim buys roughly fifteen seconds of dragon to watch.
+	# So the beats are separated by how they are produced:
+	#   ORGANIC, and asserted as such — the walk (synthesized keys), a keg
+	#     burning a crate WHILE THE WYRM STILL SLEEPS, and a boon changing a
+	#     king. All three land inside the first ten seconds of every run
+	#     observed, and nothing is nudged to get them.
+	#   SCHEDULED — the dragon. Once the organic beats are in, the wyrm's
+	#     PATIENCE is brought forward (`sudden_death_at`), exactly as
+	#     `trial-win` brings the rival king's death forward. What the ring then
+	#     does — waking, torching in antipodal pairs, entombing the arena,
+	#     killing whoever it catches — is entirely the game's own code on the
+	#     game's own schedule. Only the alarm clock moves.
 	var opened: Vector2i = grid.kings[0].cell
 	var burned_by_keg := false
 	var moved := false
 	var boon_taken := false
 	var walk := [KEY_W, KEY_A, KEY_W, KEY_A, KEY_W, KEY_A]
 	var step := 0
-	var deadline := Time.get_ticks_msec() + 190000
-	while Time.get_ticks_msec() < deadline and not grid.is_over():
+	var deadline := Time.get_ticks_msec() + 60000
+	while Time.get_ticks_msec() < deadline and not grid.is_over() \
+			and not (burned_by_keg and boon_taken):
 		# A crate that burns while the wyrm still sleeps was burned by a KEG —
 		# the dragon has not taken a tile yet, so nothing else could have.
 		if not burned_by_keg and not bool(grid.sudden) \
@@ -2910,16 +2921,14 @@ func _scenario_trial(mode: String) -> void:
 				int(grid.kings[0].boons_taken), int(grid.kings[1].boons_taken),
 				int(grid.kings[0].radius), int(grid.kings[0].kegs_max),
 				float(grid.kings[0].speed)])
-		if bool(grid.sudden) and not _shot_taken_wyrm:
-			_shot_taken_wyrm = true
-			await _shot("trial_wyrm_ring")
 		if not grid.kings[0].alive:
 			break
 		if step >= walk.size():
-			# PHASE 2 — hands off the keyboard, let the patience clock run.
+			# Hands off the keyboard once the walk is proven — the player's king
+			# throws no jars, so he cannot end the duel before the beats land.
 			await _sleep_ticks(0.25)
 			continue
-		await _hold_key(walk[step], 0.45)   # PHASE 1 — inward, no jars
+		await _hold_key(walk[step], 0.45)   # walk inward, no jars
 		step += 1
 
 	# WHY THESE ARE RE-READ HERE. The loop sleeps in blocks of up to half a
@@ -2956,12 +2965,32 @@ func _scenario_trial(mode: String) -> void:
 		await _fail("trial-boon-taken",
 			"no king ever took a boon in %.0f s of duel" % float(grid.time))
 		return
-	if not bool(grid.sudden):
+	if grid.is_over():
 		await _fail("trial-wyrm",
-			"the wyrm never lost patience (duel ended at t=%.1fs, limit %.0fs)"
-				% [float(grid.time), float(grid.sudden_death_at)])
+			"the duel resolved at t=%.1fs before the dragon could be called"
+				% float(grid.time))
 		return
-	_pass("trial-wyrm-ring (sudden death — the arena is closing)")
+
+	# ── THE DRAGON, ON A CLOCK THE TEST MOVES AND NOTHING ELSE ─────────────
+	var squares_before := _squares_left(grid)
+	grid.sudden_death_at = float(grid.time) + 1.5
+	if not await _wait_until(func(): return bool(grid.sudden), 12.0):
+		await _fail("trial-wyrm", "the wyrm did not wake when its patience ran out")
+		return
+	_pass("trial-wyrm-wakes (patience brought forward to t=%.1fs)" % float(grid.time))
+	var wyrm: Node = arena.get("_wyrm")
+	if wyrm != null and not await _wait_until(func(): return bool(wyrm.is_awake()), 10.0):
+		await _fail("trial-wyrm", "the arena's wyrm never came up off the flagstones")
+		return
+	_pass("trial-wyrm-risen")
+	await _shot("trial_wyrm_ring")
+	# THE RING ACTUALLY EATS THE ARENA — blackstone where open board used to be.
+	if not await _wait_until(func(): return _squares_left(grid) < squares_before, 20.0):
+		await _fail("trial-wyrm-ring",
+			"the ring took no square in 20 s (%d still open)" % squares_before)
+		return
+	_pass("trial-wyrm-ring (arena shrinking: %d -> %d squares)"
+		% [squares_before, _squares_left(grid)])
 
 	# ── a king falls, and the verdict reaches the bracket ──────────────────
 	if not await _wait_until(func(): return grid.is_over(), 60.0):
@@ -3077,7 +3106,16 @@ func _trial_concede(game: Node, arena: Node, t, before: Dictionary,
 	await _trial_settle(game, t, before, slot, rival_house, false)
 
 
-var _shot_taken_wyrm := false
+## Squares the arena has NOT yet entombed — the ring's progress, read off the
+## grid rather than off a stopwatch.
+func _squares_left(grid) -> int:
+	var n := 0
+	for i in BlastGridScript.CELLS:
+		if grid.tiles[i] != BlastGridScript.Tile.STONE:
+			n += 1
+	return n
+
+const BlastGridScript := preload("res://src/minigame/blast_grid.gd")
 
 # ── Scenario: oracle-mock (DS4-Oracle vs the in-driver canned server) ──────
 func _scenario_oracle_mock() -> void:
