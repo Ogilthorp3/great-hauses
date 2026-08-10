@@ -3094,13 +3094,25 @@ func _trial_settle(game: Node, t, before: Dictionary, slot: Array,
 ## The SKIP path. Esc inside the arena must cost the round and nothing else —
 ## in particular it must not quit the process, which is what Esc does when the
 ## same scene runs standalone.
+##
+## ONE PRESS, AND ONLY ONE. The arena opens with a 2.5 s beat in which the board
+## becomes the arena, and every step above this one lands inside it — so this
+## Esc arrives while the transmutation is still running, which is precisely
+## where it used to be swallowed (2026-08-09: the key skipped the beat, yielded
+## nothing, and the round needed a second press). Pressing twice here would make
+## the scenario green over the bug, so the state at the moment of the press is
+## printed instead: a run where `transforming=false` is testing something
+## easier than the thing that broke.
 func _trial_concede(game: Node, arena: Node, t, before: Dictionary,
 		slot: Array, rival_house: String) -> void:
+	print("E2E DEBUG concede press: transforming=%s u=%.3f running=%s time_scale=%.2f"
+		% [arena.get("transforming"), arena.call("_transform_u"),
+		arena.get("_running"), Engine.time_scale])
 	await _press_key(KEY_ESCAPE)
 	if not await _wait_until(func(): return bool(arena.get("conceded")), 6.0):
 		await _fail("trial-concede", "Esc did not concede the arena")
 		return
-	_pass("trial-concede (Esc yielded the arena)")
+	_pass("trial-concede (Esc yielded the arena on one press)")
 	if _done:
 		return
 	await _trial_settle(game, t, before, slot, rival_house, false)

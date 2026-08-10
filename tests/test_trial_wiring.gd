@@ -19,6 +19,12 @@ extends SceneTree
 #   - THE CONTRACT SHAPE     every exit path returns the seam's dictionary,
 #                            including every refusal. An e2e step asserts this
 #                            same shape on the live game node
+#   - THE WAY OUT WORKS      one Esc yields the round from the FIRST FRAME the
+#                            arena is on screen — while the board is still
+#                            becoming it — and no other key over that beat
+#                            costs anything. Run against a live arena through
+#                            the real key pipeline, and CONTROLLED by a mutant
+#                            arena whose concede() is empty
 #   - IT NEVER SAYS NOTHING  the verdict lines are non-empty and name the
 #                            reason on every path, so the card cannot go blank
 #   - THE HARVEST IS PLAYABLE the position the arena inherits from that real
@@ -36,6 +42,20 @@ extends SceneTree
 const Grid := preload("res://src/minigame/blast_grid.gd")
 const AI := preload("res://src/minigame/king_ai.gd")
 const MusicScript := preload("res://src/audio/music_manager.gd")
+## The arena controller itself. Safe to preload in a `-s` run for the same
+## reason TrialBridge is: it names no autoload. It reaches Music through
+## `get_node_or_null` and PieceView through a runtime `load()`, which is why
+## the way-out test below only needs the PieceAssets shim at RUN time.
+const TrialScript := preload("res://src/minigame/trial_by_fire.gd")
+
+
+## THE NEGATIVE CONTROL, and the only reason the way-out gate can be trusted.
+## The same arena, the same scene, the same key — with `concede()` emptied. If
+## the probe below reports a yield from THIS one, the probe is measuring
+## something other than the code it claims to measure and the suite says so.
+class NeuteredConcede extends TrialScript:
+	func concede() -> void:
+		pass
 
 
 ## The board-index convention, spelled out from the one place it is documented
@@ -71,11 +91,25 @@ var checks_run := 0
 ## A hard-erroring test function aborts silently at the error and its caller
 ## carries on as if it passed — the floor turns a silent abort into a loud
 ## failure (the guard test_minigame.gd and test_dragon.gd both use).
-const MIN_EXPECTED_CHECKS := 54
+const MIN_EXPECTED_CHECKS := 76
+
+## The floor above catches a test that DIES. This catches a test that takes the
+## whole tree down with it — `SceneTree.quit()` ends the run with exit code 0
+## and `run_e2e.sh` reads exit 0 as a green suite, so a stray quit anywhere in
+## here would report ALL GREEN having asserted nothing. (The way-out test drives
+## a live arena whose standalone Esc branch is a `get_tree().quit()`; this is
+## the guard that makes reaching it a red suite instead of a silent one.)
+var _summary_done := false
 
 
 func _initialize() -> void:
 	_main()
+
+
+func _finalize() -> void:
+	if not _summary_done:
+		print("RESULT: ABORTED — the tree quit before the summary printed")
+		quit(1)
 
 
 func _main() -> void:
@@ -85,6 +119,7 @@ func _main() -> void:
 	_test_seed()
 	_test_survivors()
 	_test_contract_shape()
+	await _test_the_way_out()
 	_test_harvest_is_playable()
 	await _test_score()
 	_print_summary()
@@ -311,6 +346,167 @@ func _test_contract_shape() -> void:
 		yielded.contains("unopposed"))
 
 
+# ── the way out ─────────────────────────────────────────────────────────────
+
+
+## THE PLAYER'S ONLY WAY OUT OF A DUEL, ASSERTED AT THE WORST MOMENT FOR IT.
+##
+## THE SCAR, measured 2026-08-09. The arena opens with a 2.5 s beat in which the
+## board BECOMES the arena, and every key over that beat was routed into
+## `skip_transform()` — so the first Esc a player pressed skipped a cutscene and
+## yielded nothing, while the HUD had been reading "ESC yields the round" since
+## the frame the beat started. `concede()`'s own `if not _running` guard was a
+## second trap underneath the first. The e2e caught it as "Esc did not concede
+## the arena"; this is the headless version, which answers in two seconds
+## instead of ninety and does not need a window.
+##
+## THE PRESS IS A REAL KEY, through `Input.parse_input_event` — the same
+## InputEventKey a keyboard produces, into the same `_input`, the same
+## `_route_key` and the same `concede()`. A test that called `concede()`
+## directly could not have seen this bug at all, because `concede()` was never
+## reached.
+##
+## AND IT IS CONTROLLED. The identical probe runs a second time against
+## `NeuteredConcede` — the same scene with `concede()` emptied — and the suite
+## fails if THAT one reports a yield. Without the mutant this gate could pass
+## vacuously in three different ways (press after the beat, read a field nothing
+## sets, assert something always true) and look exactly the same from here. This
+## project has shipped two gates that passed vacuously; the mutant is the
+## cheapest insurance against a third.
+func _test_the_way_out() -> void:
+	# PieceView names the PieceAssets autoload and a `-s` run creates none —
+	# the same shim `_test_survivors` builds, for the same reason.
+	var assets: Node = load("res://src/board/piece_assets.gd").new()
+	assets.name = "PieceAssets"
+	root.add_child(assets)
+	# THE ROOT IS NOT IN THE TREE DURING `_initialize` (the same wait
+	# `_test_score` takes, for the same reason): until one frame has passed,
+	# `add_child` does not run `_ready`, the arena never finds its own Board,
+	# and `start()` dies on a null `_board` — which reads from out here exactly
+	# like "Esc did not concede", i.e. like the bug this test exists to catch.
+	await process_frame
+
+	# ── the gate: one Esc, at the earliest moment there is an arena at all ──
+	var esc := await _arena_probe(false, true, KEY_ESCAPE)
+	check("way out: the press landed while the board was still becoming the arena",
+		true, bool(esc["transforming_at_press"]))
+	check("way out: …and before the duel had opened", false,
+		bool(esc["running_at_press"]))
+	check("way out: …inside the first half of the beat (u=%.3f)" % esc["u_at_press"],
+		true, float(esc["u_at_press"]) < 0.5)
+	check("way out: ONE Esc yields the round", true, bool(esc["conceded"]))
+	check("way out: the verdict is announced", true, bool(esc["announced"]))
+	check("way out: the round goes to the rival", 1, int(esc["side"]))
+	check("way out: the beat is landed, not left half-risen", true,
+		bool(esc["skipped"]))
+	check("way out: the clock is handed back (%.2f)" % esc["time_scale"], true,
+		is_equal_approx(float(esc["time_scale"]), 1.0))
+	check("way out: the grid is left as it is", true, bool(esc["grid_kept"]))
+	check("way out: the arena survives the yield — it costs the round, not the game",
+		true, bool(esc["alive_after"]))
+
+	# ── the negative control ───────────────────────────────────────────────
+	var mute := await _arena_probe(true, true, KEY_ESCAPE)
+	check("control: the mutant was pressed at the same moment", true,
+		bool(mute["transforming_at_press"]))
+	check("control: an emptied concede() yields nothing", false,
+		bool(mute["conceded"]))
+	check("control: …and announces no verdict", false, bool(mute["announced"]))
+	# The mutant does not even skip the beat, which is the sharpest evidence in
+	# this file: Esc's ONLY route is now through `concede()`, so emptying that
+	# one method takes the whole effect of the key with it.
+	check("control: …and does not so much as land the beat", false,
+		bool(mute["skipped"]))
+	check("control: so this gate measures concede(), not the press", true,
+		bool(esc["conceded"]) and not bool(mute["conceded"]))
+
+	# ── and skipping is still only skipping ────────────────────────────────
+	# THE OTHER HALF OF THE CONTRACT. Esc had to become special without making
+	# every key special: a player mashing SPACE over a cutscene he did not ask
+	# for must not forfeit a bracket round.
+	var space := await _arena_probe(false, true, KEY_SPACE)
+	check("mash: SPACE over the beat costs no round", false, bool(space["conceded"]))
+	check("mash: SPACE over the beat lands the beat", true, bool(space["skipped"]))
+	check("mash: …and opens the duel", true, bool(space["running_after"]))
+	# R is standalone-only: rerolling a bracket decider is an exploit, and the
+	# arena it rebuilt would be a different arena — so the grid must be the same
+	# object afterwards.
+	var retry := await _arena_probe(false, true, KEY_R)
+	check("mash: R over the beat costs no round", false, bool(retry["conceded"]))
+	check("mash: R never rerolls an embedded arena", true, bool(retry["grid_kept"]))
+
+	# ── standalone is untouched ────────────────────────────────────────────
+	# ONE KEY ONLY. Standalone Esc is `get_tree().quit()` and there is no way to
+	# press it in-process without taking the suite with it — `_finalize` above
+	# turns that into a red suite rather than a silent one, and the branch
+	# itself is asserted by the e2e's own "the process survives" step. What is
+	# checked here is that the standalone SKIP path still behaves: no key over
+	# the beat concedes when nobody is embedded.
+	var solo := await _arena_probe(false, false, KEY_SPACE)
+	check("standalone: a key over the beat still only skips", true,
+		bool(solo["skipped"]))
+	check("standalone: and yields nothing", false, bool(solo["conceded"]))
+
+	assets.free()
+	check("way out: no arena walked out carrying the clock (%.2f)"
+		% Engine.time_scale, true, is_equal_approx(Engine.time_scale, 1.0))
+
+
+## Build a live arena, press ONE key at the earliest moment it exists, and
+## report what happened. `neutered` swaps in the mutant script; `embedded` is
+## the flag TrialBridge sets when the arena runs inside a match.
+func _arena_probe(neutered: bool, embedded: bool, key: Key) -> Dictionary:
+	var scene := load(TrialBridge.TRIAL_SCENE) as PackedScene
+	var arena: Node = scene.instantiate()
+	if neutered:
+		arena.set_script(NeuteredConcede)
+	root.add_child(arena)
+	arena.set("embedded", embedded)
+	var box := {"side": -1}
+	arena.trial_finished.connect(func(s: int) -> void: box["side"] = s)
+	# `start()` builds the grid, the crates, the kings and the HUD and then
+	# begins the transmutation — so the instant it returns there IS an arena,
+	# and the duel has not opened. That is the moment under test.
+	arena.start({"seed": 4242})
+	await process_frame
+	var grid_before: int = arena.get("grid").get_instance_id()
+	var out := {
+		"transforming_at_press": bool(arena.get("transforming")),
+		"running_at_press": bool(arena.get("_running")),
+		"u_at_press": float(arena.call("_transform_u")),
+	}
+	_key(key, true)
+	await process_frame
+	_key(key, false)
+	await process_frame
+	await process_frame
+	var grid_after = arena.get("grid")
+	out["conceded"] = bool(arena.get("conceded"))
+	out["announced"] = bool(arena.get("_announced"))
+	out["skipped"] = bool(arena.get("transform_skipped"))
+	out["running_after"] = bool(arena.get("_running"))
+	out["side"] = int(box["side"])
+	# READ BEFORE THE FREE. Freeing the arena restores the clock by itself
+	# (`_exit_tree`), so asking afterwards would answer 1.0 on every path
+	# including the broken ones — the same "read it before you tear it down"
+	# trap TrialBridge carries for `conceded`.
+	out["time_scale"] = Engine.time_scale
+	out["grid_kept"] = grid_after != null and grid_after.get_instance_id() == grid_before
+	out["alive_after"] = is_instance_valid(arena)
+	arena.queue_free()
+	await process_frame
+	await process_frame
+	return out
+
+
+func _key(code: int, pressed: bool) -> void:
+	var ev := InputEventKey.new()
+	ev.keycode = code
+	ev.physical_keycode = code
+	ev.pressed = pressed
+	Input.parse_input_event(ev)
+
+
 # ── the harvest is playable ─────────────────────────────────────────────────
 
 
@@ -447,4 +643,5 @@ func _print_summary() -> void:
 	print("TOTAL: %d  PASSED: %d  FAILED: %d" % [rows.size(),
 		rows.size() - failures, failures])
 	print("RESULT: %s" % ("ALL GREEN" if failures == 0 else "FAILURES PRESENT"))
+	_summary_done = true
 	quit(1 if failures > 0 else 0)

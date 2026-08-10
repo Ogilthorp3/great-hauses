@@ -388,9 +388,11 @@ func _transform_u() -> float:
 		/ (TRANSFORM_SEC * 1000.0), 0.0, 1.0)
 
 
-## Any key, any click. THE ROUND IS NOT AT STAKE HERE — Esc during the
-## transmutation must skip it and must NOT concede, or a player who hits Esc
-## over a cutscene he did not ask for has forfeited a bracket round.
+## Any key, any click. THE ROUND IS NOT AT STAKE HERE — skipping is only ever
+## skipping, so a player who mashes a key over a cutscene he did not ask for
+## cannot forfeit a bracket round by it. The one key that means more than "get
+## on with it" is Esc inside a match, and it does not arrive through here: it
+## goes to `concede()`, which lands this beat itself (see the note there).
 func skip_transform() -> void:
 	if not transforming:
 		return
@@ -607,8 +609,30 @@ func _consume(events: Array) -> void:
 
 ## Walk away. The round is lost — that is the price, and it is stated on the
 ## card — but the match, the bracket and the process all survive.
+##
+## RELIABLE FROM THE FIRST FRAME THE ARENA IS ON SCREEN, and that is the whole
+## point of the first four lines. THE SCAR, measured 2026-08-09: the board
+## spends 2.5 s BECOMING the arena (see THE TRANSMUTATION) and the first cut of
+## that beat funnelled every key into `skip_transform()` — so the first Esc a
+## player pressed skipped a cutscene and yielded nothing, `_running` was still
+## false underneath it, and only a SECOND press conceded. A player who presses
+## Esc and gets nothing presses it again, harder; by then the arena may have
+## been handed back and the press lands in the match instead, which is how one
+## "get me out of here" turns into a trip to the Hall of Banners. Worse, the
+## HUD has been promising "ESC yields the round" (TrialHud.HINT_EMBEDDED) since
+## the frame the beat started — so for those 2.5 s the chrome was lying.
+##
+## So the yield lands the beat itself rather than asking its callers to: one
+## press, one meaning, from the moment there is an arena to walk out of. The
+## order matters — `skip_transform()` runs the beat out to `_open_the_arena()`,
+## which is the one definition of "the arena is live", so `_running` below is
+## true for exactly the same reason it is true a second later.
 func concede() -> void:
-	if not _running or _announced:
+	if _announced:
+		return
+	if transforming:
+		skip_transform()
+	if not _running:
 		return
 	conceded = true
 	_running = false   # the arena stops taking input; the grid is left as it is
@@ -830,15 +854,20 @@ func _skip_click(event: InputEvent) -> bool:
 func _route_key(event: InputEventKey) -> void:
 	if event.echo:
 		return
-	# WHILE THE BOARD IS STILL BECOMING THE ARENA, every key is a skip and NO
-	# key is a concede. Esc pressed over the transmutation must not cost a
-	# player the round he has not been shown yet — the same class of mistake as
-	# the match's own Esc handler eating the first Esc of a bracket decider.
-	if transforming:
+	var key := event.keycode
+	# WHILE THE BOARD IS STILL BECOMING THE ARENA every key is a skip — with ONE
+	# exception, and the exception is the reason this branch is written the long
+	# way. Space, a direction or a click over the transmutation mean "get on with
+	# it" and cost nothing, so a player who skips a cutscene he did not ask for
+	# still cannot forfeit a bracket round by mashing. Esc INSIDE A MATCH is not
+	# that: it is the player's only way out of a duel, the HUD has said so since
+	# the first frame of the beat, and a key that means one thing during the
+	# cutscene and another thing 2.5 s later is a key you have to press twice.
+	# It goes to `concede()`, which lands the beat on its way out.
+	if transforming and not (embedded and event.pressed and key == KEY_ESCAPE):
 		if event.pressed:
 			skip_transform()
 		return
-	var key := event.keycode
 	if event.pressed:
 		match key:
 			KEY_ESCAPE:
