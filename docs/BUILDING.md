@@ -433,3 +433,24 @@ Honest list, because "it builds" is not "it runs":
   seen Explorer or the taskbar draw it.
 - The macOS `.app` is ad-hoc signed only — **not** notarized, so other Macs will need
   right-click → Open.
+
+## visionOS (immersive)
+
+No Godot release ships a visionOS export template — the packaging block in
+`godot-build-scripts/build-release.sh` is commented out ([godot#115415](https://github.com/godotengine/godot/issues/115415)).
+The engine is therefore built from source:
+
+| Pin | Value |
+|---|---|
+| Repo | `Ogilthorp3/sanctum-godot-visionos` (fork of `rsanchezsaez/godot`) |
+| Branch | `apple/visionos-xr-9-developer-capture` |
+| Commit | `c1df64224a30bd8d7c51489b6c87ee03a86bfa26` |
+| Xcode | 26.6 |
+| visionOS SDK | 26.5 |
+
+```bash
+./tools/build/build-godot-visionos.sh
+```
+
+**Do not** install the visionOS 27 SDK or update the headset past 26.x — the
+toolchain is matched to 26 and 27 is unevaluated.
