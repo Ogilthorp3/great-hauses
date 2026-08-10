@@ -22,10 +22,12 @@ fi
 
 # Local patches on top of the pin. Idempotent: --check first, skip if already applied.
 PATCH_DIR="$SCRIPT_DIR/patches"
+count=0
 for p in "$PATCH_DIR"/*.patch; do
   [ -e "$p" ] || continue
+  count=$((count+1))
   if git apply --check "$p" 2>/dev/null; then
-    git apply "$p" && echo "applied $(basename "$p")"
+    git apply "$p" && echo "applied $(basename "$p")" || exit 1
   elif git apply --reverse --check "$p" 2>/dev/null; then
     echo "already applied $(basename "$p")"
   else
@@ -33,6 +35,7 @@ for p in "$PATCH_DIR"/*.patch; do
     exit 1
   fi
 done
+[ "$count" -gt 0 ] || { echo "NO PATCHES FOUND in $PATCH_DIR"; exit 1; }
 
 echo "branch : $(git rev-parse --abbrev-ref HEAD) @ $(git rev-parse --short HEAD)"
 echo "xcode  : $(xcodebuild -version | head -1)"
