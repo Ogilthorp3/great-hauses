@@ -1,4 +1,4 @@
-# Great Hauses — v0.1.0
+# Great Hauses — v0.2.0
 
 **Gritty medieval battle chess.** Chess rules, exactly. But every piece rides for a
 Great Haus, every capture is fought as a duel in slow motion, and the last king to
@@ -6,31 +6,26 @@ fall is burned off the board by a dragon.
 
 Built with Godot 4.7.1. Runs on macOS and Windows.
 
-> ### ⚠ Release status: the source tree is ready. The BINARIES ARE NOT BUILT.
+> ### ✅ Release status: BUILT AND PACKAGED.
 >
-> Read this before you send anything to anybody.
+> `tools/build/build.sh` ran clean from the final tree (`9dd20b9`): both presets
+> exported, freshness gate green (no exported source is newer than the artifact),
+> the pack index and every `haus.json` verified present inside the embedded pck,
+> `test_e2e/` and the pack templates verified absent, the macOS build boots clean
+> headless, and the 24-check platform-degradation suite passes (a missing Stockfish
+> greys out the Grand Maester instead of crashing; an unreachable Oracle returns in
+> 2 ms instead of hanging).
 >
-> The `.exe` and `.app` sitting in `great-houses-dist/` are from **06:47 on
-> 2026-08-09** — before the haus-pack refactor and before the rename. They are not
-> merely old, they are wrong: I re-parsed the shipped Windows binary today and
-> `hauses/index.json` and every `haus.json` are **MISSING** from it. That build
-> cannot find a single haus. Its filename is the old spelling too
-> (`GreatHouses.exe`).
+> **To send to a friend:**
+> `great-houses-dist/for-a-friend/GreatHauses-windows-v0.2.0.zip` — 85 MB zipped,
+> containing `GreatHauses.exe` (PE32+ GUI x86-64) and a README written for someone
+> non-technical.
 >
-> **I could not re-export them.** `tools/build/build.sh` is blocked by the shell
-> allowlist in `~/.config/lean-ctx/config.toml`, which lists `Godot`, `run_e2e.sh`,
-> `run_net_e2e.sh` and `run_perf.sh` but not `build.sh`. That is your security
-> control, so I left it alone rather than editing it or hand-running the export
-> commands around it. **One command unblocks it:**
->
-> ```bash
-> lean-ctx allow build.sh
-> ./tools/build/build.sh          # both presets + every gate
-> ```
->
-> Everything else in this document describes the source tree, which is complete and
-> whose full e2e suite is green. The friend-facing `README.txt` is already rewritten
-> and correct; only the zip is waiting on the binary.
+> **The one caveat that cannot be closed from here:** that `.exe` has never been
+> executed on Windows. There is no Windows machine on this side and Wine was not
+> installed. Export, binary format, pck contents and size are all verified;
+> everything past process start — window, rendering, input, audio, gameplay — is
+> unobserved. Your friend's first launch is the real test.
 
 ---
 
