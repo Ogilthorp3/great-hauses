@@ -9,8 +9,12 @@ config/name="Great Hauses"
 run/main_scene="res://scenes/main.tscn"
 config/features=PackedStringArray("4.7", "Mobile")
 config/icon="res://assets/branding/app-icon-1024.png"
-boot_splash/show_image=false
 boot_splash/bg_color=Color(0, 0, 0, 1)
+; visionOS-only: boot_splash/show_image is a GLOBAL key and applies to every
+; platform if set bare — the spec puts desktop boot-splash behaviour
+; explicitly out of scope, so this is feature-tagged to visionOS alone
+; (2026-08-10 review, final gate). Windows/macOS keep the engine default.
+boot_splash/show_image.visionos=false
 
 [autoload]
 
@@ -31,3 +35,16 @@ window/stretch/aspect="expand"
 
 renderer/rendering_method="mobile"
 textures/vram_compression/import_etc2_astc=true
+
+[xr]
+
+; Multiview shader variants are compiled ONLY when this is true
+; (scene_shader_forward_mobile.cpp:625-627 gates enable_multiview_shader_group()
+; on it) — it defaults to false (rendering_server.cpp:3816). The Mobile
+; renderer this project is pinned to has NO lazy fallback for a missing
+; multiview variant (render_forward_mobile.cpp:1033-1035); Clustered has one
+; (render_forward_clustered.cpp:1888-1892) but visionOS immersive only
+; supports Mobile. Leaving this false ships a build that passes every other
+; gate and cannot render a stereo frame. tools/build/assert_visionos_preset.py
+; asserts this key so a future removal fails the build instead of the headset.
+shaders/enabled=true

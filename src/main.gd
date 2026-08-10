@@ -43,8 +43,21 @@ var _e2e_harness: Node = null
 
 func _ready() -> void:
 	_install_e2e_harness()   # FIRST: everything below may be under test
-	# visionOS: stand up XR BEFORE any scene is added, and hold the menu music
-	# until we know whether we are immersive (main.gd:60 fires it otherwise).
+	# visionOS: stand up XR (phase 1) BEFORE any scene is added — see
+	# src/xr/visionos_boot.gd's class doc for why it has to happen here.
+	#
+	# CORRECTION (2026-08-10 review, final gate — IMPORTANT 3): this used to
+	# also claim menu music was held "until we know whether we are
+	# immersive." It never was — Music.play_menu() below runs unconditionally,
+	# on every platform, whether or not `xr.ok` came back true. That claim
+	# was also never completable at this line even in principle: `xr` only
+	# reports phase 1 (the XRInterface up); XRSession.is_immersive() is
+	# deliberately false until phase 2 (bind_rig(), src/game.gd's _ready())
+	# also succeeds, and game.tscn has not even loaded yet here — House
+	# Select is the very next thing this function shows, on every platform,
+	# regardless of `xr.ok`. Whether menu music should ever be held for a
+	# visionOS launch is an open product question, not something this file
+	# does today.
 	var xr := XRSession.start(get_tree())
 	if not xr.ok and OS.get_name() == "visionOS":
 		push_error("visionOS XR bring-up failed at '%s': %s" % [xr.step, xr.error])

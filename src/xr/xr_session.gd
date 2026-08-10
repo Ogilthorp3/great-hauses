@@ -29,6 +29,19 @@ const VisionOSBootScript := preload("res://src/xr/visionos_boot.gd")
 static var _immersive := false
 
 
+## TEST-ONLY, mirrors VisionOSBoot._reset_for_test() at this layer.
+## _immersive is XRSession's OWN static latch (set by bind_rig() below), not
+## one of VisionOSBoot's two guards — resetting only the base layer left this
+## stuck at whatever the last bind_rig() reported (2026-08-10 review, final
+## gate). A suite that mounts the real rig more than once in one process
+## (see tests/test_xr_rig.gd's behavioural call-site check) needs both
+## layers clearable independently, so this is a separate function rather
+## than folded into VisionOSBoot's — that module has, and must keep, no
+## knowledge that XRSession exists.
+static func _reset_for_test() -> void:
+	_immersive = false
+
+
 ## True only once BOTH phases have completed: the interface is up AND the
 ## rig (xr_origin/xr_camera) is bound. Phase 1 alone — interface found and
 ## initialized, but the rig not yet in the tree — is deliberately NOT
@@ -41,24 +54,33 @@ static func is_immersive() -> bool:
 
 ## Returns false (and warns) when the rig isn't in the scene — VisionOSBoot
 ## treats that as a bind failure at step "origin", not a silent no-op.
+## Reads `current` back after the assignment rather than trusting the
+## assignment succeeded (2026-08-10 review, final gate) — cheap, and it is
+## the one line standing between "the origin is actually current" and "we
+## asked it to be": Node.current has other ways to end up false (a second
+## XROrigin3D taking it back the same frame, for instance) that a bare
+## `return true` would never notice.
 static func _set_origin_current(tree: SceneTree, v: bool) -> bool:
 	var origin := tree.get_first_node_in_group("xr_origin")
 	if origin == null:
 		push_warning("XRSession: no node in the 'xr_origin' group — XR origin was never made current")
 		return false
 	origin.current = v
-	return true
+	return origin.current == v
 
 
 ## Returns false (and warns) when the rig isn't in the scene — VisionOSBoot
 ## treats that as a bind failure at step "near", not a silent no-op.
+## Reads `near` back after the clamp rather than trusting `maxf` did what it
+## looks like it did (2026-08-10 review, final gate) — same discipline as
+## _set_origin_current above.
 static func _set_near(tree: SceneTree, v: float) -> bool:
 	var cam := tree.get_first_node_in_group("xr_camera")
 	if cam == null:
 		push_warning("XRSession: no node in the 'xr_camera' group — near plane was never verified")
 		return false
 	cam.near = maxf(cam.near, v)
-	return true
+	return cam.near >= v
 
 
 ## PHASE 1 — call from src/main.gd._ready(), BEFORE any scene is added.
