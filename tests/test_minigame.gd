@@ -22,6 +22,11 @@ extends SceneTree
 #                            walks" is a gameplay promise, not a description
 #   - BOONS                  hidden under crates, surface when the fire dies,
 #                            and apply to the king who steps on them
+#   - THE KINGS CAN MEET     the flood-fill that proves the arena is ONE arena
+#                            — the check the mirrored lattice needed and never
+#                            had. It is gated in both directions: every
+#                            generated arena must pass, and three hand-built
+#                            sealed boards must be REJECTED
 #   - THE WYRM'S RING        torches the outer ring inward, entombs the arena,
 #                            and kills a king standing on the cell it takes
 #   - DEATH                  a king in a lit tile dies; a king may never walk
@@ -43,7 +48,7 @@ var checks_run := 0
 ## A hard-erroring test function aborts silently at the error and its caller
 ## carries on as if it passed — the floor turns a silent abort into a loud
 ## failure (same guard test_dragon.gd and test_cinematics.gd use).
-const MIN_EXPECTED_CHECKS := 96
+const MIN_EXPECTED_CHECKS := 124
 
 const DT := 1.0 / 60.0
 
@@ -55,6 +60,8 @@ func _initialize() -> void:
 	_test_chain()
 	_test_timing()
 	_test_boons()
+	_test_connectivity()
+	_test_duel_outcome()
 	_test_ring()
 	_test_death()
 	_test_ai_matches()
@@ -372,6 +379,211 @@ func _test_boons() -> void:
 		g3.boons[g3.index(Vector2i(5, 3))])
 
 
+# ── the two kings must be able to REACH each other ──────────────────────────
+#
+# THE BUG THIS SUITE MISSED FOR A WHOLE FEATURE. `lattice_is_symmetric` proved
+# the arena was FAIR and nothing proved it was CONNECTED, and the mirrored
+# lattice is a wall: rows 3 and 4 come out as complementary combs
+# (`.#.#.#.#` over `#.#.#.#.`), so nothing 4-connected crosses the middle and
+# the two kings started life in sealed halves — in every arena the mode ever
+# built. A tie-breaker where the rival cannot be killed is not a tie-breaker.
+#
+# THE GATE IS TWO-SIDED ON PURPOSE. This project has twice shipped a check that
+# could only ever pass, so every assertion below that says "connected" is paired
+# with a hand-built board the SAME function must call sealed. If the flood fill
+# were stubbed to `return true` tomorrow, five of these would fail.
+
+
+func _test_connectivity() -> void:
+	# ── the shipped arena, and the wall that was in it ──────────────────────
+	var g: Grid = Grid.new()
+	g.setup({"crates": [], "seed": 4242})
+	check("reach: the repair opened four cells", 4, g.carved.size())
+	check("reach: every carve is answered by its antipode", true,
+		_mirrored(g.carved))
+	check("reach: the lattice is STILL symmetric after the carve", true,
+		g.lattice_is_symmetric())
+	check("reach: the two kings can meet", true, g.kings_connected())
+	check("reach: and it is ONE arena, not the biggest half",
+		g.open_cells(), g.reachable_from(g.kings[0].cell).size())
+	# No crates on this board, so "reachable" and "walkable right now" are the
+	# same question — the corridor is a corridor, not a promise.
+	check("reach: a king can WALK it without digging", true,
+		g.kings_connected(false))
+
+	# NEGATIVE CONTROL 1 — THE REAL BOARD, RE-SEALED. Put the four carved cells
+	# back and the arena is the one the mode actually shipped. This is the only
+	# control taken from live data rather than built by hand, and it is the one
+	# that says the bug was real.
+	var sealed: Grid = Grid.new()
+	sealed.setup({"crates": [], "seed": 4242})
+	for c in sealed.carved:
+		sealed.tiles[sealed.index(c)] = Grid.Tile.STONE
+	check("reach: NEGATIVE — the un-carved lattice seals the board", false,
+		sealed.kings_connected())
+	check("reach: NEGATIVE — …into two halves of exactly the same size", true,
+		sealed.reachable_from(sealed.kings[0].cell).size() * 2
+			== sealed.open_cells())
+	check("reach: NEGATIVE — the closing ring cannot save it", false,
+		sealed.ring_keeps_one_arena())
+
+	# NEGATIVE CONTROL 2 — A HAND-BUILT BLACKSTONE CUT. The anti-diagonal is the
+	# one wall that is its own mirror image, so it separates the two corners
+	# while leaving the fairness invariant intact: the check cannot pass this by
+	# accidentally measuring symmetry instead of connection.
+	var wall := _bare()
+	for x in Grid.SIZE:
+		wall.tiles[wall.index(Vector2i(x, Grid.SIZE - 1 - x))] = Grid.Tile.STONE
+	check("reach: NEGATIVE — a stone wall is symmetric", true,
+		wall.lattice_is_symmetric())
+	check("reach: NEGATIVE — …and the kings cannot meet across it", false,
+		wall.kings_connected())
+	check("reach: NEGATIVE — each king has exactly his own half", 28,
+		wall.reachable_from(wall.kings[0].cell).size())
+	check("reach: NEGATIVE — the ring cannot save it either", false,
+		wall.ring_keeps_one_arena())
+	# THE MINIMUM, read before anything is cut: one stone opens this wall, so a
+	# repair that carves a trench through it is carving more than it must.
+	check("reach: the cheapest breach is ONE stone", 1,
+		wall.stone_cut_between_kings().size())
+	var opened := wall.ensure_kings_connected()
+	check("reach: …so the duel route costs its mirrored PAIR, and the three "
+		+ "shrinking arenas one more each", 4, opened.size())
+	check("reach: …in mirrored pairs", true, _mirrored(opened))
+	check("reach: …the kings can now meet", true, wall.kings_connected())
+	check("reach: …and so can every arena the ring leaves", true,
+		wall.ring_keeps_one_arena())
+	check("reach: …and the wall is still fair", true,
+		wall.lattice_is_symmetric())
+
+	# NEGATIVE CONTROL 3 — THE SAME WALL MADE OF BANNERMEN. A crate is a door:
+	# the shipping gate must call this arena connected and the stricter
+	# walk-it-now question must call it blocked. One board, two answers — which
+	# is the proof that the `through_crates` flag is doing work and not sitting
+	# there as decoration.
+	var door := _bare()
+	for x in Grid.SIZE:
+		door.tiles[door.index(Vector2i(x, Grid.SIZE - 1 - x))] = Grid.Tile.CRATE
+	check("reach: NEGATIVE — a wall of crates is not a seal", true,
+		door.kings_connected())
+	check("reach: NEGATIVE — …but he cannot walk it until he burns it", false,
+		door.kings_connected(false))
+
+	# ── every arena this mode can generate ─────────────────────────────────
+	# The same crate fields the AI matches are played on, plus the pathological
+	# ones: a board with no survivors at all, and a board where every square was
+	# offered as a crate.
+	var joined := 0
+	var ring_safe := 0
+	var built := 0
+	var seeds := [1, 5, 11, 42, 404, 1234, 20260809, 90210]
+	for s in seeds:
+		for field in [_crate_field(s), [], _every_square()]:
+			var a: Grid = Grid.new()
+			a.setup({"crates": field, "seed": s})
+			built += 1
+			if a.kings_connected():
+				joined += 1
+			if a.ring_keeps_one_arena():
+				ring_safe += 1
+	check("reach: every generated arena joins the two kings", built, joined)
+	# THE RING MUST COMPRESS THEM TOGETHER, NEVER WALL THEM APART. The comb
+	# repeats inside the square the wyrm leaves behind ([2..5] is `.#.#` over
+	# `#.#.`), so opening the outer seam alone would let the closing ring split
+	# the arena again with twenty squares still in play.
+	check("reach: …and every arena the closing ring leaves behind", built,
+		ring_safe)
+	check("reach: 24 arenas were built to ask", 24, built)
+
+
+## True when the antipode of every cell in the list is also in the list.
+func _mirrored(cells: Array) -> bool:
+	var have := {}
+	for c in cells:
+		have[str(c)] = true
+	for c in cells:
+		if not have.has(str(Vector2i(Grid.SIZE - 1 - c.x, Grid.SIZE - 1 - c.y))):
+			return false
+	return true
+
+
+func _every_square() -> Array:
+	var out: Array = []
+	for y in Grid.SIZE:
+		for x in Grid.SIZE:
+			out.append(Vector2i(x, y))
+	return out
+
+
+# ── THE OUTCOME, NOT THE TOPOLOGY ───────────────────────────────────────────
+#
+# A FLOOD FILL IS NOT A DUEL, and the checks above would all have gone green on
+# an arena nobody can actually fight in. Reachability is a claim about the maze;
+# this is a claim about the game: ONE KING STANDS AT HIS CORNER AND DOES NOTHING
+# AT ALL, the other is a brain, and the wyrm is switched off so the only thing on
+# the board that can kill the idle man is the other man's fire.
+#
+# The number this replaced was worth having and was still too weak: two rival
+# kills across 27 AI-vs-AI matches asserted at "more than nothing". This asks the
+# question directly, and its negative control is the arena as it actually
+# shipped — put the four carved cells back and the hunter cannot land a single
+# kill in ten full duels, because he cannot get there.
+
+
+func _test_duel_outcome() -> void:
+	var joined := 0
+	var sealed := 0
+	var played := 0
+	var kill_times: Array[float] = []
+	for s in range(1, 11):
+		played += 1
+		var open_arena := _hunt(s, AI.Difficulty.MASTER, false)
+		if open_arena["killed"]:
+			joined += 1
+			kill_times.append(float(open_arena["t"]))
+		if _hunt(s, AI.Difficulty.MASTER, true)["killed"]:
+			sealed += 1
+	kill_times.sort()
+	var median := 0.0 if kill_times.is_empty() \
+		else kill_times[kill_times.size() / 2]
+	check("duel: ten idle-king hunts were played", 10, played)
+	# Measured 18/20 at Master over twenty seeds; asserted at six so a tuning
+	# pass costs a re-measure and not a red suite, and never at "> 0", which is
+	# the threshold a broken arena can still clear by luck.
+	check("duel: the rival's fire reaches an idle king (%d/10, median %.0f s)"
+		% [joined, median], true, joined >= 6)
+	# THE NEGATIVE CONTROL, ON THE ARENA THAT SHIPPED. Not a hand-built board —
+	# the real one, with the four carved gates filled back in.
+	check("duel: NEGATIVE — with the comb wall standing he NEVER reaches him",
+		0, sealed)
+
+
+## One hunt. Side 0 stands at his corner and never moves or throws; side 1 is a
+## brain; the wyrm's patience is set past any horizon so it cannot do the
+## killing. `reseal` fills the four carved gates back in — the arena as it was
+## before this fix, and the only control that proves the fix is what changed it.
+func _hunt(seed_value: int, tier: int, reseal: bool) -> Dictionary:
+	var g: Grid = Grid.new()
+	g.setup({"seed": seed_value, "crates": _crate_field(seed_value),
+		"sudden_death_at": 100000.0, "fuse_sec": 1.6})
+	if reseal:
+		for c in g.carved:
+			g.tiles[g.index(c)] = Grid.Tile.STONE
+	var brain := AI.new(tier, seed_value + 2)
+	var ticks := 0
+	while ticks < 9000 and not g.is_over():
+		var act: Dictionary = brain.decide(g, 1, DT)
+		if act.has("keg"):
+			g.place_keg(1)
+		elif act.has("step"):
+			g.request_step(1, act["step"])
+		g.tick(DT)
+		g.drain_events()
+		ticks += 1
+	var idle = g.kings[0]
+	return {"killed": (not idle.alive) and idle.killed_by == 1, "t": g.time}
+
+
 # ── the wyrm's ring ─────────────────────────────────────────────────────────
 
 
@@ -554,17 +766,21 @@ func _test_ai_matches() -> void:
 	var worst_ticks := 0
 	var kegs_seen := 0
 	var crates_seen := 0
+	var split_ticks := 0
+	var rival_kills := 0
 	var all_ended := true
 	var all_named := true
 	var matches := 0
 	for a in tiers:
 		for b in tiers:
 			for seed_value in [11, 404, 90210]:
-				var out := _run_ai_match(a, b, seed_value)
+				var out := _run_ai_match(a, b, seed_value, true)
 				matches += 1
 				worst_ticks = maxi(worst_ticks, int(out["ticks"]))
 				kegs_seen += int(out["kegs"])
 				crates_seen += int(out["crates"])
+				split_ticks += int(out["split_ticks"])
+				rival_kills += int(out["rival_kills"])
 				if not out["over"]:
 					all_ended = false
 					check("ai: %s vs %s seed %d ENDED" % [names[a], names[b],
@@ -585,6 +801,20 @@ func _test_ai_matches() -> void:
 	check("ai: inside the tick budget", true, worst_ticks < 9000)
 	check("ai: the kings actually fought (jars were lit)", true, kegs_seen > 40)
 	check("ai: …and actually broke the field open", true, crates_seen > 40)
+
+	# THE INVARIANT UNDER THE CLOSING RING, MEASURED IN A REAL MATCH rather than
+	# argued from the layout: 27 full duels, every tick, while both kings live.
+	# The only ticks that may see a split are the last two squares on the board,
+	# where the wyrm has already taken 62 of 64 and there is no duel left to
+	# have — measured at open<=2 across every match here.
+	check("ai: the ring never walls two living kings apart", 0, split_ticks)
+	# AND THE POINT OF THE WHOLE FIX. With the comb wall standing this number
+	# was ZERO across every pairing and seed — a king could not be killed by the
+	# other man's fire because he could not be reached. Measured at 2 with the
+	# arena joined; asserted at "it happens at all", because "at all" is exactly
+	# what was impossible.
+	check("ai: a king CAN fall to the rival's fire (%d times)" % rival_kills,
+		true, rival_kills > 0)
 
 	# The tiers must be DIFFERENT, or "difficulty" is a label on nothing.
 	# A Master hunting a Casual should win the clear majority of the time.
@@ -617,7 +847,13 @@ func _test_ai_matches() -> void:
 
 
 ## One full AI-vs-AI trial, fixed dt, no rendering. Returns a small report.
-func _run_ai_match(tier_a: int, tier_b: int, seed_value: int) -> Dictionary:
+##
+## `watch` turns on the per-tick connectivity audit. It is off by default and on
+## only for the 27 headline matches: a flood fill on every tick of all 159
+## matches this file plays (the ladder diagnostic included) is a second and a
+## half of nothing, and the property is the same in all of them.
+func _run_ai_match(tier_a: int, tier_b: int, seed_value: int,
+		watch := false) -> Dictionary:
 	var g: Grid = Grid.new()
 	g.setup({
 		"seed": seed_value,
@@ -630,6 +866,7 @@ func _run_ai_match(tier_a: int, tier_b: int, seed_value: int) -> Dictionary:
 	var kegs := 0
 	var crates := 0
 	var ticks := 0
+	var split_ticks := 0
 	# Budget: sudden death (20 s) + the whole 64-cell spiral (64 x 0.28 = 18 s)
 	# + slack, in 60 Hz ticks. Anything past this is a hang, not a long game.
 	var cap := int((20.0 + 64.0 * 0.28 + 6.0) / DT)
@@ -652,8 +889,18 @@ func _run_ai_match(tier_a: int, tier_b: int, seed_value: int) -> Dictionary:
 				kegs += 1
 			elif e["kind"] == "crate_burned":
 				crates += 1
+		if watch and g.kings[0].alive and g.kings[1].alive \
+				and g.open_cells() > 2 and not g.kings_connected():
+			split_ticks += 1
+	var rival_kills := 0
+	for k in g.kings:
+		# `killed_by` is the side whose jar did it, which INCLUDES your own —
+		# and a king blowing himself up is not the other man reaching him.
+		if not k.alive and k.killed_by >= 0 and k.killed_by != k.side:
+			rival_kills += 1
 	return {"over": g.is_over(), "winner": g.winner(), "ticks": ticks,
-		"kegs": kegs, "crates": crates}
+		"kegs": kegs, "crates": crates, "split_ticks": split_ticks,
+		"rival_kills": rival_kills}
 
 
 ## A reproducible field of survivors — roughly what a drawn game leaves behind,

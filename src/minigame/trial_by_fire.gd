@@ -70,6 +70,41 @@ const HOUSE_A := "winterfang"
 const HOUSE_B := "goldclaw"
 const TIER_WORDS := {"casual": 0, "seasoned": 1, "master": 2}
 
+## ── THE TRANSMUTATION — the board BECOMES the arena, on screen ─────────────
+##
+## THE BEAT THIS MODE WAS MISSING. The data half was always honest: the crates
+## are the real survivors of the real drawn game, standing on the real squares
+## they were standing on when the kings ran out of moves. A player never SAW
+## that. He saw a chessboard, then a cut, then an arena — and the single idea
+## the whole mode is built on ("the board you just drew on is the thing you now
+## fight in") lived entirely in a design document.
+##
+## So it is played instead of asserted: the survivors plant where they stand,
+## the blackstone comes UP THROUGH THE SQUARES, the camera drops into the board
+## and then lifts away to the arena's rake, and the wyrm in the east aisle picks
+## its head up. Two and a half seconds, and the frame in the middle of it has a
+## chessboard with black plinths half-way out of it.
+##
+## SKIPPABLE, and skippable is not a courtesy here: this runs in a bracket
+## decider, so any key or any click ends it AT ONCE and lands every value on its
+## final one. Nothing is left half-risen on any exit path.
+const TRANSFORM_SEC := 2.5
+## The clock the beat runs on is the WALL clock (Time.get_ticks_msec), never
+## `delta` — because the beat also bends `Engine.time_scale`, and a beat whose
+## length depends on the clock it is bending is a beat that can hang.
+const TRANSFORM_TIME_SCALE := 0.55
+## The pose scenes/game.tscn's rig sits at: this is the frame the war ended on,
+## and the transmutation opens on it so the hand-over reads as a change to the
+## BOARD rather than a cut to somewhere else.
+const PLAY_PITCH := -0.85
+const PLAY_DISTANCE := 11.5
+## …then the camera drops toward the stone, the way you lean into a position,
+## before it lifts to the arena's rake. The arena pose itself is NOT written
+## here — it is read off the scene's own CameraRig, which is where the rafter
+## ceiling that chose it is documented.
+const DIP_PITCH := -0.62
+const DIP_DISTANCE := 9.2
+
 @export var player_house := HOUSE_A
 @export var rival_house := HOUSE_B
 @export var rival_tier := 1        ## KingAi.Difficulty
@@ -94,8 +129,24 @@ var _held := Vector2i.ZERO
 var _running := false
 var _shots_dir := ""
 var _shot_n := 0
+var _tf_reel := false
 var _announced := false
 var _drive_demo := false
+
+## THE TRANSMUTATION's state. `transforming` is true only while the board is
+## becoming the arena; the grid is not ticking and no input reaches the duel.
+var transforming := false
+var transform_skipped := false
+var _tf_ms := 0
+var _tf_scale := 1.0
+var _tf_touched_scale := false
+var _tf_stone_phase := {}     ## stone cell index -> 0..1 place in the wave
+var _tf_stone_dust := {}      ## …and whether its dust has been thrown yet
+var _tf_plant := []           ## [Node3D, seated y, phase, dusted]
+var _tf_wyrm_stirred := false
+var _rig: Node3D
+var _arena_pitch := -0.90
+var _arena_distance := 11.2
 
 ## Set by TrialBridge when the arena runs INSIDE a live match. It changes what
 ## the two "get me out of here" keys mean, and both changes are safety rather
@@ -133,10 +184,16 @@ func _ready() -> void:
 			arena_seed = int(a.substr(11))
 		elif a.begins_with("--tbf-shots="):
 			_shots_dir = a.substr(12)
+		elif a.begins_with("--tbf-tf-shots="):
+			_shots_dir = a.substr(15)
+			_tf_reel = true
 		elif a == "--tbf-drive":
 			_drive_demo = true
 	var fast := args.has("--tbf-fast") or not _shots_dir.is_empty()
 	start({"seed": arena_seed, "fast": fast})
+	if _tf_reel:
+		_run_transform_reel()
+		return
 	if _drive_demo:
 		_drive_by_hand()
 	if not _shots_dir.is_empty():
@@ -177,7 +234,9 @@ func start(cfg: Dictionary = {}) -> void:
 	grid.setup({
 		"crates": crate_cells,
 		"seed": int(cfg.get("seed", arena_seed)),
-		"sudden_death_at": 22.0 if fast else 70.0,
+		# 45 s, measured against duels the kings now actually decide — see
+		# BlastGrid.sudden_death_at for the distribution that picked it.
+		"sudden_death_at": 22.0 if fast else 45.0,
 		"ring_interval": 0.30 if fast else 0.60,
 		"fuse_sec": 1.9 if fast else 2.35,
 	})
@@ -228,8 +287,18 @@ func start(cfg: Dictionary = {}) -> void:
 		_king_t[side] = 1.0
 		_king_dur[side] = 1.0
 
-	_running = true
 	_announced = false
+	# THE BOARD BECOMES THE ARENA, and only then does the duel start. Skipping
+	# the beat (or asking for it to be skipped) lands on exactly the same
+	# `_open_the_arena`, so there is one definition of "the arena is live".
+	if bool(cfg.get("transform", true)):
+		_begin_transform()
+	else:
+		_open_the_arena()
+
+
+func _open_the_arena() -> void:
+	_running = true
 	# THE FUSE. Tier 1 is a bare motorik sequencer — the arena is quiet and
 	# nothing has been thrown yet. The other two tiers are the same loop with
 	# more layers, and they are already playing underneath at silence.
@@ -239,6 +308,9 @@ func start(cfg: Dictionary = {}) -> void:
 
 func _teardown() -> void:
 	_running = false
+	# BEFORE ANYTHING IS FREED. A teardown mid-transmutation (R, or the bridge
+	# pulling the arena on its deadline) must not walk out carrying the clock.
+	_end_transform(true)
 	_music_stop(0.0)   # a restart (R) cuts, it does not crossfade into itself
 	for n in [_fx, _incin, _wyrm, _hud]:
 		if n != null and is_instance_valid(n):
@@ -253,10 +325,208 @@ func _teardown() -> void:
 	_kings.clear()
 
 
+# ── THE TRANSMUTATION ───────────────────────────────────────────────────────
+
+
+func _begin_transform() -> void:
+	_rig = get_node_or_null("CameraRig")
+	if _rig != null:
+		# The arena's own pose comes off the SCENE, not off a constant in this
+		# file: the rake was chosen against the hall's rafters and that argument
+		# is written down in trial_by_fire.tscn. Two copies of it is one copy
+		# too many.
+		_arena_pitch = float(_rig.pitch)
+		_arena_distance = float(_rig.target_distance)
+	transforming = true
+	transform_skipped = false
+	_tf_ms = Time.get_ticks_msec()
+	_tf_wyrm_stirred = false
+	_tf_scale = Engine.time_scale
+	_tf_touched_scale = true
+	# THE WORLD HOLDS ITS BREATH. Everything the beat itself drives runs on the
+	# wall clock, so this only slows what is ALREADY moving when the arena
+	# arrives — the pieces' idle animations, the torch flicker, the hall.
+	Engine.time_scale = TRANSFORM_TIME_SCALE
+
+	# THE PLINTHS start inside the board. The wave runs from the middle out, so
+	# it reads as something coming up UNDER the position rather than a curtain
+	# crossing it.
+	_tf_stone_phase.clear()
+	_tf_stone_dust.clear()
+	for i in GridScript.CELLS:
+		if not _fx.has_stone(i):
+			continue
+		var c: Vector2i = grid.cell_of(i)
+		var d := maxf(absf(float(c.x) - 3.5), absf(float(c.y) - 3.5)) / 3.5
+		_tf_stone_phase[i] = clampf(d, 0.0, 1.0)
+		_tf_stone_dust[i] = false
+		_fx.set_stone_rise(i, 0.0)
+
+	# THE SURVIVORS. Every man still standing when the war drew — and the two
+	# kings with them, because they were pieces on this board a second ago too.
+	_tf_plant.clear()
+	for idx in _crates:
+		_tf_plant.append(_plant_entry(_crates[idx], grid.cell_of(idx)))
+	for side in _kings.size():
+		if is_instance_valid(_kings[side]):
+			_tf_plant.append(_plant_entry(_kings[side], grid.kings[side].cell))
+	_camera_pose(PLAY_PITCH, PLAY_DISTANCE)
+	_apply_transform(0.0)
+
+
+func _plant_entry(node: Node3D, cell: Vector2i) -> Array:
+	var d := maxf(absf(float(cell.x) - 3.5), absf(float(cell.y) - 3.5)) / 3.5
+	return [node, node.position.y, clampf(d, 0.0, 1.0), false]
+
+
+## How far through the beat we are, on the wall clock. 1.0 when there is no beat
+## running, so a caller can always ask.
+func _transform_u() -> float:
+	if not transforming:
+		return 1.0
+	return clampf(float(Time.get_ticks_msec() - _tf_ms)
+		/ (TRANSFORM_SEC * 1000.0), 0.0, 1.0)
+
+
+## Any key, any click. THE ROUND IS NOT AT STAKE HERE — Esc during the
+## transmutation must skip it and must NOT concede, or a player who hits Esc
+## over a cutscene he did not ask for has forfeited a bracket round.
+func skip_transform() -> void:
+	if not transforming:
+		return
+	transform_skipped = true
+	_end_transform(false)
+
+
+func _tick_transform() -> void:
+	var u := _transform_u()
+	_apply_transform(u)
+	if u >= 1.0:
+		_end_transform(false)
+
+
+## Every exit lands here, and it lands everything: the clock, the plinths, the
+## bodies, the camera. `quiet` is the teardown path, where the arena is going
+## away and there is nothing left to open.
+func _end_transform(quiet: bool) -> void:
+	if not transforming:
+		_restore_time_scale()
+		return
+	transforming = false
+	if not quiet:
+		_apply_transform(1.0)   # nothing is ever left half-risen
+	_restore_time_scale()
+	if not quiet:
+		_open_the_arena()
+
+
+func _restore_time_scale() -> void:
+	if not _tf_touched_scale:
+		return
+	_tf_touched_scale = false
+	Engine.time_scale = _tf_scale
+
+
+func _exit_tree() -> void:
+	_restore_time_scale()
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_PREDELETE:
+		_restore_time_scale()
+
+
+## THE WHOLE BEAT AS A FUNCTION OF u. Written this way on purpose: a skip is
+## `_apply_transform(1.0)`, which is why no exit path can leave a plinth in the
+## floor or the camera between two poses.
+func _apply_transform(u: float) -> void:
+	# I. THE CAMERA — down into the position, then up and back to the arena.
+	if u < 0.30:
+		var a := _ease(u / 0.30)
+		_camera_pose(lerpf(PLAY_PITCH, DIP_PITCH, a),
+			lerpf(PLAY_DISTANCE, DIP_DISTANCE, a))
+	else:
+		var b := _ease((u - 0.30) / 0.70)
+		_camera_pose(lerpf(DIP_PITCH, _arena_pitch, b),
+			lerpf(DIP_DISTANCE, _arena_distance, b))
+
+	# II. THE SURVIVORS PLANT. They drop the last hand's-breadth onto their own
+	# square and squash — a man setting his feet, not a piece being placed.
+	for entry in _tf_plant:
+		var node: Node3D = entry[0]
+		if not is_instance_valid(node):
+			continue
+		var p := _window(u, 0.06 + float(entry[2]) * 0.14, 0.26)
+		var seated: float = entry[1]
+		# A hand's breadth, not a drop from the rafters. THE FIRST FRAME OF THIS
+		# BEAT IS THE LAST FRAME OF THE WAR and has to match it: an army hanging
+		# in the air on frame one says "a cutscene started", which is the exact
+		# read the transmutation exists to avoid.
+		node.position.y = seated + 0.12 * (1.0 - p)
+		var squash: float = 1.0 - 0.16 * sin(clampf(p, 0.0, 1.0) * PI)
+		node.scale = Vector3(1.0 / maxf(squash, 0.05), squash,
+			1.0 / maxf(squash, 0.05))
+		if not entry[3] and p > 0.55:
+			entry[3] = true
+			_fx.plant_dust(_world_of(node), 0.7)
+
+	# III. THE BLACKSTONE COMES UP THROUGH THE SQUARES. This is the shot: a
+	# chessboard with black plinths half-way out of it.
+	# The wave is deliberately WIDE (the middle is out before the rim has
+	# started) so that the frame at the middle of the beat has plinths at every
+	# height at once — seated, half-out, and still breaking the surface. A tight
+	# wave gives two clean states and no picture of the change between them.
+	for i in _tf_stone_phase:
+		var s := _window(u, 0.16 + float(_tf_stone_phase[i]) * 0.24, 0.26)
+		# A little overshoot, so each block lands rather than arrives.
+		var rise: float = s if s >= 1.0 else s + 0.10 * sin(s * PI)
+		_fx.set_stone_rise(i, rise)
+		if not _tf_stone_dust[i] and s > 0.22:
+			_tf_stone_dust[i] = true
+			_fx.plant_dust(_world(grid.cell_of(i)), 1.0)
+
+	# IV. THE WYRM PICKS ITS HEAD UP — the clock introducing itself.
+	if not _tf_wyrm_stirred and u >= 0.44:
+		_tf_wyrm_stirred = true
+		if _wyrm != null and is_instance_valid(_wyrm):
+			_wyrm.stir()
+
+
+## 0 before `at`, 1 after `at + span`, smooth between. The one shaping function
+## the whole beat is built out of.
+func _window(u: float, at: float, span: float) -> float:
+	return _ease(clampf((u - at) / maxf(span, 0.001), 0.0, 1.0))
+
+
+static func _ease(u: float) -> float:
+	var c := clampf(u, 0.0, 1.0)
+	return c * c * (3.0 - 2.0 * c)
+
+
+## The rig lerps toward its own targets every frame, so driving only the public
+## fields would fight the beat at `lerp_speed`. Setting the private targets with
+## them means `_apply` has nothing left to interpolate and the curve written
+## above is the curve on screen.
+func _camera_pose(pitch: float, distance: float) -> void:
+	if _rig == null or not is_instance_valid(_rig):
+		return
+	_rig.pitch = pitch
+	_rig.set("_target_pitch", pitch)
+	_rig.target_distance = distance
+	_rig.set("_distance", distance)
+
+
+func _world_of(node: Node3D) -> Vector3:
+	return node.position
+
+
 # ── the frame ───────────────────────────────────────────────────────────────
 
 
 func _process(delta: float) -> void:
+	if transforming:
+		_tick_transform()
+		return
 	if not _running or grid == null:
 		return
 	var dt := minf(delta, 1.0 / 20.0)   # a stalled frame must not skip a fuse
@@ -521,7 +791,12 @@ func _refresh_hud() -> void:
 ## `_input` runs before all of them, so embedded the arena consumes every key.
 ## M is the one exception: it is the mute toggle and it harms nothing.
 func _input(event: InputEvent) -> void:
-	if not embedded or not (event is InputEventKey):
+	if not embedded:
+		return
+	if _skip_click(event):
+		get_viewport().set_input_as_handled()
+		return
+	if not (event is InputEventKey):
 		return
 	if (event as InputEventKey).keycode == KEY_M:
 		return
@@ -531,13 +806,37 @@ func _input(event: InputEvent) -> void:
 
 ## Standalone only — embedded, `_input` above has already routed the key.
 func _unhandled_input(event: InputEvent) -> void:
-	if embedded or not (event is InputEventKey):
+	if embedded:
+		return
+	if _skip_click(event):
+		return
+	if not (event is InputEventKey):
 		return
 	_route_key(event as InputEventKey)
 
 
+## A click during the transmutation skips it, and does nothing at any other
+## time — this mode is a keyboard mode and the mouse still belongs to the
+## camera rig the moment the arena is live.
+func _skip_click(event: InputEvent) -> bool:
+	if not transforming or not (event is InputEventMouseButton):
+		return false
+	if not (event as InputEventMouseButton).pressed:
+		return false
+	skip_transform()
+	return true
+
+
 func _route_key(event: InputEventKey) -> void:
 	if event.echo:
+		return
+	# WHILE THE BOARD IS STILL BECOMING THE ARENA, every key is a skip and NO
+	# key is a concede. Esc pressed over the transmutation must not cost a
+	# player the round he has not been shown yet — the same class of mistake as
+	# the match's own Esc handler eating the first Esc of a bracket decider.
+	if transforming:
+		if event.pressed:
+			skip_transform()
 		return
 	var key := event.keycode
 	if event.pressed:
@@ -632,10 +931,37 @@ func _seat_survivors(survivors: Array, free_cells: Array[Vector2i]) -> Array:
 ## the ashfall in this project shipped a whole day of frames that photographed
 ## the wrong beat because they were timed rather than triggered, and the fix was
 ## exactly this — instruments wait on the thing they claim to show.
+## THE TRANSMUTATION, photographed on ITS OWN clock rather than on a stopwatch.
+## Seven frames evenly across the beat plus the settled arena — which is how a
+## claim like "a still from the middle of it obviously shows a chessboard
+## becoming an arena" gets checked instead of asserted.
+func _run_transform_reel() -> void:
+	var marks := [0.02, 0.16, 0.32, 0.46, 0.60, 0.76, 0.94]
+	var n := 0
+	for m in marks:
+		await _until(func() -> bool:
+			return not transforming or _transform_u() >= m, 8.0)
+		await _shot("tf%d_u%02d" % [n, int(m * 100.0)])
+		n += 1
+	await _until(func() -> bool: return not transforming, 8.0)
+	await get_tree().create_timer(0.6, true, false, true).timeout
+	await _shot("tf7_arena")
+	get_tree().quit()
+
+
 func _run_shot_reel() -> void:
 	if not _drive_demo:
 		both_ai = true
-	await get_tree().create_timer(0.6).timeout
+	# The reel opens on the transmutation, because it is the first thing a
+	# player sees and the thing the mode is sold on.
+	await _until(func() -> bool:
+		return not transforming or _transform_u() >= 0.02, 6.0)
+	await _shot("00a_board")
+	await _until(func() -> bool:
+		return not transforming or _transform_u() >= 0.52, 8.0)
+	await _shot("00b_becoming")
+	await _until(func() -> bool: return not transforming, 8.0)
+	await get_tree().create_timer(0.6, true, false, true).timeout
 	await _shot("01_arena")
 	await _until(func() -> bool: return not grid.kegs.is_empty(), 12.0)
 	await _shot("02_jar_lit")
@@ -706,8 +1032,19 @@ func _drive_by_hand() -> void:
 		[KEY_S, 0.30], [KEY_S, 0.30], [KEY_A, 0.34], [KEY_A, 0.34],
 		[KEY_SPACE, 0.10], [KEY_D, 0.30], [KEY_W, 0.34], [KEY_W, 0.34],
 	]
+	await get_tree().process_frame
+	# THE FIRST KEY GOES TO THE TRANSMUTATION and must SKIP it — the same route
+	# a player's Esc or click takes, through the same `_route_key`. Driving it
+	# from here is what turns "the skip restores the clock" from a claim in a
+	# comment into a line in a log.
+	if transforming:
+		_key(KEY_SPACE, true)
+		await get_tree().process_frame
+		_key(KEY_SPACE, false)
+		await get_tree().process_frame
 	var opened: Vector2i = grid.kings[0].cell
-	print("TBF DRIVE begins at %s" % str(opened))
+	print("TBF DRIVE begins at %s | skipped=%s | time_scale=%.2f"
+		% [str(opened), transform_skipped, Engine.time_scale])
 	var trail: Array = [str(opened)]
 	for beat in moves:
 		if not _running or grid.is_over() or not grid.kings[0].alive:
@@ -718,8 +1055,13 @@ func _drive_by_hand() -> void:
 		await get_tree().process_frame
 		trail.append("%s%s" % [str(grid.kings[0].cell),
 			"+jar" if beat[0] == KEY_SPACE else ""])
-	print("TBF DRIVE %s | alive=%s" % [" ".join(PackedStringArray(trail)),
-		grid.kings[0].alive])
+	# THE CLOCK IS PART OF THE PROOF. The transmutation bends `Engine.time_scale`
+	# and the first key this driver sends is the one that SKIPS it — so a run
+	# that ends anywhere but 1.0 has leaked the beat's clock into the match, and
+	# the driver is the cheapest place in the project to notice.
+	print("TBF DRIVE %s | alive=%s | skipped=%s | time_scale=%.2f"
+		% [" ".join(PackedStringArray(trail)), grid.kings[0].alive,
+		transform_skipped, Engine.time_scale])
 
 
 func _key(code: int, pressed: bool) -> void:

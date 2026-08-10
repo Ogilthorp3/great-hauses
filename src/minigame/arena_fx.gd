@@ -285,6 +285,60 @@ func has_stone(idx: int) -> bool:
 	return _stones.has(idx) and is_instance_valid(_stones[idx])
 
 
+func stone_indices() -> Array:
+	return _stones.keys()
+
+
+## HOW FAR A PLINTH HAS COME OUT OF ITS SQUARE — 0 is buried inside the board,
+## 1 is seated. Only the transmutation drives this; every other caller gets a
+## seated block because `add_stone` builds it seated.
+##
+## The sink has to clear the whole block (0.46 + a 0.06 cap) or the transmutation
+## opens on eight rows of black caps already sitting proud of the chessboard,
+## which is the one thing the beat exists to hide.
+const STONE_SINK := 0.62
+
+
+func set_stone_rise(idx: int, u: float) -> void:
+	if not has_stone(idx):
+		return
+	var root: Node3D = _stones[idx]
+	root.position.y = tile_top - STONE_SINK * (1.0 - clampf(u, 0.0, 1.0))
+
+
+## Grit thrown out of a square — the plinth breaking the surface, or a bannerman
+## planting his feet.
+##
+## MIX-BLENDED AND UNLIT, alone among this file's effects. Everything else here
+## is additive wildfire because it IS fire; dust that glows is a boon, and the
+## one thing the transmutation must not say is "something magical happened to
+## this square" when what happened is that a slab of rock came up through it.
+func plant_dust(world: Vector3, power := 1.0) -> void:
+	var p := RigScript.spawn_emitter(self, "PlantDust", {
+		"amount": maxi(6, int(14.0 * power)), "lifetime": 0.9,
+		"size": 0.30 * tile_size, "velocity": Vector2(0.5, 1.9 * power),
+		"spread": 68.0, "direction": Vector3(0.0, 1.0, 0.0),
+		"gravity": Vector3(0.0, -2.4, 0.0), "grow": 2.8,
+		"emission_radius": tile_size * 0.34,
+		"ramp": [
+			[0.0, Color(0.40, 0.38, 0.35, 0.62)],
+			[0.45, Color(0.29, 0.28, 0.25, 0.38)],
+			[1.0, Color(0.18, 0.17, 0.15, 0.0)],
+		],
+		"blend": BaseMaterial3D.BLEND_MODE_MIX, "emission_energy": 0.0,
+	})
+	p.position = Vector3(world.x, tile_top + 0.04, world.z)
+	p.one_shot = true
+	p.explosiveness = 0.88
+	p.emitting = true
+	# ignore_time_scale: the transmutation bends the clock, and a puff of dust
+	# that outlives the beat that threw it is litter on the arena floor.
+	get_tree().create_timer(1.8, true, false, true).timeout.connect(
+		func() -> void:
+			if is_instance_valid(p):
+				p.queue_free())
+
+
 # ── the wildfire jar ────────────────────────────────────────────────────────
 
 

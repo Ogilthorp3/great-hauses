@@ -78,7 +78,25 @@ var ring_step := 0.045        ## seconds the blast takes to walk one tile
 var flame_life := 0.62        ## how long a lit tile burns
 var fuse_sec := 2.35          ## a keg's fuse
 var step_sec := 0.21          ## a king's grid step at speed 1.0
-var sudden_death_at := 75.0   ## when the wyrm loses patience
+## WHEN THE WYRM LOSES PATIENCE — 45 s, and the number was measured, not felt.
+##
+## It used to be 75 (70 in the arena scene), and it was chosen against a mode in
+## which the two kings COULD NOT REACH EACH OTHER: nothing was ever decided by
+## the kings, so the clock had to run long enough to entomb them both and the
+## typical duel ended at ~88 s in a double knockout resolved by a bookkeeping
+## tiebreak. With the arena joined, 108 AI duels with the wyrm switched off are
+## decided by the kings at p25 16 s / MEDIAN 28 s / p75 41 s — and a 70 s clock
+## would then wake the dragon in 11 % of duels, which makes the best beat in the
+## mode dead content.
+##
+## 45 s sits just past the third quartile ON PURPOSE. THE WYRM IS THE
+## ANTI-CAMPING CLOCK, not a co-star: three duels in four are already settled by
+## then and are not interrupted, and the long quarter — the cagey ones, the ones
+## that stall, the ones this clock exists for — become dragon fights (~23 %).
+## The dragon is not rare in the mode either way: it STIRS in the transmutation
+## at the top of every single trial (see trial_by_fire.gd), so a player always
+## learns what the clock is; 45 s is when it stops watching.
+var sudden_death_at := 45.0
 var ring_interval := 0.55     ## …and how fast it eats the arena after that
 var start_radius := 1
 var start_kegs := 1
@@ -99,6 +117,11 @@ var events: Array = []              ## drained by the view every frame
 var time := 0.0
 var sudden := false
 var rng := RandomNumberGenerator.new()
+
+## THE BLACKSTONE `setup()` HAD TO OPEN so the two kings could meet. Empty on
+## every arena the lattice builds on its own — which is exactly what makes it
+## evidence: a non-empty list is the arena admitting it generated a wall.
+var carved: Array[Vector2i] = []
 
 var _drops := {}          ## cell index -> Boon hidden inside that crate
 var _pending := {}        ## cell index -> Boon revealed, waiting for the fire to die
@@ -183,6 +206,7 @@ func setup(cfg: Dictionary = {}) -> void:
 	arms.clear()
 	kings.clear()
 	events.clear()
+	carved.clear()
 	_drops.clear()
 	_pending.clear()
 	time = 0.0
@@ -246,6 +270,11 @@ func setup(cfg: Dictionary = {}) -> void:
 			_drops[i] = Boon.DRAUGHT if roll < 0.42 \
 				else (Boon.CACHE if roll < 0.78 else Boon.SPURS)
 
+	# THE DUEL INVARIANT, PROVED AND IF NEED BE MADE. Last thing, after the
+	# crates: an arena the two kings cannot reach each other in is not a duel,
+	# it is two men waiting for a dragon.
+	carved = ensure_kings_connected()
+
 	_spiral = _spiral_order()
 
 
@@ -260,6 +289,257 @@ func lattice_is_symmetric() -> bool:
 		if (tiles[i] == Tile.STONE) != (tiles[_i(m)] == Tile.STONE):
 			return false
 	return true
+
+
+# ── THE DUEL INVARIANT: the two kings must be able to REACH each other ──────
+#
+# THE BUG THIS CLOSES, AND IT WAS TOTAL. The lattice above is proved SYMMETRIC
+# and the pockets are proved OPEN, and NEITHER OF THOSE SAYS THE TWO KINGS ARE
+# IN THE SAME ARENA. Print the mirrored lattice and the hole is obvious the
+# moment you look at rows 3 and 4:
+#
+#     7 ........        The half-turn that fixed the 65/35 spawn also flips the
+#     6 #.#.#.#.        parity of the pillars across the seam, so the two middle
+#     5 ........        rows come out as COMPLEMENTARY COMBS. Every gap in row 3
+#     4 #.#.#.#.   <--  is a pillar in row 4 and every gap in row 4 is a pillar
+#     3 .#.#.#.#   <--  in row 3. Nothing 4-connected crosses. The board was two
+#     2 ........        sealed halves with one king in each, in EVERY arena the
+#     1 .#.#.#.#        mode ever built — 399/399 in the probe that found it.
+#     0 ........
+#
+# So the "duel" could not be lost to the other man's fire: the only deaths
+# available were self-inflicted or by wyrm, which is the exact not-a-duel this
+# whole mode exists to replace. The fairness fix was real and it is kept; what
+# was missing is anything that PROVED the arena was still one arena afterwards.
+#
+# AND IT REPEATS AT EVERY SCALE. The same comb sits inside the sub-board the
+# wyrm's ring leaves behind ([2..5] is `.#.#` over `#.#.`), so opening the outer
+# seam alone would hand the kings a corridor and then let the closing ring wall
+# them apart again with 20 squares still on the board. The repair therefore has
+# to hold for the arena the wyrm is about to leave, not only the one it starts
+# with — see `ensure_kings_connected`.
+#
+# A CRATE IS A DOOR, NOT A WALL. Bannermen are destructible, so a corridor
+# behind one is a corridor a king can open with a jar — the digging IS the game.
+# Blackstone is the only thing that can seal the arena for good, so the shipping
+# gate is "no all-blackstone cut". `through_crates = false` asks the strictly
+# harder question (can he WALK it right now) that the gate must NOT be: an
+# opening position where every route is currently plugged by bannermen is a good
+# opening position.
+
+
+## Every cell reachable from `start`, as a set of cell indices. `inset` shrinks
+## the board to the square the wyrm's ring has not eaten yet.
+func reachable_from(start: Vector2i, through_crates := true, inset := 0) -> Dictionary:
+	var seen := {}
+	if not _inside(start, inset) or tiles[_i(start)] == Tile.STONE:
+		return seen
+	seen[_i(start)] = true
+	var stack: Array[Vector2i] = [start]
+	while not stack.is_empty():
+		var c: Vector2i = stack.pop_back()
+		for d in DIRS:
+			var n: Vector2i = c + d
+			if not _inside(n, inset) or seen.has(_i(n)):
+				continue
+			var t := tiles[_i(n)]
+			if t == Tile.STONE:
+				continue
+			if t == Tile.CRATE and not through_crates:
+				continue
+			seen[_i(n)] = true
+			stack.append(n)
+	return seen
+
+
+func _inside(c: Vector2i, inset: int) -> bool:
+	return c.x >= inset and c.x < SIZE - inset \
+		and c.y >= inset and c.y < SIZE - inset
+
+
+## THE INVARIANT ITSELF: king A can get to king B. Asserted on every generated
+## arena by the suite and — because a check that cannot fail is worse than no
+## check — against hand-built sealed boards it must REJECT.
+func kings_connected(through_crates := true) -> bool:
+	if kings.size() < 2:
+		return false
+	return reachable_from(kings[0].cell, through_crates).has(_i(kings[1].cell))
+
+
+## THE SAME QUESTION ASKED OF THE ARENA THE WYRM IS LEAVING BEHIND: with the
+## outer `inset` rings entombed, is every square still standing part of ONE
+## arena? The ring is supposed to compress the kings together; a ring that
+## divides what it has not eaten yet is a ring that walls them apart.
+func region_is_connected(inset: int) -> bool:
+	var first := Vector2i(-1, -1)
+	var total := 0
+	for i in CELLS:
+		var c := cell_of(i)
+		if not _inside(c, inset) or tiles[i] == Tile.STONE:
+			continue
+		total += 1
+		if first.x < 0:
+			first = c
+	if total <= 1:
+		return true
+	return reachable_from(first, true, inset).size() == total
+
+
+## Every stage of the closing ring, in one answer. The gate the suite asserts on
+## every generated arena.
+func ring_keeps_one_arena() -> bool:
+	for inset in SIZE / 2:
+		if not region_is_connected(inset):
+			return false
+	return true
+
+
+## How many squares are still arena (anything the wyrm has not entombed).
+func open_cells() -> int:
+	var n := 0
+	for i in CELLS:
+		if tiles[i] != Tile.STONE:
+			n += 1
+	return n
+
+
+## THE FEWEST BLACKSTONE CELLS whose removal joins `a` to `b`, as the path they
+## lie on. A 0-1 BFS: stepping onto blackstone costs one carve, stepping
+## anywhere else costs nothing, so the cheapest route IS the minimum — any set
+## of removals that opens a route contains every stone on the route it opens,
+## and no route is cheaper than this one.
+##
+## Deterministic to the tile: no RNG, fixed neighbour order, and the tiles it
+## reads came from the seed. Same seed, same drawn position, same carve.
+func _cheapest_stone_path(a: Vector2i, b: Vector2i, inset: int) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	if not _inside(a, inset) or not _inside(b, inset):
+		return out
+	var unreached := CELLS + 1
+	var dist := PackedInt32Array()
+	var prev := PackedInt32Array()
+	dist.resize(CELLS)
+	prev.resize(CELLS)
+	for i in CELLS:
+		dist[i] = unreached
+		prev[i] = -1
+	var src := _i(a)
+	var dst := _i(b)
+	dist[src] = 0
+	var deque: Array[int] = [src]
+	while not deque.is_empty():
+		var cur: int = deque.pop_front()
+		var cc := cell_of(cur)
+		for d in DIRS:
+			var n := cc + d
+			if not _inside(n, inset):
+				continue
+			var j := _i(n)
+			var w := 1 if tiles[j] == Tile.STONE else 0
+			if dist[cur] + w >= dist[j]:
+				continue
+			dist[j] = dist[cur] + w
+			prev[j] = cur
+			if w == 0:
+				deque.push_front(j)
+			else:
+				deque.push_back(j)
+	if dist[dst] >= unreached:
+		return out
+	var walk := dst
+	while walk != -1:
+		if tiles[walk] == Tile.STONE:
+			out.append(cell_of(walk))
+		walk = prev[walk]
+	out.reverse()
+	return out
+
+
+## THE CHEAPEST BREACH, without touching anything: the blackstone a jar-proof
+## wall between the two kings is actually made of. Empty when they can already
+## meet. The suite reads it to prove the repair carves the MINIMUM and not
+## merely *a* corridor.
+func stone_cut_between_kings() -> Array[Vector2i]:
+	if kings.size() < 2:
+		return []
+	return _cheapest_stone_path(kings[0].cell, kings[1].cell, 0)
+
+
+## Open the cheapest corridor between two cells. Returns what it carved.
+##
+## IT CARVES IN MIRROR PAIRS, and that is not tidiness. The lattice's half-turn
+## symmetry is the measured fairness fix this arena rests on (see setup: the
+## unmirrored lattice put one corner at 26/40). An unpaired carve would open the
+## arena and hand one corner a gate the other does not have — trading a sealed
+## tie-breaker for a rigged one. The antipode of a blackstone cell is a
+## blackstone cell while the lattice is symmetric, so the pair always exists,
+## and opening the far side can only help the near side's route.
+func _carve_between(a: Vector2i, b: Vector2i, inset: int) -> Array[Vector2i]:
+	var opened: Array[Vector2i] = []
+	var path := _cheapest_stone_path(a, b, inset)
+	for c in path:
+		for m in [c, Vector2i(SIZE - 1 - c.x, SIZE - 1 - c.y)]:
+			if not _inside(m, inset) or tiles[_i(m)] != Tile.STONE:
+				continue
+			tiles[_i(m)] = Tile.EMPTY
+			opened.append(m)
+	return opened
+
+
+## PROVE THE KINGS CAN MEET — now, and at every stage of the wyrm's closing
+## ring — and open the minimum blackstone where they cannot. Returns the cells
+## it had to carve.
+##
+## Two passes, and the second is the one that is easy to forget: joining the two
+## corners fixes the arena the duel STARTS in, and the ring then eats that
+## corridor and leaves the same comb wall standing in the middle four ranks with
+## twenty squares still in play. So every sub-board the ring will leave behind
+## is joined too, outward in, which on the shipped lattice costs four cells and
+## turns the seam into four symmetric gates.
+func ensure_kings_connected() -> Array[Vector2i]:
+	var opened: Array[Vector2i] = []
+	if kings.size() < 2:
+		return opened
+	# I. THE DUEL AS IT OPENS — a route from one king's corner to the other's.
+	# A bounded loop, never `while true`: a repair that cannot converge has to
+	# say so out loud, not hang a bracket decider inside setup().
+	for _pass in 4:
+		if kings_connected():
+			break
+		var cut := _carve_between(kings[0].cell, kings[1].cell, 0)
+		if cut.is_empty():
+			push_error("BlastGrid: the two kings cannot be joined at all")
+			break
+		opened.append_array(cut)
+	# II. THE DUEL AS THE RING CLOSES — every arena the wyrm is about to leave.
+	for inset in range(1, SIZE / 2):
+		for _pass in 8:
+			if region_is_connected(inset):
+				break
+			var seed_cell := Vector2i(-1, -1)
+			var stranded := Vector2i(-1, -1)
+			var seen := {}
+			for i in CELLS:
+				var c := cell_of(i)
+				if not _inside(c, inset) or tiles[i] == Tile.STONE:
+					continue
+				if seed_cell.x < 0:
+					seed_cell = c
+					seen = reachable_from(seed_cell, true, inset)
+				elif not seen.has(i):
+					stranded = c
+					break
+			if stranded.x < 0:
+				break
+			var cut := _carve_between(seed_cell, stranded, inset)
+			if cut.is_empty():
+				push_error("BlastGrid: ring inset %d cannot be joined" % inset)
+				break
+			opened.append_array(cut)
+	if not kings_connected() or not ring_keeps_one_arena():
+		push_error("BlastGrid: carved %d cells and the arena is still split"
+			% opened.size())
+	return opened
 
 
 ## The three tiles a king must have free at his corner: his own and two out.

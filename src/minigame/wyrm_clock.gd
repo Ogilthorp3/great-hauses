@@ -41,6 +41,9 @@ const DracarysScript := preload("res://assets/vfx/dracarys.gd")
 @export var rest_yaw := -PI * 0.30
 @export var rest_idle_speed := 0.30
 @export var rest_ember := 0.40
+## What the coals settle at after the transmutation's stir — brighter than
+## sleeping, nowhere near awake. See `stir()`.
+@export var stir_ember := 1.15
 @export var woke_ember := 2.60
 @export var rig_scale := 1.15
 @export var awake_scale := 1.35
@@ -70,6 +73,7 @@ var _fx: Node3D = null
 var _slumber = null
 var _awake := false
 var _waking := false
+var _stirred := false
 var _t := 0.0
 
 
@@ -87,6 +91,44 @@ func _ready() -> void:
 
 func is_awake() -> bool:
 	return _awake
+
+
+func has_stirred() -> bool:
+	return _stirred
+
+
+## THE STIR — a half-wake, for the transmutation at the top of the trial.
+##
+## The clock has to be a CHARACTER before it is a threat. `wake()` is what
+## happens when the wyrm's patience runs out, and after the pacing re-measure
+## that lands in roughly a quarter of duels — so in the other three quarters a
+## player would never learn that the thing asleep in the east aisle had anything
+## to do with him. The stir costs a second at the top of every trial: the head
+## comes off the stone, the throat coals kindle and stay kindled, and the beast
+## settles back down WATCHING. It leaves `_awake` false, so the real wake is
+## still the real wake.
+##
+## Driven on `_lerp`'s wall clock, like every other beat in this file, so the
+## transmutation's time_scale cannot stretch it.
+func stir() -> void:
+	if _awake or _waking or _stirred:
+		return
+	_stirred = true
+	var from_yaw := rotation.y
+	# It turns its head onto the board it is about to be the clock for.
+	var to_yaw := atan2(-position.x, -position.z)
+	await _lerp(1.05, func(u: float) -> void:
+		# One breath: up on the first half, down on the second. The embers do
+		# NOT come back down with it — a wyrm that lights up and goes dark again
+		# has been dreaming, and this one has noticed you.
+		var lift := sin(clampf(u, 0.0, 1.0) * PI)
+		_set_slumber(1.0 - 0.42 * lift)
+		rotation.y = lerp_angle(from_yaw, to_yaw, _ease(u))
+		if rig != null and is_instance_valid(rig):
+			rig.set_ember_energy(lerpf(rest_ember, stir_ember, _ease(u))))
+	if not is_instance_valid(self):
+		return
+	_set_slumber(1.0)
 
 
 func _process(delta: float) -> void:
@@ -110,12 +152,16 @@ func wake() -> void:
 		return
 	_waking = true
 	woke.emit()
-	# I. THE STIR — the head comes off the stone and the coals kindle.
+	# I. THE STIR — the head comes off the stone and the coals kindle. They
+	# kindle FROM WHERE THEY ARE: the transmutation's half-wake leaves them at
+	# `stir_ember`, and starting this ramp at `rest_ember` regardless would drop
+	# the throat dark on the exact frame the dragon finally stands up.
 	var home := position
+	var ember_from: float = stir_ember if _stirred else rest_ember
 	await _lerp(stir_wall, func(u: float) -> void:
 		_set_slumber(1.0 - _ease(u))
 		if rig != null and is_instance_valid(rig):
-			rig.set_ember_energy(lerpf(rest_ember, woke_ember, u)))
+			rig.set_ember_energy(lerpf(ember_from, woke_ember, u)))
 	if not is_instance_valid(self):
 		return
 	# II. THE RISE — `Land_Settle` played BACKWARDS is a beast standing up. The
