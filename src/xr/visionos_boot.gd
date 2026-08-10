@@ -55,7 +55,17 @@ extends RefCounted
 ## the return value or the logs said the origin was never made current or
 ## the near plane never verified.
 
-const INTERFACE_NAME := "visionOSXR"
+## Scar (2026-08-10 review, final gate): this was "visionOSXR". The engine
+## registers the interface as "visionOS" — visionos_xr_interface.mm:64,
+## `const String VisionOSXRInterface::name = "visionOS";` (the CLASS is
+## VisionOSXRInterface; the STRING it registers under is not). XRServer's
+## lookup is an exact string compare, so the old value failed step "find" on
+## every single real-device launch — the interface was always there, this
+## file was just asking for it by the wrong name. `grep -rn "visionOSXR"`
+## over the engine repo returns zero hits; it was never a real name anywhere
+## but here. See the "find" branch below for the diagnostic that now fires
+## if this ever drifts from the engine's registered name again.
+const INTERFACE_NAME := "visionOS"
 
 ## CompositorServices refuses a nearer plane; visionos_xr_interface.mm
 ## validates it and fails the frame. There is no workaround.
@@ -101,6 +111,18 @@ static func bring_up(deps: Dictionary) -> Dictionary:
 
 	var iface = deps["find_interface"].call(INTERFACE_NAME)
 	if iface == null:
+		# A wrong INTERFACE_NAME must not look like "no device" — it looks
+		# EXACTLY like a missing headset otherwise, which is what let the
+		# "visionOSXR" typo above survive every review until now. On an
+		# actual visionOS build, print every interface XRServer DOES know
+		# about, so the next name mismatch names itself instead of hiding
+		# behind this same generic message.
+		if OS.get_name() == "visionOS":
+			var available: Array[String] = []
+			for entry in XRServer.get_interfaces():
+				available.append(str((entry as Dictionary).get("name", "?")))
+			push_error("visionOS XR bring-up: no XRInterface named '%s'. XRServer.get_interfaces() reports: %s" \
+				% [INTERFACE_NAME, ", ".join(available) if not available.is_empty() else "<none>"])
 		return {"ok": false, "step": "find",
 			"error": "no XRInterface named '%s' — is this a visionOS build?" % INTERFACE_NAME}
 

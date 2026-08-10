@@ -76,11 +76,31 @@ environment = SubResource("Environment_gh")
 ; (src/xr/xr_session.gd) resolve these two nodes by GROUP, not by path — the
 ; group names below must match "xr_origin"/"xr_camera" exactly, or bring-up
 ; fails at step "origin"/"near" only on real hardware, never in this editor.
-; Neither node sets `current` here: XRSession.start() is the only place that
-; may flip either to true, and only after a real visionOS interface comes up
-; (find_interface("visionOSXR") returns null on Windows/macOS). Leaving both
-; false in the saved scene keeps CameraRig/Camera3D above as the one and only
-; current camera on desktop.
+;
+; Neither node sets `current` here in the saved file. XRCamera3D.current
+; is only ever flipped by XRSession.bind_rig() (phase 2, src/game.gd's
+; _ready(), gated on phase 1 — XRSession.start() in src/main.gd — already
+; having found the real XRInterface named "visionOS" via
+; XRServer.find_interface(), which returns null on Windows/macOS).
+;
+; CORRECTION (2026-08-10 review, final gate — IMPORTANT 1): the line that
+; used to be here claimed leaving XROrigin3D.current false in this file was
+; part of what keeps CameraRig/Camera3D the one current camera on desktop.
+; That is not true and was never testable that way: any XROrigin3D that
+; enters ANY live tree is forced `current = true` by the engine itself
+; (scene/3d/xr/xr_nodes.cpp NOTIFICATION_ENTER_TREE, "first entry always
+; becomes current") the instant this scene loads, on every platform,
+; regardless of bind_rig(). That is harmless and expected — XROrigin3D.
+; current governs which origin XR pose tracking applies against, not which
+; Camera3D the viewport renders through. The property that actually keeps
+; the desktop viewport on CameraRig/Camera3D is XRCamera3D.current staying
+; false (only bind_rig() ever sets it, and only past a real visionOS
+; interface), reinforced by CameraRig/Camera3D itself explicitly saving
+; `current = true` below and being declared first in this file — Godot
+; hands a Viewport's camera to the first Camera3D added when none is yet
+; current, so XRCamera3D would need BOTH of those to fail before it could
+; ever contend for it. tests/test_xr_rig.gd's BEHAVIOURAL call-site section
+; proves both halves on the real, tree-mounted scene.
 [node name="XROrigin3D" type="XROrigin3D" parent="." groups=["xr_origin"]]
 
 [node name="XRCamera3D" type="XRCamera3D" parent="XROrigin3D" groups=["xr_camera"]]

@@ -102,7 +102,7 @@ func _main() -> void:
 	var r1 := VB.bring_up(_deps1(null, log1))
 	_ok("absent interface -> not ok", r1.ok == false)
 	_ok("absent interface -> step 'find'", r1.step == "find")
-	_ok("absent interface -> no viewport touched", log1 == ["find:visionOSXR"])
+	_ok("absent interface -> no viewport touched", log1 == ["find:visionOS"])
 	_ok("absent interface -> error is a diagnostic string", r1.error != "")
 
 	# 2. The interface does NOT auto-initialize; a false return must abort.
@@ -127,7 +127,7 @@ func _main() -> void:
 	_ok("happy path ok", r3.ok == true)
 	_ok("happy path step 'done'", r3.step == "done")
 	_ok("order is find,use_xr — nothing rig-shaped in this phase",
-		log3 == ["find:visionOSXR", "use_xr:true"])
+		log3 == ["find:visionOS", "use_xr:true"])
 
 	# 4. Once-only: a second bring_up on an already-up interface must NOT
 	#    re-run initialize() — it only reports ok.
@@ -293,7 +293,11 @@ func _main() -> void:
 	root.remove_child(origin11)
 	cam11.free()
 	origin11.free()
-	VB._reset_for_test()   # leave no latch behind for whatever runs after this suite
+	VB._reset_for_test()
+	XS._reset_for_test()   # this case is the one that sets _immersive=true; both
+	                        # layers' latches must be clear for whatever runs next
+	                        # (2026-08-10 review, final gate — XS's own latch was
+	                        # not covered by VB._reset_for_test() and stayed stuck)
 
 	print("=== %s ===" % ("PASS" if failures == 0 else "%d FAILURES" % failures))
 	quit(1 if failures > 0 else 0)
