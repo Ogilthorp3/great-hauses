@@ -71,3 +71,17 @@ directional_shadow_max_distance = 30.0
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="."]
 environment = SubResource("Environment_gh")
+
+; visionOS XR rig (Task 5b). XRSession._set_origin_current/_set_near
+; (src/xr/xr_session.gd) resolve these two nodes by GROUP, not by path — the
+; group names below must match "xr_origin"/"xr_camera" exactly, or bring-up
+; fails at step "origin"/"near" only on real hardware, never in this editor.
+; Neither node sets `current` here: XRSession.start() is the only place that
+; may flip either to true, and only after a real visionOS interface comes up
+; (find_interface("visionOSXR") returns null on Windows/macOS). Leaving both
+; false in the saved scene keeps CameraRig/Camera3D above as the one and only
+; current camera on desktop.
+[node name="XROrigin3D" type="XROrigin3D" parent="." groups=["xr_origin"]]
+
+[node name="XRCamera3D" type="XRCamera3D" parent="XROrigin3D" groups=["xr_camera"]]
+near = 0.1

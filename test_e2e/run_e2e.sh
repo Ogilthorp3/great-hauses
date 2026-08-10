@@ -37,7 +37,15 @@
 #               XRSession._set_origin_current/_set_near helpers — not just
 #               VisionOSBoot's handling of a fake false return — proven to
 #               report false on this host's genuinely empty "xr_origin"/
-#               "xr_camera" groups)                               — Gate A
+#               "xr_camera" groups), and the XR RIG itself (9 — Task 5b:
+#               scenes/game.tscn's XROrigin3D/XRCamera3D resolve by the exact
+#               "xr_origin"/"xr_camera" groups xr_session.gd looks up, the
+#               camera's near plane already clears VisionOSBoot.MIN_NEAR,
+#               NEITHER new node is `current` in the saved scene, and the
+#               pre-existing CameraRig/Camera3D is untouched and still the
+#               one current camera — the assertion that catches the rig
+#               stealing the desktop viewport before test_e2e's screen-
+#               geometry scenarios would)                         — Gate A
 #   boot        windowed: select flows to game, 32 pieces, banners+HUD dyed
 #   orientation windowed: --debug-coords labeled overlay from the default
 #               player camera, saved as labeled.png — the permanent
@@ -358,6 +366,7 @@ for step in "${STEPS[@]}"; do
       run_suite minigame-suite res://tests/test_minigame.gd || SUITE_RC=1
       run_suite trial-wiring-suite res://tests/test_trial_wiring.gd || SUITE_RC=1
       run_suite visionos-boot-suite res://tests/test_visionos_boot.gd || SUITE_RC=1
+      run_suite xr-rig-suite res://tests/test_xr_rig.gd || SUITE_RC=1
       ;;
     boot)      run_scenario boot || SUITE_RC=1 ;;
     orientation) run_scenario orientation "--debug-coords" || SUITE_RC=1 ;;
