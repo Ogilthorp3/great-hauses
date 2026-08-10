@@ -84,6 +84,7 @@ func _main() -> void:
 	await _test_victim_variety()
 	await _test_tower_victim_still_crumbles()
 	await _test_bolt_leaves_nothing_behind()
+	await _test_ranged_ranks_hold_their_square()
 	check("final: time_scale untouched", true, is_equal_approx(Engine.time_scale, 1.0))
 	check("final: all six styles fired", 6, kills_seen.size())
 	check("final: no test silently aborted (checks >= %d)" % MIN_EXPECTED_CHECKS,
@@ -119,6 +120,86 @@ func _lights_under(n: Node) -> int:
 
 
 ## Tests ##
+
+
+## THE RANGED RANKS KILL AT A DISTANCE (owner, 2026-08-09). Chess walks a
+## capturing piece onto its victim; the queen and the bishop must not, or the
+## archer draws at arm's length and the mage casts by touch. The whole
+## mechanism is PieceView.move_to declining ONE walk — the duel approach — so
+## this proves the rule it declines on, both halves, and then the behaviour.
+##
+## The rule: a legal destination is always a square CENTRE; the approach mark
+## `target - dir * stand_off` for a unit dir and any stand-off strictly inside
+## a tile never is. Checked over all 64 squares and all eight directions,
+## because if that ever stops being true the queen silently starts walking
+## into her kills again and nothing else in the suite would notice.
+const RANGED_TYPES: Array[int] = [T_BISHOP, T_QUEEN]
+const MELEE_TYPES: Array[int] = [T_PAWN, T_ROOK, T_KNIGHT, T_KING]
+
+
+func _test_ranged_ranks_hold_their_square() -> void:
+	var PV: GDScript = load("res://src/board/piece_view.gd")
+	for t in 6:
+		check("ranged: type %s" % TYPE_NAMES[t], t in RANGED_TYPES, PV.rank_is_ranged(t))
+	# The square test, over the real board and the real approach mark.
+	var tile: float = BoardView.TILE_SIZE
+	var dirs: Array[Vector3] = []
+	for dx in [-1.0, 0.0, 1.0]:
+		for dz in [-1.0, 0.0, 1.0]:
+			if not (is_zero_approx(dx) and is_zero_approx(dz)):
+				dirs.append(Vector3(dx, 0.0, dz).normalized())
+	var centres_ok := true
+	var marks_ok := true
+	for fx in 8:
+		for fz in 8:
+			var centre := Vector3((float(fx) - 3.5) * tile, 0.22, (float(fz) - 3.5) * tile)
+			if not PV._is_board_square(centre):
+				centres_ok = false
+			for d: Vector3 in dirs:
+				for stand_off in [0.34, 0.55, 0.62, 0.9]:
+					if PV._is_board_square(centre - d * float(stand_off)):
+						marks_ok = false
+	check("ranged: every one of the 64 square centres IS a square", true, centres_ok)
+	check("ranged: no approach mark ever is (8 dirs x 4 stand-offs x 64)", true, marks_ok)
+
+	# THE BEHAVIOUR. A queen asked to walk to an approach mark holds her square
+	# and turns; asked to walk to a real square she goes. A pawn does both.
+	var home := Vector3(-0.5, 0.22, -3.5)
+	var square := Vector3(-0.5, 0.22, 0.5)
+	var mark := square - Vector3(0.0, 0.0, 1.0) * 0.55
+	for t in [T_QUEEN, T_BISHOP, T_PAWN, T_KING]:
+		var pv := _spawn(t, FROST, "winterfang")
+		pv.position = home
+		await pv.move_to(mark, 0.05)
+		var held: bool = pv.position.distance_to(home) < 0.01
+		check("ranged: %s %s the duel approach" % [TYPE_NAMES[t],
+				"HOLDS" if t in RANGED_TYPES else "walks"],
+				t in RANGED_TYPES, held)
+		# …and the walk that TAKES the square always happens, for every rank.
+		await pv.move_to(square, 0.05)
+		check("ranged: %s still advances onto the square" % TYPE_NAMES[t], true,
+				pv.position.distance_to(square) < 0.01)
+		pv.free()
+		await process_frame
+
+	# THE SHOT SCALES. A ranged rank gives ground only when it is parked inside
+	# its own shot; across a real board it does not move at all.
+	var probe := _spawn(T_QUEEN, FROST, "winterfang")
+	var mark_v := _spawn(T_PAWN, EMBER, "goldclaw")
+	root.add_child(mark_v) if mark_v.get_parent() == null else null
+	probe.position = Vector3(-0.5, 0.22, -3.5)
+	mark_v.position = Vector3(-0.5, 0.22, 0.5)
+	check("ranged: a four-square shot gives NO ground (%.2f)"
+			% probe._ranged_give_ground(mark_v), 0.0,
+			snappedf(probe._ranged_give_ground(mark_v), 0.01))
+	mark_v.position = probe.position + Vector3(0.0, 0.0, 0.55)
+	check("ranged: parked at arm's length it opens the range", true,
+			probe._ranged_give_ground(mark_v) > 0.5)
+	check("ranged: …but never more than RANGED_GIVE_MAX", true,
+			probe._ranged_give_ground(mark_v) <= float(PV.RANGED_GIVE_MAX) + 0.001)
+	probe.free()
+	mark_v.free()
+	await process_frame
 
 
 ## THE GATE, per type and per variant: the signature fires, the victim dies

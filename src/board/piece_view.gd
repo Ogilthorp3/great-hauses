@@ -128,6 +128,65 @@ const KILL_STYLES := {
 ## Approach/timing/follow-through variants per style — see each _kill_* func.
 const KILL_VARIANTS := 3
 
+## ── THE RANGED RANKS DO NOT WALK INTO THEIR OWN KILL (owner, 2026-08-09) ───
+##
+## "The Queen should kill with her arrow at a distance and the bishop too with
+## his magic staff."
+##
+## Chess moves a capturing piece ONTO its victim's square, and the presentation
+## followed the rule: game.gd walks every attacker to `victim - dir * 0.55`,
+## THEN plays the duel there. For four ranks that is the whole point — a stab, a
+## charge, a grind and an execution all happen at arm's length. For the two that
+## kill at range it is backwards, and it is why the queen never read as an
+## archer no matter how well the bow was drawn: she closed to half a square
+## before nocking. An archer who walks up to you is not an archer; a mage who
+## comes close enough to touch you is not casting.
+##
+## The order these two now play, and the engine is not involved in any of it:
+##   1. the attacker HOLDS its own square and turns to face across the board,
+##   2. it looses / casts, and the shaft or the bolt crosses the REAL distance
+##      between the two squares — four squares look like four squares, and the
+##      flight scales with them (_loose_arrow, _kill_bolt),
+##   3. the victim dies where he stands,
+##   4. and only then does the attacker walk in and take the square.
+##
+## Step 4 is not new code: it is game.gd's own `move_to(target)` after the duel,
+## which was always there. All that changed is that step 1's APPROACH walk no
+## longer happens for these two — see `move_to`. Board state, move application,
+## FEN and the wire are untouched: this is presentation ORDER, decided from the
+## piece's own rank, so both machines in a head-to-head animate it identically
+## from the same broadcast move.
+const RANGED_STYLES: Array[String] = [KILL_ARROW, KILL_BOLT]
+
+## Nothing loosed or cast may leave the frame with less than this much air in
+## it. With the approach suppressed a real capture is at least one square away
+## and this never fires; it is the floor for the two cases that would otherwise
+## still be point-blank — a capture on the very next square, and any caller that
+## stands the duellists up by hand (the e2e kills bench does exactly that).
+const RANGED_MIN_GAP := 1.65
+## …and the most ground a ranged rank will ever give to reach that floor.
+const RANGED_GIVE_MAX := 1.15
+
+
+## True for the ranks that kill at range (queen · bishop). Static so the
+## director and the suites can ask about a TYPE without standing one up.
+static func rank_is_ranged(pt: int) -> bool:
+	return str(KILL_STYLES.get(pt, KILL_STAB)) in RANGED_STYLES
+
+
+## Is `p` the centre of a board square? BoardView lays its tiles on a
+## TILE_SIZE grid whose centres sit at half-tile offsets, so every legal
+## destination satisfies this and the duel's approach mark — `target - dir *
+## STAND_OFF` for a unit `dir` and a stand-off strictly inside one tile — can
+## never satisfy it. That is the whole test: a `move_to` that is NOT to a
+## square is the duel approach, whoever asked for it and whatever stand-off
+## they used. tests/test_kill_styles.gd proves both halves over all 64 squares
+## and all eight directions.
+static func _is_board_square(p: Vector3) -> bool:
+	var half := BoardView.TILE_SIZE * 0.5
+	return is_zero_approx(fposmod(p.x + half, BoardView.TILE_SIZE)) \
+		and is_zero_approx(fposmod(p.z + half, BoardView.TILE_SIZE))
+
 ## TWO FIGHTERS MUST READ AS TWO FIGURES — the closest a kill may bring two
 ## bodies, in world units, centre to centre.
 ##
@@ -430,6 +489,15 @@ func move_to(world_pos: Vector3, walk_time: float = 0.4) -> void:
 		move_finished.emit()
 		return
 	var dir := world_pos - start
+	# THE ARCHER HOLDS HER GROUND (see RANGED_STYLES). A ranged rank asked to
+	# walk to a point that is not a square is being walked into its own kill —
+	# it turns to face the fight instead, and stays where it is. The walk that
+	# takes the square still happens: it is the caller's NEXT move_to, after the
+	# victim is down, and it is to a real square so it runs normally.
+	if rank_is_ranged(piece_type) and not _is_board_square(world_pos):
+		await _face(Vector3(dir.x, 0.0, dir.z))
+		move_finished.emit()
+		return
 	await _face(Vector3(dir.x, 0.0, dir.z))
 	if piece_type != Type.KNIGHT and _anim != null:
 		_anim.play(ANIM_WALK, 0.2)
@@ -710,36 +778,52 @@ func _mount_yaw(model_deg: float, rider_deg: float, sec: float) -> void:
 func _kill_bolt(victim: PieceView) -> void:
 	var dir := _flat_dir_to(victim)
 	var home := position
-	var stand := home - dir * (0.34 if kill_variant == 2 else 0.55)
+	# HE CASTS FROM WHERE HE STANDS (see RANGED_STYLES). The old fixed
+	# half-step back existed only because the caller had already marched him
+	# onto his victim; it now fires only when something really has parked him
+	# inside his own spell.
+	var give := _ranged_give_ground(victim) * (0.62 if kill_variant == 2 else 1.0)
+	var stand := home - dir * give
 	var give_ground := create_tween()
-	give_ground.tween_property(self, "position", stand, 0.24) \
+	give_ground.tween_property(self, "position", stand, 0.24 if give > 0.01 else 0.02) \
 		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-	_prepare_bolt()   # build the kit NOW, under the raise — not on the ignition frame
+	# THE BOLT MUST CROSS THE BOARD IT IS FIRED ACROSS. The kit bakes `reach`
+	# into its shaders at build time, so the range is measured HERE, before the
+	# staff comes up, from the gap the shot actually has to cover.
+	_prepare_bolt(_flat_gap_to(victim) - give)
 	if _anim != null:
 		_anim.play(ANIM_THROW, 0.05)   # the staff comes up
 		_anim.speed_scale = 1.15
 	await give_ground.finished
 	await _beat(0.2)
 	var chest := victim.global_position + Vector3.UP * _chest_height(victim)
+	# …AND IT MUST BE HELD LONG ENOUGH TO CROSS IT. The kit's `reach` is how far
+	# the torrent gets; the DURATION is how long it is on screen, and a bolt
+	# thrown across four squares in the same 0.42 s a one-square bolt takes
+	# arrives as a flash rather than as a shot. Same law as the arrow's flight
+	# (_loose_arrow), same shape: proportional, floored at the old value so a
+	# point-blank cast is unchanged, and capped so the hall is never just lit.
+	var span := clampf(_flat_gap_to(victim) / RANGED_MIN_GAP, 1.0, 2.2)
 	match kill_variant:
 		1:
-			_fire_bolt(chest, 0.24)
+			_fire_bolt(chest, 0.24 * span)
 			await _beat_wall(0.34)
-			_fire_bolt(chest, 0.3)
+			_fire_bolt(chest, 0.3 * span)
 		2:
 			var high := chest + Vector3.UP * 1.0
-			_fire_bolt(high, 0.5)
-			await _sweep_bolt(high, chest, 0.22)
+			_fire_bolt(high, 0.5 * span)
+			await _sweep_bolt(high, chest, 0.22 * span)
 		_:
-			_fire_bolt(chest, 0.42)
-	await _beat_wall(0.16)
+			_fire_bolt(chest, 0.42 * span)
+	await _beat_wall(0.16 * span)
 	await victim.die(DEATH_BURN)
 	_stop_bolt()
 	_settle_attacker()
-	var ret := create_tween()
-	ret.tween_property(self, "position", home, 0.26) \
-		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-	await ret.finished
+	if give > 0.01:
+		var ret := create_tween()
+		ret.tween_property(self, "position", home, 0.26) \
+			.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+		await ret.finished
 
 
 ## ROOK — THE GRIND, and THE CRUSH IS ON SCREEN NOW. A watchtower has no arms:
@@ -835,8 +919,10 @@ func _kill_arrow(victim: PieceView) -> void:
 	var dir := _flat_dir_to(victim)
 	var home := position
 	var draw := _bow_draw(victim)   # limbs up, arrow on the string
+	var give := _ranged_give_ground(victim)
 	var open_range := create_tween()
-	open_range.tween_property(self, "position", home - dir * 0.62, 0.26) \
+	open_range.tween_property(self, "position", home - dir * give,
+		0.26 if give > 0.01 else 0.02) \
 		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 	if _anim != null:
 		_anim.play(ANIM_THROW, 0.05)   # draw and loose
@@ -859,10 +945,11 @@ func _kill_arrow(victim: PieceView) -> void:
 	await _beat(0.12)   # the shaft is IN him, and read, before he goes
 	await victim.die(DEATH_ARROW)
 	_settle_attacker()
-	var close_range := create_tween()
-	close_range.tween_property(self, "position", home, 0.24) \
-		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-	await close_range.finished
+	if give > 0.01:
+		var close_range := create_tween()
+		close_range.tween_property(self, "position", home, 0.24) \
+			.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+		await close_range.finished
 	draw["live"] = false   # …and only now does the bow go back to her side
 
 
@@ -922,6 +1009,21 @@ func _flat_dir_to(victim: Node3D) -> Vector3:
 	var d := victim.position - position
 	d.y = 0.0
 	return d.normalized() if d.length() > 0.001 else Vector3.FORWARD
+
+
+## Flat board distance to the victim — the length of the shot, in squares.
+func _flat_gap_to(victim: Node3D) -> float:
+	var d := victim.position - position
+	d.y = 0.0
+	return d.length()
+
+
+## How far back a ranged rank steps before it shoots: ZERO whenever the shot
+## already has RANGED_MIN_GAP of air in it, which — with the approach walk
+## suppressed — is every real capture beyond the adjacent square. She holds her
+## square; she does not retreat from a fight she is winning at range.
+func _ranged_give_ground(victim: Node3D) -> float:
+	return clampf(RANGED_MIN_GAP - _flat_gap_to(victim), 0.0, RANGED_GIVE_MAX)
 
 
 ## NOTE `_flat_gap_to` is GONE. Its only caller was the charge's old
@@ -1594,7 +1696,14 @@ func _loose_arrow(victim: PieceView, arc: float, offset: Vector3 = Vector3.ZERO)
 	# The aim is LIVE: `last` is only the memory of it, for the frame after he
 	# is freed.
 	var last := {"t": _arrow_aim(victim, offset)}
-	var flight := clampf(from.distance_to(last["t"]) * 0.14, 0.12, 0.26)
+	# FOUR SQUARES MUST TAKE LONGER THAN ONE. The old ceiling was 0.26 s, which
+	# a shot of 1.9 squares already hit — so with the approach walk gone and the
+	# queen loosing across the board, every distance would have arrived in the
+	# same quarter second and the flight would have read as a teleport. The
+	# ceiling is the SHOT's, not the tween's: a full-board shaft spends ~0.5 s,
+	# and because this tween is scaled it spends four times that in wall clock
+	# under the duel's slow-mo, which is the beat the whole cinematic is for.
+	var flight := clampf(from.distance_to(last["t"]) * 0.105, 0.12, 0.50)
 	var fly := create_tween()
 	var travel := func(u: float) -> void:
 		if not is_instance_valid(shaft):
@@ -1877,12 +1986,18 @@ func _fletch(shaft: MeshInstance3D) -> void:
 const DracarysScript := preload("res://assets/vfx/dracarys.gd")
 
 
-func _prepare_bolt() -> void:
+## `gap` is the distance the bolt has to travel (see _kill_bolt). The kit bakes
+## `reach` into shaders and particle materials in its own _ready(), so it can
+## only be set BEFORE add_child — which is why the range is an argument rather
+## than something the caller nudges later. Floored at the old 1.6 so a
+## point-blank cast looks exactly as it always did, and capped well inside the
+## hall: a bolt is a staff's shot, never the wyrm's breath.
+func _prepare_bolt(gap: float = 1.6) -> void:
 	if _bolt != null and is_instance_valid(_bolt):
 		return
 	var fx: Node3D = DracarysScript.new()
 	fx.name = "StaffBolt"
-	fx.reach = 1.6                   # a staff bolt, not a wyrm's breath
+	fx.reach = clampf(gap * 1.12, 1.6, 8.5)
 	fx.torrent_spread = 6.0
 	# 0.30, not the kit's 1.0 and not the wyrm's 0.40. This is a ONE-METRE shot
 	# fired between two figures 0.8 m tall in a dark hall: at 0.34 the first

@@ -224,10 +224,17 @@ func _test_every_kill_has_a_frame() -> void:
 		if frame == null:
 			continue
 		if (frame as Array).size() > 4:
-			# It slides the EYE along the duel line, so it is measured in metres
-			# from the attacker and must stay inside the action it is framing.
-			check("frame: type %d squares the lens near the fight" % t, true,
-					absf(float(frame[4])) <= 1.0)
+			# It slides the EYE along the duel line as a FRACTION of it (0 at
+			# the attacker, 1 at the victim) — metres would not survive a ranged
+			# shot whose length is not known until the move is made.
+			check("frame: type %d squares the lens on the line" % t, true,
+					float(frame[4]) >= 0.0 and float(frame[4]) <= 1.0)
+			# Only the two RANGED ranks opt in — BISHOP 3 and QUEEN 4. A melee
+			# rank that grew one would be filmed off the centre of a fight that
+			# is symmetric about it. (PieceView.rank_is_ranged owns the roster;
+			# naming the indices here keeps this suite free of the autoload.)
+			check("frame: type %d is a ranged rank (bishop/queen)" % t, true,
+					t == 3 or t == 4)
 		check("frame: type %d fov is sane" % t, true,
 				float(frame[2]) > 25.0 and float(frame[2]) < 75.0)
 		# Metres, not multipliers — see DUEL_FRAMES: a standoff under a metre

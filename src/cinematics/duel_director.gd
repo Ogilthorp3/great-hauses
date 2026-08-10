@@ -755,28 +755,31 @@ func _process(_delta: float) -> void:
 ## (`kills-*-in-frame`), so a drift here fails a gate rather than shipping a
 ## cropped hero frame.
 ##
-## ...AND WHERE THE PERPENDICULAR IS ERECTED IS ITS OWN DECISION (the queen's
-## kill, 2026-08-09). The camera stands off to the SIDE of the duel line, but
-## "the side" is only a direction — it does not say which point on the line the
-## lens is square to. Erecting it at the centre of the action box, which is what
-## every rank did, is right for a kill that happens BETWEEN two men: the pair sit
-## symmetrically about it. It is wrong for the one kill that happens ENTIRELY AT
-## THE ATTACKER — the archer never closes, so the box's centre sits between her
-## and a man a metre and a half away, and the lens ends up looking at her from
-## the quarter instead of square-on. The critic's word for the result was that
-## she is "shot from BEHIND, so the camera never sees the draw", and the draw in
-## profile is the only thing that says archer.
+## ...AND THE TWO RANGED RANKS ARE FILMED ACROSS A GAP THAT VARIES (owner,
+## 2026-08-09: "The Queen should kill with her arrow at a distance and the
+## bishop too with his magic staff"). Since PieceView's ranged ranks stopped
+## walking into their own kill, a queen's duel can be half a square long or
+## seven, and the SAME entry has to compose both. Two things carry that:
 ##
-## The 5th field is that point, in metres along the duel line measured FROM THE
-## ATTACKER (negative = behind her). Absent = the box centre, i.e. exactly what
-## the other five ranks already did, so this is not a change for them. The queen
-## takes -0.31: she gives 0.62 m of ground while she draws (PieceView._kill_arrow),
-## so half of that is the middle of her own travel, and the lens is square to the
-## bowstring for the whole shot instead of at either end of it. The LOOK-AT point
-## is untouched — the frame is still composed on the action box, so the framing
-## gate still has both fighters.
+##   * `_duel_fit` already sizes the shot rather than assuming it — the action
+##     box now genuinely spans the flight — so the standoff floors below are
+##     floors and nothing more, and the clamp ceiling had to come up with them
+##     (BACK_MAX): a four-square shot wants the lens ~7.5 m out, and the old
+##     7.5 ceiling was a crop waiting to happen on anything longer;
+##   * the 5th field, which says WHERE ON THE DUEL LINE the lens is erected
+##     square, as a FRACTION of it (0 = at the attacker, 1 = at the victim).
+##     A fraction and not metres, because metres do not survive a shot whose
+##     length is not known until the move is made.
+##
+## Absent means the action box's own centre — exactly what the other five ranks
+## always did, so this is not a change for them. The two ranged ranks take 0.40:
+## biased toward the shooter, so the drawn bow (or the raised staff) is the
+## nearer, larger end of the picture and reads in profile, while the far end
+## still holds the man it is aimed at. The LOOK-AT point is untouched — the
+## frame is still composed on the action box, so the framing gate still has
+## both fighters.
 ##   [standoff floor (m), camera height (m), fov (deg), reach along the line (m),
-##    (optional) where the lens is square to the line, m from the attacker]
+##    (optional) where the lens is square to the line, as a fraction a->v]
 const DUEL_FRAMES := {
 	0: [1.9, 0.42, 40.0, 0.80],   # PAWN — a lunge: guard behind, blade ahead
 	1: [3.2, 1.35, 48.0, 0.85],   # ROOK — high and back, looking DOWN at the
@@ -784,11 +787,16 @@ const DUEL_FRAMES := {
 	                              #        tower is a grey wall filling the frame
 	2: [3.1, 0.80, 50.0, 2.30],   # KNIGHT — the gather, the run AND the man it
 	                              #        throws all have to be in one picture
-	3: [2.7, 0.60, 46.0, 0.90],   # BISHOP — the gap the bolt crosses IS the shot
-	4: [2.6, 0.70, 44.0, 1.15, -0.31],  # QUEEN — square to the DRAW, not to the
-	                              #        midpoint: she kills from where she stands
+	3: [2.7, 0.75, 52.0, 1.00, 0.40],   # BISHOP — the gap the bolt crosses IS
+	                              #        the shot, and the gap is now the board's
+	4: [2.6, 0.80, 52.0, 1.15, 0.40],   # QUEEN — the draw at one end of the
+	                              #        flight, the man it kills at the other
 	5: [2.2, 0.55, 42.0, 0.75],   # KING — a hero angle under the raised blade
 }
+## How far back the fit may pull to contain a shot. Melee never comes near it
+## (they sit around 4 m); a ranged duel across the board does, and the hall is
+## 24 m across, so this stays inside the walls by design.
+const BACK_MAX := 11.0
 ## Slack left around the fitted action sphere: nothing may sit ON the edge of
 ## the picture, and the handheld noise and the impact shake both move the lens
 ## after the frame is composed.
@@ -822,12 +830,13 @@ func _cam_enter_duel(attacker: Node3D, victim: Node3D, seq: int) -> void:
 		maxf(_fighter_top(attacker), _fighter_top(victim)), fov)
 	var focus: Vector3 = fit["focus"]
 	var back := clampf(maxf(float(fit["back"]), float(frame[0]) * randf_range(0.97, 1.06)),
-		1.8, 7.5)
-	# The point on the duel line the lens is SQUARE to (DUEL_FRAMES' 5th field).
-	# The look-at stays `focus` either way — only the eye slides along the line.
+		1.8, BACK_MAX)
+	# The point on the duel line the lens is SQUARE to (DUEL_FRAMES' 5th field,
+	# a FRACTION of the shot so it scales with it). The look-at stays `focus`
+	# either way — only the eye slides along the line.
 	var square_to := focus
 	if frame.size() > 4:
-		var p := a + axis * float(frame[4])
+		var p := a + axis * (clampf(float(frame[4]), 0.0, 1.0) * a.distance_to(v))
 		square_to = Vector3(p.x, focus.y, p.z)
 	var p1 := square_to + side * back + Vector3.UP * lift
 	var p2 := square_to - side * back + Vector3.UP * lift
