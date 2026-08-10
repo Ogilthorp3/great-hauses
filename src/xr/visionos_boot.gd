@@ -7,6 +7,24 @@ extends RefCounted
 ## the world origin. So bring-up is a state machine that reports WHICH step
 ## failed, and its side effects are Callables so the headless suite on macOS
 ## (where no visionOS interface exists) can drive it with fakes.
+##
+## set_origin_current and set_near are NOT fire-and-forget: each returns a
+## bool, and bring_up() treats a false return as a bring-up failure at step
+## "origin" / "near" respectively — a build with no node in the "xr_origin" /
+## "xr_camera" group must be REPORTED, not silently accepted as "done". The
+## once-only guard latches ONLY on a genuinely complete bring-up, so a
+## failure at "origin" or "near" leaves the NEXT bring_up() free to run for
+## real again (e.g. once the rig actually exists in the scene), rather than
+## permanently latching a session that never truly came up.
+##
+## Scar (2026-08-10 review, 6th silent-green on this plan): before this,
+## set_origin_current/set_near were `-> void`. On a real device with no
+## "xr_origin"/"xr_camera" group tagged (the rig was deferred to a later
+## plan), find/initialize/use_xr all succeeded, the two setters silently
+## no-op'd on a null node, bring_up() still latched `_up = true` and returned
+## {ok: true, step: "done"}, and is_immersive() reported true — nothing in
+## the return value or the logs said the origin was never made current or
+## the near plane never verified.
 
 const INTERFACE_NAME := "visionOSXR"
 
@@ -54,7 +72,14 @@ static func bring_up(deps: Dictionary) -> Dictionary:
 			"error": "XRInterface.initialize() returned false"}
 
 	deps["set_use_xr"].call(true)
-	deps["set_origin_current"].call(true)
-	deps["set_near"].call(MIN_NEAR)
+
+	if not deps["set_origin_current"].call(true):
+		return {"ok": false, "step": "origin",
+			"error": "no node made current in the 'xr_origin' group — is an XROrigin3D tagged?"}
+
+	if not deps["set_near"].call(MIN_NEAR):
+		return {"ok": false, "step": "near",
+			"error": "near plane not verified >= %.2f m — is an XRCamera3D tagged 'xr_camera'?" % MIN_NEAR}
+
 	_up = true
 	return {"ok": true, "step": "done", "error": ""}

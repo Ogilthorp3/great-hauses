@@ -21,16 +21,26 @@ static func is_immersive() -> bool:
 	return _immersive
 
 
-static func _set_origin_current(tree: SceneTree, v: bool) -> void:
+## Returns false (and warns) when the rig isn't in the scene — VisionOSBoot
+## treats that as a bring-up failure at step "origin", not a silent no-op.
+static func _set_origin_current(tree: SceneTree, v: bool) -> bool:
 	var origin := tree.get_first_node_in_group("xr_origin")
-	if origin != null:
-		origin.current = v
+	if origin == null:
+		push_warning("XRSession: no node in the 'xr_origin' group — XR origin was never made current")
+		return false
+	origin.current = v
+	return true
 
 
-static func _set_near(tree: SceneTree, v: float) -> void:
+## Returns false (and warns) when the rig isn't in the scene — VisionOSBoot
+## treats that as a bring-up failure at step "near", not a silent no-op.
+static func _set_near(tree: SceneTree, v: float) -> bool:
 	var cam := tree.get_first_node_in_group("xr_camera")
-	if cam != null:
-		cam.near = maxf(cam.near, v)
+	if cam == null:
+		push_warning("XRSession: no node in the 'xr_camera' group — near plane was never verified")
+		return false
+	cam.near = maxf(cam.near, v)
+	return true
 
 
 static func start(tree: SceneTree) -> Dictionary:
@@ -38,8 +48,8 @@ static func start(tree: SceneTree) -> Dictionary:
 	var result: Dictionary = VisionOSBootScript.bring_up({
 		"find_interface": func(n: String): return XRServer.find_interface(n),
 		"set_use_xr": func(v: bool) -> void: viewport.use_xr = v,
-		"set_origin_current": func(v: bool) -> void: _set_origin_current(tree, v),
-		"set_near": func(v: float) -> void: _set_near(tree, v),
+		"set_origin_current": func(v: bool) -> bool: return _set_origin_current(tree, v),
+		"set_near": func(v: float) -> bool: return _set_near(tree, v),
 	})
 	_immersive = result.ok
 	return result
