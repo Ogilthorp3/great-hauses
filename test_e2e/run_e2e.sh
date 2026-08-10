@@ -21,6 +21,9 @@
 #               arena, the two difficulty enums agreeing 1:1, the survivors
 #               harvested from a real stalemate, the contract shape on every
 #               refusal, and the three music tiers being one 60.000 s loop)
+#               and the visionOS XR BRING-UP state machine (11 — the exact
+#               find/initialize/use_xr/origin/near order, every silent-
+#               failure step reported by name, idempotent on a second call)
 #                                                                  — Gate A
 #   boot        windowed: select flows to game, 32 pieces, banners+HUD dyed
 #   orientation windowed: --debug-coords labeled overlay from the default
@@ -341,6 +344,7 @@ for step in "${STEPS[@]}"; do
       run_suite promotion-suite res://tests/test_promotion.gd || SUITE_RC=1
       run_suite minigame-suite res://tests/test_minigame.gd || SUITE_RC=1
       run_suite trial-wiring-suite res://tests/test_trial_wiring.gd || SUITE_RC=1
+      run_suite visionos-boot-suite res://tests/test_visionos_boot.gd || SUITE_RC=1
       ;;
     boot)      run_scenario boot || SUITE_RC=1 ;;
     orientation) run_scenario orientation "--debug-coords" || SUITE_RC=1 ;;
