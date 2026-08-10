@@ -4,6 +4,7 @@
 #   ./tools/build/build.sh                 # windows + macos + verify
 #   ./tools/build/build.sh windows         # just the .exe
 #   ./tools/build/build.sh macos
+#   ./tools/build/build.sh visionos        # immersive .xcodeproj (custom editor, gated)
 #   ./tools/build/build.sh degrade         # platform-degradation suite only
 #   ./tools/build/build.sh freshness       # is the shipped .exe older than src?
 #   ./tools/build/build.sh freshness --artifact <path>
@@ -15,10 +16,15 @@
 # until `file` and the pck index agree with what we intended to ship.
 #
 # Env overrides:  GODOT=/path/to/Godot   OUT=/path/to/dist
+#                 GODOT_VISIONOS_EDITOR=/path/to/custom/godot (visionOS only)
 
 set -uo pipefail
 
 GODOT="${GODOT:-/Applications/Godot.app/Contents/MacOS/Godot}"
+# visionOS is built by a DIFFERENT, custom-built editor — not the stock
+# 4.7.1.stable app above. See docs/BUILDING.md's visionOS section for the
+# pinned repo/commit/branch this is built from.
+GODOT_VISIONOS_EDITOR="${GODOT_VISIONOS_EDITOR:-/Users/bert/Projects/godot-visionos/bin/godot.macos.editor.arm64}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJ="$(cd "$SCRIPT_DIR/../.." && pwd)"
 OUT="${OUT:-$(cd "$PROJ/.." && pwd)/great-hauses-dist}"
@@ -26,8 +32,10 @@ TEMPLATE_ROOT="$HOME/Library/Application Support/Godot/export_templates"
 
 WIN_PRESET="Windows Desktop"
 MAC_PRESET="macOS"
+VISIONOS_PRESET="visionOS"
 WIN_OUT_NAME="GreatHauses.exe"
 MAC_OUT_NAME="GreatHauses.app"
+VISIONOS_OUT_NAME="GreatHauses.xcodeproj"
 
 RC=0
 note() { printf '[build] %s\n' "$*"; }
@@ -293,6 +301,47 @@ build_macos() {
   return 0
 }
 
+build_visionos() {
+  local target="$OUT/visionos/$VISIONOS_OUT_NAME"
+  note "asserting visionOS export preset is immersive"
+  # THE GATE (2026-08-10): application/app_role defaults to 0 (Window) and
+  # immersion_style defaults to 1 (Mixed) — a preset that never sets both
+  # explicitly ships a flat panel floating in the room, not an immersive
+  # app, and nothing downstream of Godot's own export step would catch it.
+  # This MUST run — and MUST be checked — before any editor process touches
+  # the project, and a non-zero result MUST call fail() (not a bare
+  # `return`) so it sets the script's global RC; a `return 1` alone would
+  # abort this function but leave RC=0, and the whole build would report
+  # green on a silently-flattened export.
+  python3 "$SCRIPT_DIR/assert_visionos_preset.py" "$PROJ/export_presets.cfg" || {
+    fail "visionOS export preset failed the immersive-preset assertion (see FAIL above)"
+    return 1
+  }
+  if [ ! -x "$GODOT_VISIONOS_EDITOR" ]; then
+    fail "visionOS editor not executable at $GODOT_VISIONOS_EDITOR"
+    return 1
+  fi
+  mkdir -p "$OUT/visionos"
+  rm -rf "$target"
+
+  note "importing assets headless (visionOS editor: $GODOT_VISIONOS_EDITOR)"
+  "$GODOT_VISIONOS_EDITOR" --headless --path "$PROJ" --import \
+      >"$OUT/visionos/import.log" 2>&1
+  local rc=$?
+  if [ $rc -ne 0 ]; then fail "visionOS --import exited $rc (see $OUT/visionos/import.log)"; return 1; fi
+
+  note "exporting '$VISIONOS_PRESET' -> $target"
+  "$GODOT_VISIONOS_EDITOR" --headless --path "$PROJ" \
+      --export-release "$VISIONOS_PRESET" "$target" \
+      >"$OUT/visionos/export.log" 2>&1
+  rc=$?
+  if [ $rc -ne 0 ]; then fail "visionos export exited $rc (see $OUT/visionos/export.log)"; return 1; fi
+  if [ ! -d "$target" ]; then fail "visionOS export produced no xcodeproj at $target"; return 1; fi
+
+  note "visionOS xcodeproj exported: $target"
+  return 0
+}
+
 run_degrade() {
   note "platform-degradation suite (missing stockfish + unreachable oracle)"
   local h="$OUT/.degradehome"; rm -rf "$h"; mkdir -p "$h"
@@ -312,8 +361,8 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --out) OUT="$2"; shift 2 ;;
     --artifact) FRESH_ARTIFACT="$2"; shift 2 ;;
-    windows|macos|degrade|freshness|all) TARGETS+=("$1"); shift ;;
-    -h|--help) sed -n '2,18p' "$0"; exit 0 ;;
+    windows|macos|visionos|degrade|freshness|all) TARGETS+=("$1"); shift ;;
+    -h|--help) sed -n '2,19p' "$0"; exit 0 ;;
     *) echo "unknown argument '$1'"; exit 2 ;;
   esac
 done
@@ -333,6 +382,7 @@ for t in "${TARGETS[@]}"; do
   case "$t" in
     windows) guard_concurrent_e2e && do_import && build_windows ;;
     macos)   guard_concurrent_e2e && do_import && build_macos ;;
+    visionos) guard_concurrent_e2e && build_visionos ;;
     degrade) run_degrade ;;
     freshness) verify_freshness "${FRESH_ARTIFACT:-$OUT/windows/$WIN_OUT_NAME}" ;;
     all)     guard_concurrent_e2e && do_import && { build_windows; build_macos; run_degrade; } ;;
