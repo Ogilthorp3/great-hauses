@@ -21,9 +21,13 @@
 #               arena, the two difficulty enums agreeing 1:1, the survivors
 #               harvested from a real stalemate, the contract shape on every
 #               refusal, and the three music tiers being one 60.000 s loop)
-#               and the visionOS XR BRING-UP state machine (11 — the exact
+#               and the visionOS XR BRING-UP state machine (15 — the exact
 #               find/initialize/use_xr/origin/near order, every silent-
-#               failure step reported by name, idempotent on a second call)
+#               failure step reported by name with a non-empty diagnostic,
+#               a second bring_up on an already-up session genuinely
+#               skipping initialize()/the setters rather than merely
+#               reporting ok, and the once-only guard's own test reset
+#               proven to work so no later case runs against a stuck guard)
 #                                                                  — Gate A
 #   boot        windowed: select flows to game, 32 pieces, banners+HUD dyed
 #   orientation windowed: --debug-coords labeled overlay from the default
