@@ -1,0 +1,23 @@
+diff --git a/platform/visionos/app_visionos.swift b/platform/visionos/app_visionos.swift
+index 1a0eb831ee..c6c66bce0e 100644
+--- a/platform/visionos/app_visionos.swift
++++ b/platform/visionos/app_visionos.swift
+@@ -192,15 +192,15 @@ struct CompositorServicesImmersiveSpace: Scene {
+ 					for event in spatialEventCollection {
+ 						guard event.kind == .indirectPinch else {
+ 							Logger.godot.log("Ignoring non-IndirectPinch event: \(String(describing: event))")
+-							return
++							continue
+ 						}
+ 						guard let selectionRay = event.selectionRay else {
+ 							Logger.godot.log("Ignoring event without selectionRay: \(String(describing: event))")
+-							return
++							continue
+ 						}
+ 						guard let inputDevicePose = event.inputDevicePose else {
+ 							Logger.godot.log("Ignoring event without inputDevicePose: \(String(describing: event))")
+-							return
++							continue
+ 						}
+ 						let isActive = (event.phase == .active)
+ 						let hasBeenCancelled = (event.phase == .cancelled)
