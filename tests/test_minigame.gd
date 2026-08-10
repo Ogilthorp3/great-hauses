@@ -33,6 +33,14 @@ extends SceneTree
 #                            INTO fire; the verdict is never "nobody"
 #   - AI vs AI TERMINATES    every tier pairing, several seeds, always ends
 #                            with a named winner inside a bounded tick budget
+#   - THE TIER LADDER        the difficulty menu's promise, as a rate rather
+#                            than a vibe: each tier beats the one below it by a
+#                            real margin, and each can threaten a king who is
+#                            STANDING STILL at a rate inside a stated band —
+#                            Casual included, because an opponent that can never
+#                            reach you is not an easy setting. Two negative
+#                            controls flatten a tier onto another's parameters
+#                            and require these thresholds to go red
 #
 # Run: /Applications/Godot.app/Contents/MacOS/Godot --headless --path <project> \
 #        -s res://tests/test_minigame.gd
@@ -48,9 +56,31 @@ var checks_run := 0
 ## A hard-erroring test function aborts silently at the error and its caller
 ## carries on as if it passed — the floor turns a silent abort into a loud
 ## failure (same guard test_dragon.gd and test_cinematics.gd use).
-const MIN_EXPECTED_CHECKS := 124
+const MIN_EXPECTED_CHECKS := 137
 
 const DT := 1.0 / 60.0
+
+## THE ARENA EVERY AI TEST IN THIS FILE PLAYS, and it is trial_by_fire.gd's
+## quick-match config verbatim (`fast` there: 22 s / 0.30 / 1.9) rather than
+## numbers invented for the suite.
+##
+## IT USED TO BE 20 s / 0.28 / FUSE 1.6, AND THE FUSE WAS THE PROBLEM. Nothing
+## ships a 1.6 s fuse — the game's two configs are 1.9 and 2.35 — and a king's
+## chance of surviving HIS OWN JAR is dominated by exactly that number. Measured
+## on the fixture's 1.6 the Casual tier landed 8 % of idle-king hunts and looked
+## like an opponent that could not exist; on the shipped 1.9 the same brain
+## lands 35 %. The wyrm, waking a clock-tick earlier into a shorter game, also
+## decided half of every duel and averaged the top two tiers down to a coin flip.
+##
+## A tier ladder is a property of the ARENA as much as of the brains, so a suite
+## that grades the brains on an arena nobody plays is grading its own fixture.
+## Same family of mistake as the crate generator that skipped odd/odd cells
+## (see _crate_field); a different disguise, found the same way — by measuring
+## the same brains on more than one board.
+const ARENA := {"sudden_death_at": 22.0, "ring_interval": 0.30, "fuse_sec": 1.9}
+## The wyrm's spiral is the termination proof: sudden death, plus all 64 cells at
+## `ring_interval`, plus slack. Anything past this is a hang, not a long game.
+const TICK_CAP := int((22.0 + 64.0 * 0.30 + 6.0) * 60.0)
 
 
 func _initialize() -> void:
@@ -65,6 +95,7 @@ func _initialize() -> void:
 	_test_ring()
 	_test_death()
 	_test_ai_matches()
+	_test_tier_ladder()
 	_print_summary()
 
 
@@ -562,26 +593,33 @@ func _test_duel_outcome() -> void:
 ## brain; the wyrm's patience is set past any horizon so it cannot do the
 ## killing. `reseal` fills the four carved gates back in — the arena as it was
 ## before this fix, and the only control that proves the fix is what changed it.
-func _hunt(seed_value: int, tier: int, reseal: bool) -> Dictionary:
+func _hunt(seed_value: int, tier: int, reseal: bool, idle_side := 0,
+		over := {}) -> Dictionary:
 	var g: Grid = Grid.new()
-	g.setup({"seed": seed_value, "crates": _crate_field(seed_value),
-		"sudden_death_at": 100000.0, "fuse_sec": 1.6})
+	var cfg := ARENA.duplicate()
+	cfg["seed"] = seed_value
+	cfg["crates"] = _crate_field(seed_value)
+	cfg["sudden_death_at"] = 100000.0   # the wyrm may not do the killing
+	g.setup(cfg)
 	if reseal:
 		for c in g.carved:
 			g.tiles[g.index(c)] = Grid.Tile.STONE
+	var hunter := 1 - idle_side
 	var brain := AI.new(tier, seed_value + 2)
+	brain.overrides = over
 	var ticks := 0
 	while ticks < 9000 and not g.is_over():
-		var act: Dictionary = brain.decide(g, 1, DT)
+		var act: Dictionary = brain.decide(g, hunter, DT)
 		if act.has("keg"):
-			g.place_keg(1)
+			g.place_keg(hunter)
 		elif act.has("step"):
-			g.request_step(1, act["step"])
+			g.request_step(hunter, act["step"])
 		g.tick(DT)
 		g.drain_events()
 		ticks += 1
-	var idle = g.kings[0]
-	return {"killed": (not idle.alive) and idle.killed_by == 1, "t": g.time}
+	var idle = g.kings[idle_side]
+	return {"killed": (not idle.alive) and idle.killed_by == hunter, "t": g.time,
+		"hunter_died": not g.kings[hunter].alive}
 
 
 # ── the wyrm's ring ─────────────────────────────────────────────────────────
@@ -767,6 +805,7 @@ func _test_ai_matches() -> void:
 	var kegs_seen := 0
 	var crates_seen := 0
 	var split_ticks := 0
+	var split_open := 0
 	var rival_kills := 0
 	var all_ended := true
 	var all_named := true
@@ -780,6 +819,7 @@ func _test_ai_matches() -> void:
 				kegs_seen += int(out["kegs"])
 				crates_seen += int(out["crates"])
 				split_ticks += int(out["split_ticks"])
+				split_open = maxi(split_open, int(out["split_open"]))
 				rival_kills += int(out["rival_kills"])
 				if not out["over"]:
 					all_ended = false
@@ -804,10 +844,20 @@ func _test_ai_matches() -> void:
 
 	# THE INVARIANT UNDER THE CLOSING RING, MEASURED IN A REAL MATCH rather than
 	# argued from the layout: 27 full duels, every tick, while both kings live.
-	# The only ticks that may see a split are the last two squares on the board,
-	# where the wyrm has already taken 62 of 64 and there is no duel left to
-	# have — measured at open<=2 across every match here.
-	check("ai: the ring never walls two living kings apart", 0, split_ticks)
+	# The only ticks that may see a split are the last squares on the board,
+	# where the wyrm has taken almost all of 64 and there is no duel left to have.
+	#
+	# THE `open_cells() > 2` IN THAT WATCH IS FOLKLORE, so the label now carries
+	# the number it is really claiming. `split_open` is the largest arena a split
+	# was ever seen in, and with the shipped tiers it is ZERO — the two kings
+	# never lose each other at all. It is not zero for every brain: run the same
+	# 27 matches on the pre-fix tiers and it reads 8, because those kings survive
+	# deeper into the spiral, where the wyrm (which eats ANTIPODAL PAIRS) has
+	# left a handful of disconnected singletons. That is the ring's endgame and
+	# not a topology bug, but it is worth SEEING rather than hiding inside a
+	# constant — a threshold nobody can read is a threshold nobody can defend.
+	check("ai: the ring never walls two living kings apart (worst %d open)"
+		% split_open, 0, split_ticks)
 	# AND THE POINT OF THE WHOLE FIX. With the comb wall standing this number
 	# was ZERO across every pairing and seed — a king could not be killed by the
 	# other man's fire because he could not be reached. Measured at 2 with the
@@ -853,24 +903,21 @@ func _test_ai_matches() -> void:
 ## matches this file plays (the ladder diagnostic included) is a second and a
 ## half of nothing, and the property is the same in all of them.
 func _run_ai_match(tier_a: int, tier_b: int, seed_value: int,
-		watch := false) -> Dictionary:
+		watch := false, over_a := {}, over_b := {}) -> Dictionary:
 	var g: Grid = Grid.new()
-	g.setup({
-		"seed": seed_value,
-		"crates": _crate_field(seed_value),
-		"sudden_death_at": 20.0,
-		"ring_interval": 0.28,
-		"fuse_sec": 1.6,
-	})
+	var cfg := ARENA.duplicate()
+	cfg["seed"] = seed_value
+	cfg["crates"] = _crate_field(seed_value)
+	g.setup(cfg)
 	var brains := [AI.new(tier_a, seed_value + 1), AI.new(tier_b, seed_value + 2)]
+	brains[0].overrides = over_a
+	brains[1].overrides = over_b
 	var kegs := 0
 	var crates := 0
 	var ticks := 0
 	var split_ticks := 0
-	# Budget: sudden death (20 s) + the whole 64-cell spiral (64 x 0.28 = 18 s)
-	# + slack, in 60 Hz ticks. Anything past this is a hang, not a long game.
-	var cap := int((20.0 + 64.0 * 0.28 + 6.0) / DT)
-	while ticks < cap and not g.is_over():
+	var split_open := 0
+	while ticks < TICK_CAP and not g.is_over():
 		# ALTERNATE WHO ACTS FIRST. Both kings are polled inside one tick, so a
 		# fixed order hands side 0 a half-tick head start on every race for the
 		# same tile — worth 9-3 in a Casual mirror before this line existed, on
@@ -890,8 +937,18 @@ func _run_ai_match(tier_a: int, tier_b: int, seed_value: int,
 			elif e["kind"] == "crate_burned":
 				crates += 1
 		if watch and g.kings[0].alive and g.kings[1].alive \
-				and g.open_cells() > 2 and not g.kings_connected():
-			split_ticks += 1
+				and not g.kings_connected():
+			# HOW MUCH ARENA WAS LEFT when the two kings lost each other. The
+			# assertion is on THIS, not on a raw tick count: the wyrm's spiral
+			# eats antipodal PAIRS, so a half-eaten ring genuinely leaves the
+			# survivors in two arcs for a moment, and near the very end the last
+			# few squares are singletons with no duel left to have. A magic
+			# "open_cells() > 2" hid that distinction inside a constant; the
+			# number this records is the one that says whether a split ever
+			# happened while there was still a game.
+			split_open = maxi(split_open, g.open_cells())
+			if g.open_cells() > 2:
+				split_ticks += 1
 	var rival_kills := 0
 	for k in g.kings:
 		# `killed_by` is the side whose jar did it, which INCLUDES your own —
@@ -900,7 +957,200 @@ func _run_ai_match(tier_a: int, tier_b: int, seed_value: int,
 			rival_kills += 1
 	return {"over": g.is_over(), "winner": g.winner(), "ticks": ticks,
 		"kegs": kegs, "crates": crates, "split_ticks": split_ticks,
-		"rival_kills": rival_kills}
+		"split_open": split_open, "rival_kills": rival_kills}
+
+
+# ── THE TIER LADDER — the promise the difficulty menu makes ─────────────────
+#
+# THE DEFECT THIS GATE EXISTS TO CATCH, because it shipped once. Master beat
+# Seasoned 7/12 and 6/12 — a coin flip — while beating Casual 98 %, and Casual
+# could not kill an idle king in twenty tries. The ladder's ENDS were right and
+# its MIDDLE was missing: three menu entries, two of them the same opponent and
+# one of them not an opponent at all.
+#
+# NEITHER FAULT IS VISIBLE IN A SINGLE MATCH, which is why nothing above caught
+# them for a whole feature. A duel is noisy enough that any pair of tiers looks
+# different in one run and identical in the next; only a rate over enough seeds
+# is a fact. So this gate is a measurement with thresholds, and it costs a few
+# seconds of duels — that is the price of the property being asserted.
+#
+# THREE PROPERTIES, AND EACH ONE FAILED ONCE:
+#   MONOTONE WITH A MARGIN   every tier beats the one below it by a real margin,
+#                            not by a nose. This is what "Master ≈ Seasoned"
+#                            broke.
+#   THE HUNT BAND            against a king who STANDS STILL and never presses a
+#                            key, with the wyrm off, each tier lands a kill at a
+#                            rate inside a stated band. The band has a FLOOR
+#                            because a tier that cannot ever threaten a beginner
+#                            is not a difficulty setting, and a CEILING because a
+#                            Casual tier that hunts like a Master is not one
+#                            either.
+#   THE ARENA IS FAIR        run first, because this file has been fooled by its
+#                            own fixture twice (see _crate_field, and ARENA). If
+#                            random walkers do not split the two corners, no
+#                            number below means anything and the fault is the
+#                            board.
+#
+# AND IT IS GATED IN BOTH DIRECTIONS. Two negative controls FLATTEN a tier onto
+# another's parameters and require the very thresholds above to go red — because
+# a ladder check that cannot fail is exactly the check that let this ship.
+
+## 20 seeds x 2 orientations = 40 duels per cell, which carries about seven
+## points of standard error. The thresholds below are set well clear of that, so
+## a red is a regression and not a bad afternoon.
+const LADDER_SEEDS := 20
+const HUNT_SEEDS := 20
+## HELD-OUT SEEDS. The tiers were tuned by sweeping dev_ladder_probe.gd, whose
+## duels run on 1000 + i*131. Grading the result on the same seeds it was fitted
+## to would be grading the fit, so the gate plays different boards.
+const LADDER_BASE := 7001
+const LADDER_STRIDE := 97
+const HUNT_BASE := 3301
+const HUNT_STRIDE := 53
+
+## The margins, as wins out of LADDER_SEEDS * 2. Measured on these held-out
+## seeds at Master 31/40 over Seasoned, Seasoned 36/40 over Casual and Master
+## 38/40 over Casual; asserted six to eight duels below each, which is a couple
+## of standard errors of headroom — a red here is a regression, not a bad
+## afternoon.
+const MARGIN_ADJACENT := 25    # 62 % — a step up you can feel, not a nose
+const MARGIN_ENDS := 30        # 75 % — two rungs apart is not a contest
+
+## The hunt band, as kills out of HUNT_SEEDS * 2. Measured Casual 14/40,
+## Seasoned 37/40, Master 40/40. Casual's FLOOR is the property the reported
+## defect violated outright — it scored ZERO, an opponent a motionless player was
+## never in danger from; its CEILING is what stops a future "fix" from raising
+## the easy tier into a second Master, which is the other way to flatten a
+## ladder and the one that looks like progress while you do it.
+## CALIBRATED AGAINST THE DEFECT, NOT AGAINST ZERO. Every number in this gate is
+## exactly reproducible — fixed seeds, fixed dt, no threads — so a threshold is
+## not a flake budget, it is a statement of how far the tiers may drift before
+## someone must come and look. The floor is set at 8 because the PRE-FIX Casual
+## scores 6/40 on this arena: a bar at "more than nothing" would have let the
+## reported defect through, which is the whole failure mode being closed.
+const HUNT_CASUAL_FLOOR := 8
+const HUNT_CASUAL_CEIL := 28
+const HUNT_SEASONED_FLOOR := 22
+const HUNT_MASTER_FLOOR := 26
+
+
+## Wins of tier `a` over tier `b` out of LADDER_SEEDS * 2, BOTH ORIENTATIONS.
+## Playing both corners is what keeps a spawn advantage out of a tier number.
+func _ladder_cell(a: int, b: int, over_a := {}, over_b := {}) -> int:
+	var wins := 0
+	for i in LADDER_SEEDS:
+		var sv := LADDER_BASE + i * LADDER_STRIDE
+		if _run_ai_match(a, b, sv, false, over_a, over_b)["winner"] == 0:
+			wins += 1
+		if _run_ai_match(b, a, sv, false, over_b, over_a)["winner"] == 1:
+			wins += 1
+	return wins
+
+
+## Idle-king kills out of HUNT_SEEDS * 2, both corners.
+func _hunt_rate(tier: int, over := {}) -> int:
+	var killed := 0
+	for i in HUNT_SEEDS:
+		for idle_side in 2:
+			if _hunt(HUNT_BASE + i * HUNT_STRIDE, tier, false, idle_side,
+					over)["killed"]:
+				killed += 1
+	return killed
+
+
+## THE CONTROL THAT RUNS FIRST. Two brainless walkers — a legal step at random,
+## a jar now and then, no danger map — on the arenas the duels above are played
+## on. A board that is unfair to DICE is a board problem, and this project has
+## twice built a tier conclusion on top of a broken arena.
+func _walker_corner_wins() -> int:
+	var wins := 0
+	for i in LADDER_SEEDS:
+		var sv := LADDER_BASE + i * LADDER_STRIDE
+		var g: Grid = Grid.new()
+		var cfg := ARENA.duplicate()
+		cfg["seed"] = sv
+		cfg["crates"] = _crate_field(sv)
+		g.setup(cfg)
+		var r := RandomNumberGenerator.new()
+		r.seed = sv * 7919 + 13
+		var cool := [0.0, 0.0]
+		var ticks := 0
+		while ticks < TICK_CAP and not g.is_over():
+			for n in 2:
+				var side: int = n if ticks % 2 == 0 else 1 - n
+				cool[side] -= DT
+				if cool[side] > 0.0 or not g.kings[side].alive \
+						or g.kings[side].busy > 0.0:
+					continue
+				cool[side] = 0.25
+				if r.randf() < 0.15:
+					g.place_keg(side)
+				else:
+					g.request_step(side, Grid.DIRS[r.randi() % 4])
+			g.tick(DT)
+			g.drain_events()
+			ticks += 1
+		if g.winner() == 0:
+			wins += 1
+	return wins
+
+
+func _test_tier_ladder() -> void:
+	# ── 0. IS THE BOARD FAIR? Ask the dice before you accuse a brain. ───────
+	var dice := _walker_corner_wins()
+	check("ladder: CONTROL — random walkers split the two corners (%d/%d)"
+		% [dice, LADDER_SEEDS], true,
+		dice * 4 >= LADDER_SEEDS and dice * 4 <= LADDER_SEEDS * 3)
+
+	# ── 1. MONOTONE, WITH A MARGIN ─────────────────────────────────────────
+	var ms := _ladder_cell(AI.Difficulty.MASTER, AI.Difficulty.SEASONED)
+	var sc := _ladder_cell(AI.Difficulty.SEASONED, AI.Difficulty.CASUAL)
+	var mc := _ladder_cell(AI.Difficulty.MASTER, AI.Difficulty.CASUAL)
+	var n := LADDER_SEEDS * 2
+	check("ladder: Master beats Seasoned clearly (%d/%d)" % [ms, n], true,
+		ms >= MARGIN_ADJACENT)
+	check("ladder: Seasoned beats Casual clearly (%d/%d)" % [sc, n], true,
+		sc >= MARGIN_ADJACENT)
+	check("ladder: and two rungs apart is no contest (%d/%d)" % [mc, n], true,
+		mc >= MARGIN_ENDS)
+	# The ends must stay the ends: skipping a rung cannot be EASIER than taking
+	# one. A ladder that is monotone pairwise and inverted end-to-end is not a
+	# ladder, and no single margin above would notice.
+	check("ladder: Master-over-Casual outranks both single steps", true,
+		mc >= ms and mc >= sc)
+
+	# ── 2. CAN EACH TIER THREATEN A PLAYER WHO IS NOT PLAYING? ──────────────
+	var hc := _hunt_rate(AI.Difficulty.CASUAL)
+	var hs := _hunt_rate(AI.Difficulty.SEASONED)
+	var hm := _hunt_rate(AI.Difficulty.MASTER)
+	var hn := HUNT_SEEDS * 2
+	check("hunt: Casual can kill an idle king SOMETIMES (%d/%d)" % [hc, hn],
+		true, hc >= HUNT_CASUAL_FLOOR)
+	check("hunt: …and not often — it is still the easy tier (%d/%d)" % [hc, hn],
+		true, hc <= HUNT_CASUAL_CEIL)
+	check("hunt: Seasoned hunts you down (%d/%d)" % [hs, hn], true,
+		hs >= HUNT_SEASONED_FLOOR)
+	check("hunt: Master almost always gets there (%d/%d)" % [hm, hn], true,
+		hm >= HUNT_MASTER_FLOOR)
+	check("hunt: and the three rates are ordered", true, hc < hs and hs <= hm)
+
+	# ── 3. NEGATIVE CONTROL A — FLATTEN THE TOP TWO ────────────────────────
+	# Master's brain given Seasoned's parameters, playing Seasoned. This is the
+	# EXACT defect that shipped — two menu entries, one opponent — so the margin
+	# above must call it out. If it does not, the gate is decoration.
+	var flat_master := AI.TIERS[AI.Difficulty.SEASONED].duplicate()
+	var flat := _ladder_cell(AI.Difficulty.MASTER, AI.Difficulty.SEASONED,
+		flat_master, {})
+	check("ladder: NEGATIVE — Master tuned like Seasoned scores %d/%d, under "
+		% [flat, n] + "the margin", true, flat < MARGIN_ADJACENT)
+
+	# ── 4. NEGATIVE CONTROL B — FLATTEN THE BOTTOM TWO ─────────────────────
+	# The band's ceiling, proved to be load-bearing: a Casual tier given the
+	# Master's parameters hunts like the Master, and "Casual" then means nothing.
+	var flat_casual := AI.TIERS[AI.Difficulty.MASTER].duplicate()
+	var loud := _hunt_rate(AI.Difficulty.CASUAL, flat_casual)
+	check("hunt: NEGATIVE — Casual tuned like Master hunts %d/%d, over the "
+		% [loud, hn] + "ceiling", true, loud > HUNT_CASUAL_CEIL)
 
 
 ## A reproducible field of survivors — roughly what a drawn game leaves behind,

@@ -14,17 +14,23 @@ extends RefCounted
 ## mapping is one table.
 ##
 ##   CASUAL   slow to react (0.42 s), sees 1.15 s into the future, and BLUNDERS
-##            — a 30 % chance per decision that it simply ignores the danger
-##            map, plus no retreat check before it sets a keg down. It kills
-##            itself regularly, which is what "casual" has to mean in a game
-##            where the enemy is mostly your own bad planning.
+##            — a 20 % chance per decision that it simply ignores the danger
+##            map, plus no retreat check before it sets a keg down. It still
+##            kills itself in most duels, which is what "casual" has to mean in
+##            a game where the enemy is mostly your own bad planning; but it
+##            has a short nerve (four tiles) and WILL come at a player who
+##            stands still, because an opponent that can never reach you is a
+##            difficulty setting in name only.
 ##   SEASONED 0.20 s, 2.10 s of lookahead, checks it has somewhere to run
 ##            BEFORE lighting a fuse, and comes hunting once you are within
 ##            five tiles.
-##   MASTER   0.09 s, 3.20 s of lookahead, never blunders, always hunting. It
+##   MASTER   0.06 s, 3.20 s of lookahead, never blunders, always hunting. It
 ##            reads the chain (danger_map's two relaxation passes), it will not
-##            walk into the far end of a fuse that has not started, and it
-##            corners you against the wyrm's closing ring.
+##            walk into the far end of a fuse that has not started, and when the
+##            arena closes it does not retreat a tile at a time — it searches
+##            the whole board for the square that burns LAST and goes and stands
+##            there. That last skill is `refuge`, and it is what actually
+##            separates this tier from the one below it.
 ##
 ## THE DECISION LADDER, in priority order — the ordering IS the personality:
 ##   1. AM I IN THE FIRE'S PATH?  Breadth-first to the nearest tile that is
@@ -48,18 +54,84 @@ enum Difficulty { CASUAL, SEASONED, MASTER }
 
 const TIERS := {
 	Difficulty.CASUAL: {
-		"label": "Casual", "think": 0.42, "horizon": 1.15, "blunder": 0.30,
-		"hunt": 0, "retreat": false, "wander": 0.35,
+		"label": "Casual", "think": 0.42, "horizon": 1.15, "blunder": 0.20,
+		"hunt": 4, "retreat": false, "wander": 0.35, "refuge": 1,
 	},
 	Difficulty.SEASONED: {
 		"label": "Seasoned", "think": 0.20, "horizon": 2.10, "blunder": 0.08,
-		"hunt": 5, "retreat": true, "wander": 0.12,
+		"hunt": 5, "retreat": true, "wander": 0.12, "refuge": 1,
 	},
 	Difficulty.MASTER: {
-		"label": "Master", "think": 0.09, "horizon": 3.20, "blunder": 0.0,
-		"hunt": 99, "retreat": true, "wander": 0.0,
+		"label": "Master", "think": 0.06, "horizon": 3.20, "blunder": 0.0,
+		"hunt": 99, "retreat": true, "wander": 0.0, "refuge": 8,
 	},
 }
+
+## WHERE THE LADDER WAS ACTUALLY BROKEN — TWO SEPARATE FAULTS, ONE AT EACH END,
+## and the diagnosis for both came out of src/minigame/dev_ladder_probe.gd.
+##
+## THE CONTROL FIRST, because this file has been burned once by skipping it. Two
+## RANDOM WALKERS on the same arenas: corner (0,0) took 48-52 % and the two sides
+## killed themselves 19-vs-21. The board is fair to dice, so what follows is a
+## brain problem and not another broken fixture.
+##
+## FAULT 1 — MASTER ≈ SEASONED (55 %, a coin flip) WHILE BEATING CASUAL 90 %.
+## The obvious reading is "the top two brains are the same brain", and it is
+## wrong. Split every duel by WHO DECIDED IT:
+##
+##     arena      duels the KINGS decided     duels the WYRM decided
+##     full        Master 82 %                 Master 56 %
+##     fast        Master 69 %                 Master 40 %
+##     fixture     Master 76 %                 Master 53 %
+##
+## Master out-fought Seasoned by 20-30 points and then played the closing ring
+## EXACTLY AS WELL AS IT DID — and on the short clocks the wyrm decides 50-59 %
+## of all duels, so the cell averaged down to 50 %. The tiers were never
+## separated at the thing that settles half the mode: SURVIVING A SHRINKING
+## ARENA. That is the second skill this game asks for and it had no tier axis at
+## all, because every tier ran the same one-tile hill climb when cornered.
+##
+## THE FIX IS `refuge` — how deep a king searches for the tile that burns LAST
+## once nothing is safe (see _refuge). Depth 1 is the old neighbours-only step;
+## depth 8 crosses the arena, which under a closing ring means walking to the
+## middle while the fire is still on the rim. Measured on the `fast` arena,
+## Master over Seasoned against refuge depth: 1 -> 52 %, 2 -> 65 %, 4 -> 70 %,
+## 8 -> 70 %, 16 -> 70 %. It is pure lookahead over the same public danger map —
+## nothing a player with good eyes could not do.
+##
+## THE FALSE LEAD, KEPT BECAUSE IT COST AN HOUR. The first idea was `ring_sense`:
+## the wyrm's spiral is scheduled minutes ahead, so let the good tiers multiply
+## their horizon once it wakes and leave early. It is worse, badly, and the
+## direction is the lesson — Master over Seasoned by ring_sense: 1.0 -> 52 %,
+## 1.5 -> 35 %, 2.0 -> 35 %, 3.0 -> 25 %, 6.0 -> 25 %. A king who sees the whole
+## board burning finds rule 1 (get out of the fire's path) true on EVERY tile of
+## every decision, so he never lays another jar, never takes another boon, and
+## spends the endgame running from a fire that has not started. Seeing further is
+## not the skill; knowing where to stand is. Reverted.
+##
+## FAULT 2 — CASUAL COULD NOT THREATEN A STANDING PLAYER AT ALL. Against an idle
+## king with the wyrm switched off it landed 3 kills in 40 attempts on the
+## fixture arena (the suite's own measurement was 0/20) — and it killed ITSELF in
+## 35 of those 40. That is not an easy opponent, it is no opponent: a player who
+## never presses a key is never in danger from it.
+##
+## Two causes, and the second one dominates:
+##   `hunt` 0 -> 4   with a nerve of zero it never walked toward the rival at
+##                   all, so it only ever reached him by accident.
+##   `blunder` 0.30 -> 0.20   the real one. Blundering is ignoring the danger map
+##                   for a decision, and at 0.30 the Casual king blew himself up
+##                   long before he arrived anywhere. Idle-king kills against
+##                   blunder: 0.30 -> 12 %, 0.20 -> 25 %, 0.12 -> 40 %, 0.05 ->
+##                   65 %. 0.20 is a floor, not a promotion — he still kills
+##                   himself in three duels out of four and still loses to
+##                   Seasoned by a mile. THE FLOOR WAS RAISED, THE CEILING WAS
+##                   NOT LOWERED: no tier above him was weakened to make the
+##                   ladder monotone.
+##
+## ALSO TRIED AND REVERTED: making `retreat` a probability (Casual checks for a
+## door half the time instead of never). Idle-king kills at retreat 0.0 / 0.5 /
+## 1.0 came out 30 % / 22 % / 30 % — noise on 40 duels. It reads like a fix and
+## measures like nothing, so `retreat` stays the bool it was.
 
 ## Margin between "I arrive" and "it burns". Below this a step is a coin flip
 ## on floating-point noise, and a king who takes those dies to rounding.
@@ -100,6 +172,15 @@ const BFS_CAP := 96
 var difficulty: int = Difficulty.SEASONED
 var rng := RandomNumberGenerator.new()
 
+## PER-INSTANCE TIER OVERRIDES — the sweep seam, and empty in the game.
+##
+## The tier table above is the shipping answer, and it got to be the shipping
+## answer by being measured against a few hundred alternatives. Doing that by
+## editing the constant means every sweep is a working-tree edit you can forget
+## to undo; this lets dev_ladder_probe.gd try a value without the file ever
+## changing. Nothing in src/ writes it.
+var overrides := {}
+
 var _cool := 0.0
 var _last_step := Vector2i.ZERO
 
@@ -112,7 +193,12 @@ func _init(tier: int = Difficulty.SEASONED, seed_value: int = 7) -> void:
 
 
 func tier() -> Dictionary:
-	return TIERS[difficulty]
+	if overrides.is_empty():
+		return TIERS[difficulty]
+	var t: Dictionary = TIERS[difficulty].duplicate()
+	for k in overrides:
+		t[k] = overrides[k]
+	return t
 
 
 func label() -> String:
@@ -144,7 +230,7 @@ func decide(grid, side: int, dt: float) -> Dictionary:
 			_somewhere_to_stand(grid, danger))
 		if not run.is_empty():
 			return _step(me, run[0])
-		var salvage := _least_bad_step(grid, me, danger)
+		var salvage := _refuge(grid, me, danger, int(t["refuge"]))
 		if salvage != Vector2i.ZERO:
 			return _step(me, me.cell + salvage)
 		return {}
@@ -313,20 +399,63 @@ func _has_retreat(grid, me, danger: Dictionary) -> bool:
 	return not run.is_empty()
 
 
-## No safe tile in reach: take the neighbour that burns LAST. Buys the seconds
-## a chain sometimes needs to open a door.
-func _least_bad_step(grid, me, danger: Dictionary) -> Vector2i:
-	var best := Vector2i.ZERO
-	var best_eta: float = float(danger.get(grid.index(me.cell), 0.0))
-	for d in Grid.DIRS:
-		var n: Vector2i = me.cell + d
-		if not grid.walkable(n) or grid.flame[grid.index(n)] > 0.0:
+## NOTHING IS SAFE ANY MORE: go to the tile that burns LAST, within `depth`
+## steps. Returns the first step of the way there, or ZERO to stand still.
+##
+## THE DEPTH IS THE TIER, and it is the difference between a king who takes the
+## nearest breath and one who reads the whole closing arena. At depth 1 this is
+## exactly the old neighbours-only hill climb — one tile of foresight, which is
+## the sloppy tiers' character and was every tier's behaviour until the ring was
+## measured. At depth 16 the search covers the arena, so under the wyrm's ring
+## (where every remaining tile has an eta and the etas grow inward) the deepest
+## pocket IS the middle: the Master king walks to the centre while the fire is
+## still on the rim, instead of retreating one tile at a time into the corner
+## the spiral is about to reach.
+##
+## Time-aware like every other search here: a tile you cannot get to before it
+## lights is not a refuge, it is a slower death.
+func _refuge(grid, me, danger: Dictionary, depth: int) -> Vector2i:
+	var step_cost: float = grid.step_sec / maxf(me.speed, 0.05)
+	var start: Vector2i = me.cell
+	var came := {}
+	var dist := {grid.index(start): 0}
+	var queue: Array[Vector2i] = [start]
+	var head := 0
+	var best := start
+	var best_eta: float = float(danger.get(grid.index(start), 0.0))
+	var best_depth := 0
+	while head < queue.size() and head < BFS_CAP:
+		var c: Vector2i = queue[head]
+		head += 1
+		var d: int = dist[grid.index(c)]
+		if d >= depth:
 			continue
-		var eta: float = float(danger.get(grid.index(n), 99.0))
-		if eta > best_eta:
-			best_eta = eta
-			best = d
-	return best
+		for dir in Grid.DIRS:
+			var n: Vector2i = c + dir
+			if not grid.walkable(n):
+				continue
+			var ni: int = grid.index(n)
+			if dist.has(ni):
+				continue
+			var arrive := float(d + 1) * step_cost
+			if grid.flame[ni] > 0.0 and grid.flame[ni] > arrive:
+				continue   # still burning when I would get there
+			var eta: float = float(danger.get(ni, 99.0))
+			if eta < arrive:
+				continue   # it is ash before I arrive — not a refuge
+			dist[ni] = d + 1
+			came[ni] = c
+			queue.append(n)
+			# The latest-burning tile wins; ties go to the nearer one, because
+			# every extra step is a step spent inside the fire he is fleeing.
+			if eta > best_eta or (is_equal_approx(eta, best_eta) and d + 1 < best_depth):
+				best_eta = eta
+				best = n
+				best_depth = d + 1
+	if best == start:
+		return Vector2i.ZERO
+	var path := _unwind(came, start, best)
+	return Vector2i.ZERO if path.is_empty() else (path[0] as Vector2i) - start
 
 
 func _safe_neighbours(grid, me, danger: Dictionary) -> Array[Vector2i]:
