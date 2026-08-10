@@ -5,6 +5,16 @@ extends SceneTree
 # The visionOS interface does not exist on macOS, so bring_up() takes its
 # side effects as Callables and this suite drives it with fakes.
 #
+# set_origin_current and set_near are NOT fire-and-forget: each Callable
+# returns a bool, and bring_up() treats false as a failure at step "origin" /
+# "near" — a build with no node in the "xr_origin" / "xr_camera" group must
+# be REPORTED, not silently accepted as "done" (2026-08-10 review: this was
+# exactly backwards — both setters were `-> void`, so a missing rig produced
+# {ok: true, step: "done"} and is_immersive() == true while doing nothing).
+# Cases 5 and 6 below prove those two failures are reported AND that the
+# once-only guard does not latch on them, so a later bring_up (once the rig
+# exists) still runs for real.
+#
 # bring_up() also latches a process-wide once-only guard after the first
 # success, so a second call short-circuits before find/initialize and before
 # the three setters (case 4). That guard is a static — it survives across
@@ -40,12 +50,17 @@ class FakeInterface extends RefCounted:
 		return init_result
 
 
-func _deps(iface, log: Array) -> Dictionary:
+## origin_ok / near_ok let a case simulate a missing "xr_origin" / "xr_camera"
+## group node without touching any real scene tree — set_origin_current and
+## set_near still log the call (so ordering/skip assertions keep working),
+## they just report failure via their return value, exactly like the real
+## XRSession helpers do when get_first_node_in_group() comes back null.
+func _deps(iface, log: Array, origin_ok := true, near_ok := true) -> Dictionary:
 	return {
 		"find_interface": func(n: String): log.append("find:" + n); return iface,
 		"set_use_xr": func(v: bool) -> void: log.append("use_xr:" + str(v)),
-		"set_origin_current": func(v: bool) -> void: log.append("origin:" + str(v)),
-		"set_near": func(v: float) -> void: log.append("near:" + str(v)),
+		"set_origin_current": func(v: bool) -> bool: log.append("origin:" + str(v)); return origin_ok,
+		"set_near": func(v: float) -> bool: log.append("near:" + str(v)); return near_ok,
 	}
 
 
@@ -102,17 +117,68 @@ func _main() -> void:
 	_ok("second bring_up still ok", r4.ok == true)
 	_ok("second bring_up did not re-run initialize()", not iface4.initialized)
 
-	# 5. On a non-visionOS host, is_immersive() must be false and start() must
+	# 5. set_origin_current returning false must abort at step 'origin' — a
+	#    build with no node in the 'xr_origin' group must be REPORTED, not
+	#    silently accepted as 'done' (2026-08-10 review: this was the defect —
+	#    the setter was void, the missing group was invisible, and bring_up()
+	#    still returned ok=true). set_near must never run once origin failed,
+	#    and — critically — the once-only guard must NOT latch on this
+	#    failure: a later bring_up (no reset in between) with a working
+	#    origin must run for real, proven by initialize() being called again.
+	VB._reset_for_test()
+	var iface5 := FakeInterface.new()
+	var log5: Array = []
+	var r5o := VB.bring_up(_deps(iface5, log5, false, true))
+	_ok("origin failure -> not ok", r5o.ok == false)
+	_ok("origin failure -> step 'origin'", r5o.step == "origin")
+	_ok("origin failure -> error is a diagnostic string", r5o.error != "")
+	_ok("origin failure -> near never set", not log5.has("near:0.1"))
+	iface5.initialized = false
+	var r5b := VB.bring_up(_deps(iface5, [], true, true))
+	_ok("origin failure did not latch the once-only guard -> next bring_up runs for real",
+		r5b.ok == true and iface5.initialized)
+
+	# 6. set_near returning false must abort at step 'near' — same
+	#    report-don't-latch guarantee as case 5, on the other silent setter.
+	VB._reset_for_test()
+	var iface6 := FakeInterface.new()
+	var log6: Array = []
+	var r6n := VB.bring_up(_deps(iface6, log6, true, false))
+	_ok("near failure -> not ok", r6n.ok == false)
+	_ok("near failure -> step 'near'", r6n.step == "near")
+	_ok("near failure -> error is a diagnostic string", r6n.error != "")
+	_ok("near failure -> origin WAS set before near ran", log6.has("origin:true"))
+	iface6.initialized = false
+	var r6b := VB.bring_up(_deps(iface6, [], true, true))
+	_ok("near failure did not latch the once-only guard -> next bring_up runs for real",
+		r6b.ok == true and iface6.initialized)
+
+	# 7. On a non-visionOS host, is_immersive() must be false and start() must
 	#    fail at 'find' — the macOS build must keep booting normally.
-	# Case 4 leaves the once-only guard 'up' (its second bring_up succeeded
-	# without re-running anything) — reset here too, or XS.start() below would
-	# short-circuit straight to {ok: true, step: "done"} and this case would
-	# prove nothing.
+	# Cases 5/6 leave the once-only guard 'up' (their recovery bring_up
+	# succeeded) — reset here too, or XS.start() below would short-circuit
+	# straight to {ok: true, step: "done"} and this case would prove nothing.
 	VB._reset_for_test()
 	const XS := preload("res://src/xr/xr_session.gd")
 	_ok("macOS host is not immersive", XS.is_immersive() == false)
-	var r5 := XS.start(self)
-	_ok("macOS start() fails at find", r5.ok == false and r5.step == "find")
+	var r7 := XS.start(self)
+	_ok("macOS start() fails at find", r7.ok == false and r7.step == "find")
+
+	# 8. The REAL XRSession helpers, not fakes. Cases 5/6 only prove that
+	#    VisionOSBoot.bring_up() honours a false return from its deps — they
+	#    never call XRSession._set_origin_current/_set_near themselves, and
+	#    on this host XRSession.start() always fails at 'find' before it
+	#    could ever reach them either. So without this case, reverting
+	#    _set_origin_current to silently `return true` on a null node would
+	#    slip past the whole suite undetected — which is exactly the
+	#    regression this round of review exists to close. This suite's own
+	#    tree has nothing in "xr_origin"/"xr_camera" (repo-wide grep: zero
+	#    hits — the rig is deferred to a later plan), so it doubles as a
+	#    faithful stand-in for "the group genuinely does not exist yet".
+	_ok("XRSession._set_origin_current returns false with no 'xr_origin' node",
+		XS._set_origin_current(self, true) == false)
+	_ok("XRSession._set_near returns false with no 'xr_camera' node",
+		XS._set_near(self, 0.1) == false)
 
 	print("=== %s ===" % ("PASS" if failures == 0 else "%d FAILURES" % failures))
 	quit(1 if failures > 0 else 0)

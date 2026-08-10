@@ -21,14 +21,23 @@
 #               arena, the two difficulty enums agreeing 1:1, the survivors
 #               harvested from a real stalemate, the contract shape on every
 #               refusal, and the three music tiers being one 60.000 s loop)
-#               and the visionOS XR BRING-UP state machine (15 — the exact
+#               and the visionOS XR BRING-UP state machine (29 — the exact
 #               find/initialize/use_xr/origin/near order, every silent-
 #               failure step reported by name with a non-empty diagnostic,
 #               a second bring_up on an already-up session genuinely
 #               skipping initialize()/the setters rather than merely
-#               reporting ok, and the once-only guard's own test reset
-#               proven to work so no later case runs against a stuck guard)
-#                                                                  — Gate A
+#               reporting ok, the once-only guard's own test reset proven
+#               to work so no later case runs against a stuck guard,
+#               set_origin_current/set_near FAILURE reported as step
+#               "origin"/"near" instead of silently latching ok=true on a
+#               missing rig (2026-08-10: the 6th silent-green this plan
+#               produced — bring-up reported success while doing nothing),
+#               that failure NOT latching the once-only guard so a later
+#               bring_up with a real rig still runs for real, and the REAL
+#               XRSession._set_origin_current/_set_near helpers — not just
+#               VisionOSBoot's handling of a fake false return — proven to
+#               report false on this host's genuinely empty "xr_origin"/
+#               "xr_camera" groups)                               — Gate A
 #   boot        windowed: select flows to game, 32 pieces, banners+HUD dyed
 #   orientation windowed: --debug-coords labeled overlay from the default
 #               player camera, saved as labeled.png — the permanent
