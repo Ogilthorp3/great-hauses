@@ -232,6 +232,18 @@ func _ready() -> void:
 	_lt("init->enter_tree")
 	_perf_step_us = _perf_tree_us
 	_lt("children-ready (GreatHall+Board+camera)")
+	# visionOS XR bring-up, PHASE 2 (src/xr/visionos_boot.gd). PHASE 1 (the
+	# XRSession start-up call) already ran in main.gd._ready(), before this
+	# scene existed — this is the earliest point the rig (XROrigin3D/XRCamera3D,
+	# tagged "xr_origin"/"xr_camera" in this very scene) can possibly be
+	# resolved: it is a static child of Game, and Godot always finishes a
+	# child's _ready() before its parent's, so it is already in the tree by
+	# the time this line runs. On desktop (no visionOS interface, phase 1
+	# never reached "done") this returns a clean, non-fatal
+	# {ok: false, step: "not_active"} — never a crash, never a silent no-op.
+	var xr_bind := XRSession.bind_rig(get_tree())
+	if not xr_bind.ok and OS.get_name() == "visionOS":
+		push_error("visionOS XR rig bind failed at '%s': %s" % [xr_bind.step, xr_bind.error])
 	var fen := ""
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--difficulty="):
