@@ -70,12 +70,49 @@ and taking the move back gives you your pawn.
 **Draws.** Stalemate, insufficient material, fifty quiet moves and threefold
 repetition all end the war with their own words on the card and no dragon — nobody
 was beaten, so nobody burns — and the rival haus now has something to say about it.
-In a tournament a drawn match does not advance you, and **the card says so** instead
-of quietly eliminating you. The Trial by Fire minigame that will properly settle a
-draw drops into one function (`game.gd::settle_tournament_draw`).
+
+**THE TRIAL BY FIRE — a knockout bracket cannot draw, so the kings settle it.**
+In a **tournament**, a **stalemate** or a draw by **insufficient material** no longer
+eliminates you by arithmetic. The board you just drew on becomes an arena: the pieces
+still standing become the crates, wildfire jars throw cross-shaped blasts that walk a
+tile at a time and chain, and **the dragon is the clock** — after seventy seconds the
+wyrm wakes and torches the arena inward, ring by ring, until somebody is standing
+alone. Last king up takes the round, and the bracket moves on.
+
+It is your own army you are fighting over: the wall between you and the rival king is
+made of your own bannermen, and burning them is a choice you get to make. WASD or the
+arrows walk, Space sets a jar, **Esc yields the round** (it costs you the match and
+nothing else — it will not quit the game). Boons hidden under the crates widen your
+blast, give you more jars, or make you faster. The arena is built from *that* war's
+position and seeded from its FEN, so the same drawn game always produces the same
+maze.
+
+**Where it does NOT run, said plainly:**
+
+- **Single Match.** The rule was "offer it, don't force it", and only half of that
+  shipped: a single-match draw keeps the ordinary draw card. The trial's only call
+  site is the tournament one, and adding the offer means touching a function that was
+  fenced off this phase (see caveat 13, which carries the patch).
+- **Play a Friend (online).** The chess is turn-based and host-authoritative; this
+  duel is real time. A real-time duel without a synchronised host tick is two
+  different fights on two screens, so **it is gated off online** and the ordinary
+  draw card is shown. Nothing about it is faked, and no desyncing duel ships.
+- **Threefold and fifty-move** are draws by bookkeeping rather than by position, so
+  they keep the card too.
+
+If the trial cannot run for any reason at all, the bracket still gets an answer: the
+old card, with the rival advancing, and a line saying which reason it was. A
+tournament can never hang on this.
 
 **A medieval score.** Menu and gameplay playlists that crossfade rather than cut,
-stingers over the duels, and separate victory / defeat / championship fanfares.
+stingers over the duels, and separate victory / defeat / championship fanfares — plus
+an original **"medieval music meets Kraftwerk"** track for the Trial by Fire: a D
+Dorian lute-and-recorder line over a motorik sequencer, 128 BPM, in three layers that
+follow the duel itself. The bare pulse is the fuse; kick, tabor and bass arrive on the
+first jar thrown; the lute, recorder and hurdy-gurdy drone come in when the dragon
+wakes. All three layers are the same 60.000-second loop playing **at once** in sample
+lock — a tier change moves volume only, so it never drops a beat. It is original work
+with no licence and no attribution required (`assets/music/trial/`).
 
 ---
 
@@ -349,6 +386,46 @@ Ordered by how likely they are to bite you.
     are unaffected. **No perf numbers are claimed in this document** — `run_perf.sh`
     was not run.
 
+12. **The Trial by Fire has never been played by a human.** Every claim about it in
+    this document is a claim about state and pixels, not about hand-feel. It was
+    driven in the e2e by *synthesized* key events through the same
+    `Input.parse_input_event` path a keyboard uses — which proves the binding, the
+    walk, the jar and the death, and proves nothing at all about whether a 0.21 s step
+    feels good in the hand, whether the 2.35 s fuse is tense or sluggish, or whether
+    the raked arena camera stays legible while you are panicking. **Bert should be the
+    one to say.** The one thing that is fun by construction is that the crates are
+    your own bannermen.
+
+13. **The single-match offer is not wired, and the winner's card is repaired from the
+    wrong side.** Two consequences of one fence: `game.gd::_end_sequence` was
+    off-limits this phase, and it (a) only reaches the draw seam inside
+    `_in_tournament()`, and (b) hard-codes `_show_match_end(false, …)` for every draw,
+    so even a trial the player WINS writes a card offering "Return to the Hall of
+    Banners". The seam repairs (b) itself with a deferred fix-up that re-points the
+    button at the next round — asserted live by the `trial-win` e2e — but the repair
+    belongs one level up. Both are small, and both are in the same function:
+
+    ```gdscript
+    # in _end_sequence, for (b):
+    var advanced := bool(verdict.get("player_advances", false))
+    Session.tournament.report_result(advanced)
+    _show_match_end(advanced, RESULT_TEXT.get(result, "The war is over"))
+    #                ^^^^^^^^ instead of `false` — then delete the deferred
+    #                fix-up in settle_tournament_draw
+    ```
+
+    For (a), call the seam for a single-match draw too (behind a prompt, since the
+    owner's rule is "offer it, don't force it") and delete the `_is_tournament()`
+    guard in `TrialBridge._refuse_reason`.
+
+14. **The trial's music ships as 34.5 MB of WAV.** Correct and licence-free, but
+    heavier than it needs to be: `ffmpeg` is not in this machine's shell allowlist, so
+    an OGG encode (~10x smaller, no audible cost) could not be made, and hand-rolling
+    a resampler in Python to fake a smaller file would have been a silent quality
+    decision I had no business making. Runtime memory is already fine — the `.import`
+    files use QOA, so the three layers cost 7 MB in RAM, not 34.5. The exact commands
+    are in `assets/music/trial/Trial_By_Fire.license.txt`.
+
 ---
 
 ## Verifying a build yourself
@@ -378,11 +455,41 @@ binary fell into.
 
 ## The final e2e run
 
-`./test_e2e/run_e2e.sh`, full sequence, foreground, 2026-08-09 13:37:32 →
-**466 s, exit 0, 32 of 32 steps PASS.** Logs:
-`test_e2e/artifacts/runs/20260809-133732/`. Nothing else was rendering on this GPU
-for the duration — I checked for co-tenant Godot processes before starting and
-launched nothing beside it.
+> **AMENDED 2026-08-09 ~20:25 for the Trial by Fire.** The table below is the
+> 13:37:32 full-sequence run. The trial work added two headless suites
+> (`minigame-suite`, `trial-wiring-suite`) and three windowed scenarios (`trial`,
+> `trial-concede`, `trial-win`), and the suite was re-run **in foreground chunks**
+> rather than as one sequence — every step below plus the five new ones came back
+> PASS. Run dirs: `20260809-195850` (preflight + all 15 suites), `20260809-201331`,
+> `20260809-201442`, `20260809-201636`, `20260809-201929`, `20260809-202259`,
+> `20260809-202402`, `20260809-202439`.
+>
+> **Three caveats on that run, because it was not a quiet machine.** Another agent
+> was editing `src/board/**` and `src/cinematics/**` and running its own Godot
+> suites on this same working tree throughout:
+> 1. `trial-win` failed once on a `piece_view.gd` caught **mid-save**
+>    (`_prepare_bolt()` called with one argument against a zero-arg definition). Not
+>    my lane and not my change; it passed on re-run once that edit landed.
+> 2. `move` and `showcase` each failed once at `input-pipeline` — the synthesized-
+>    mouse calibration step, before any scenario logic — under window-focus churn
+>    from the co-tenant. Both pass alone.
+> 3. `ds4-suite` failed once: its **live** local-LLM call timed out at 120 s under
+>    load and fell back, so `source is llm*` read false. It passes standalone (the
+>    Oracle answered in 81.8 s). That suite preloads only `src/ai/*` and
+>    `src/chess/ChessState.gd`, none of which this work touches.
+>
+> Every one of those was re-run to green. None of them are perf claims, and no perf
+> numbers are claimed here either.
+
+| step | result | detail |
+|---|---|---|
+| minigame-suite | PASS | exit 0 · 98 checks (27 AI-vs-AI matches) |
+| trial-wiring-suite | PASS | exit 0 · 88 checks |
+| trial | PASS | 26 steps · real pacing, 88 s duel |
+| trial-concede | PASS | 21 steps |
+| trial-win | PASS | 22 steps |
+
+The original full-sequence run:
 
 | step | result | detail |
 |---|---|---|

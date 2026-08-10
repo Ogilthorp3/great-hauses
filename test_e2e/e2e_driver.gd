@@ -64,6 +64,20 @@
 ##   tournament  Begin Tournament with a mate-in-1 FEN: three rounds of
 ##               scripted mates; asserts bracket advance, banner re-dress
 ##               each round, and the championship panel
+##   trial       THE TRIAL BY FIRE. A real stalemate (clicked, not injected)
+##               hands the round to the minigame; the whole chain is asserted
+##               at SHIPPING PACING — arena built from that war's survivors and
+##               seated on squares the match agrees with, the player's king
+##               walked on synthesized keys, a keg burning a crate while the
+##               wyrm still sleeps, a boon changing a king, the dragon's ring,
+##               a king falling, the score climbing fuse → kegs → dragon, the
+##               verdict landing in Tournament.report_result(), and the frame
+##               and clock handed back
+##   trial-concede the SKIP path: Esc concedes the round and nothing more
+##   trial-win   the ADVANCE path: the rival king's death is injected through
+##               the grid's own kill (a scripted duel cannot be relied on to
+##               win); everything after it is real, and the card must offer
+##               the next round rather than the Hall of Banners
 ##   oracle-mock DS4-Oracle (Pure Oracle) against an in-driver canned HTTP
 ##               mock; asserts a legal oracle move, llm source, thinking HUD
 ##   oracle-modes Counseled Oracle vs the mock LLM + REAL local stockfish:
@@ -216,6 +230,12 @@ func _run() -> void:
 			await _scenario_kills()
 		"tournament":
 			await _scenario_tournament()
+		"trial":
+			await _scenario_trial("duel")
+		"trial-concede":
+			await _scenario_trial("concede")
+		"trial-win":
+			await _scenario_trial("win")
 		"oracle-mock":
 			await _scenario_oracle_mock()
 		"oracle-modes":
@@ -2656,6 +2676,408 @@ func _scenario_tournament() -> void:
 		return
 	_pass("tourn-timescale-1.0")
 	_finish(0)
+
+# ── Scenario: trial — the Trial by Fire settles a drawn bracket ────────────
+#
+# THE ONE THING A KNOCKOUT TOURNAMENT CANNOT DO IS DRAW, and until this feature
+# a drawn round eliminated the player by arithmetic. This scenario drives the
+# whole replacement through the real pipeline, at REAL PACING (no shortened
+# fuse, no impatient wyrm — a duel the player would actually be handed), and
+# asserts the chain end to end: a real stalemate on a real board, the arena
+# raised from the survivors of THAT war, a keg that burns one of them, a boon
+# that changes a king, the dragon closing the ring, a king dying, and the
+# verdict landing in Tournament.report_result() — plus the frame and the clock
+# handed back to the match afterwards.
+
+const TRIAL_ARENA := "TrialByFire"
+
+## Held-key movement: the arena reads `_held` on press and clears it on
+## release, so a tap moves one tile and a HOLD walks. Tapping would test a
+## different control scheme than the one that ships.
+func _hold_key(keycode: Key, sec: float) -> void:
+	var down := InputEventKey.new()
+	down.keycode = keycode
+	down.physical_keycode = keycode
+	down.pressed = true
+	Input.parse_input_event(down)
+	await _sleep_ticks(sec)
+	var up := InputEventKey.new()
+	up.keycode = keycode
+	up.physical_keycode = keycode
+	up.pressed = false
+	Input.parse_input_event(up)
+	await get_tree().process_frame
+
+
+## The player's unresolved bracket slot as [round, index], or [] if there is
+## none. Read BEFORE the trial so the same slot can be re-read after it and the
+## verdict proven to have landed in the bracket rather than merely been printed.
+func _player_slot(bracket: Dictionary) -> Array:
+	var me := str(bracket["player_house"])
+	var rounds: Array = bracket["rounds"]
+	for r in rounds.size():
+		for i in rounds[r].size():
+			var m: Dictionary = rounds[r][i]
+			if str(m["winner"]).is_empty() \
+					and (str(m["a"]) == me or str(m["b"]) == me):
+				return [r, i]
+	return []
+
+
+func _slot_winner(bracket: Dictionary, slot: Array) -> String:
+	if slot.size() != 2:
+		return ""
+	return str((bracket["rounds"][slot[0]] as Array)[slot[1]]["winner"])
+
+
+## `mode` is "duel" (fight it out at real pacing), "concede" (the Esc path), or
+## "win" (the player takes the tie — the one branch a scripted duel cannot be
+## relied on to produce, and the only branch in which the bracket ADVANCES).
+func _scenario_trial(mode: String) -> void:
+	# Seasoned, not Casual: the arena tier is the chess tier (ChessAI.Difficulty
+	# maps 1:1 onto KingAi.Difficulty), and a Seasoned king hunts boons and
+	# retreats — which is what makes the power-up beat happen on its own rather
+	# than being staged by the test.
+	if not await _navigate_select("goldclaw", "Seasoned", "Begin Tournament"):
+		return
+	var game := await _boot_game(0)
+	if game == null:
+		return
+	var state: Object = game.get("state")
+	var t = Session.tournament
+	if t == null:
+		await _fail("trial-tournament", "Session.tournament is null")
+		return
+	var before: Dictionary = t.bracket_state()
+	var slot := _player_slot(before)
+	if slot.is_empty():
+		await _fail("trial-bracket-slot", "the player has no pending bracket match")
+		return
+	var rival_house := str(game.get("rival_house_id"))
+	_pass("trial-bracket-slot (round %d vs %s)" % [slot[0], rival_house])
+
+	# ── the stalemate, found on THIS board and played by clicking ──────────
+	if not await _wait_until(func():
+		return not bool(game.get("busy")) and state.turn == false, 15.0):
+		await _fail("trial-turn", "never became the player's turn")
+		return
+	var stale = null
+	for m in game.get("_turn_moves"):
+		var probe = ChessState.new()
+		probe.set_fen(state.get_fen())
+		probe.apply_move(probe.move_from_uci(m.to_uci()))
+		if int(probe.get_result()) == ChessState.RESULT.STALEMATE:
+			stale = m
+			break
+	if stale == null:
+		await _fail("trial-stalemate-available",
+			"the FEN offers no stalemate-in-1 (%s)" % str(state.get_fen()))
+		return
+	_pass("trial-stalemate-available (%s)" % stale.to_uci())
+	if not await _select_square(game, game.sq_of(stale.from_square)):
+		await _fail("trial-select", "the stalemating piece never selected")
+		return
+	await _click_square(game, game.sq_of(stale.to_square))
+	if not await _wait_until(func(): return bool(game.get("game_over")), 15.0):
+		await _fail("trial-draw", "the game never ended after the stalemating move")
+		return
+	if int(state.get_result()) != ChessState.RESULT.STALEMATE:
+		await _fail("trial-draw", "result=%s, expected STALEMATE"
+			% ChessState.RESULT.keys()[int(state.get_result())])
+		return
+	_pass("trial-draw (STALEMATE — the draw that used to eliminate you)")
+
+	# ── the arena is raised from the survivors of THAT war ─────────────────
+	var box := {"arena": null}
+	if not await _wait_until(func():
+		box["arena"] = game.get_node_or_null(TRIAL_ARENA)
+		return box["arena"] != null and box["arena"].get("grid") != null, 25.0):
+		await _fail("trial-arena", "the arena never appeared after the draw")
+		return
+	var arena: Node = box["arena"]
+	var grid = arena.get("grid")
+	_pass("trial-arena-raised")
+	var crates_at_open: int = grid.crates_left()
+	if crates_at_open <= 0:
+		await _fail("trial-crates", "the arena opened with no crates — the drawn "
+			+ "position never reached it")
+		return
+	_pass("trial-crates (%d survivors became crates)" % crates_at_open)
+	# THE ARENA IS THIS MATCH'S ARENA. Every crate must stand on a square the
+	# MATCH would call by the same name — the bridge is handed game.gd's own
+	# sq_of rather than a copy, and this is where that is proven live.
+	var engine_cells := {}
+	for idx in 64:
+		var c = state.pieces[idx]
+		if c != null and str(c).to_lower() != "k":
+			engine_cells[str(game.sq_of(idx))] = true
+	var seated := 0
+	for cell_key in (arena.get("_crates") as Dictionary):
+		if engine_cells.has(str(grid.cell_of(cell_key))):
+			seated += 1
+	if seated == 0:
+		await _fail("trial-crate-squares",
+			"no crate stands on a square the match agrees with")
+		return
+	_pass("trial-crate-squares (%d/%d crates on their own men's squares)"
+		% [seated, crates_at_open])
+	if not (grid.kings[0].alive and grid.kings[1].alive):
+		await _fail("trial-kings", "a king was already down when the arena opened")
+		return
+	_pass("trial-kings-stand")
+	# THE MATCH GAVE UP THE FRAME. Two of everything cannot be on screen.
+	var match_board: Node = game.get_node_or_null("Board")
+	if match_board != null and bool(match_board.get("visible")):
+		await _fail("trial-frame", "the match board is still visible under the arena")
+		return
+	_pass("trial-frame-taken")
+	await _shot("trial_arena_open")
+
+	if mode == "concede":
+		await _trial_concede(game, arena, t, before, slot, rival_house)
+		return
+	if mode == "win":
+		# THE PLAYER TAKES THE TIE. A scripted duel cannot be relied on to
+		# produce this branch — the driver plays badly on purpose — and it is
+		# the ONLY branch in which the bracket advances and the verdict card
+		# has to offer the next round. So the CAUSE of the rival's death is
+		# injected and nothing else is: `_kill` is the grid's own kill, it
+		# raises the real `king_died` event, the real fall animation, the real
+		# `over` event with the real `winner()`, and the real `trial_finished`.
+		await _sleep_ticks(1.2)
+		grid._kill(grid.kings[1], 0)
+		if not await _wait_until(func(): return grid.is_over(), 8.0):
+			await _fail("trial-win-decided", "the arena never resolved the kill")
+			return
+		if grid.winner() != 0:
+			await _fail("trial-win-decided",
+				"the arena named side %d with the rival down" % grid.winner())
+			return
+		_pass("trial-win-decided (the rival king is down; your king stands)")
+		await _trial_settle(game, t, before, slot, rival_house, true)
+		return
+
+	# ── the duel, driven by the real keyboard path ─────────────────────────
+	# Side 0 is the PLAYER's king and nothing else drives it: with no hands on
+	# the keyboard he would stand on his spawn until the wyrm ate him, and the
+	# scenario would be testing the rival's AI alone.
+	# THE DRIVE, IN TWO PHASES, AND THE FIRST CUT GOT IT WRONG.
+	#
+	# Cut one walked a W-A-S-D box and dropped a jar every fourth leg. A leg is
+	# 0.42 s (two tiles) and the fuse is 2.35 s, so the box brought the king back
+	# over his own jar before it went off: he died at ~15 s of a 70 s clock and
+	# the wyrm — the beat this scenario exists to prove — never woke. That is
+	# the test playing badly, not the game misbehaving, and the fix is to play
+	# the way the mode asks you to.
+	#
+	# Cut two set ONE jar with a long escape and still died at ~10 s. The player
+	# in this scenario is not here to win the duel — he is here to prove the
+	# keyboard reaches the arena and then to STAY ALIVE long enough for the
+	# game's own 70 s clock to produce the dragon. So he now throws NO jars at
+	# all: the rival is a Seasoned brain that seeks crates and kegs them without
+	# any help, and every crate it burns is still a crate burned by a keg while
+	# the wyrm sleeps, which is the thing being asserted.
+	#
+	# PHASE 1 walks INWARD (from the spawn corner both W and A go toward the
+	# middle) for a few legs — the input-path proof — and parks around the
+	# second ring. PHASE 2 takes the hands off the keyboard. The ring opens on
+	# the two spawn CORNERS (outer ring first, in antipodal pairs), so parking
+	# off the rim buys roughly fifteen seconds of dragon to watch.
+	var opened: Vector2i = grid.kings[0].cell
+	var burned_by_keg := false
+	var moved := false
+	var boon_taken := false
+	var walk := [KEY_W, KEY_A, KEY_W, KEY_A, KEY_W, KEY_A]
+	var step := 0
+	var deadline := Time.get_ticks_msec() + 190000
+	while Time.get_ticks_msec() < deadline and not grid.is_over():
+		# A crate that burns while the wyrm still sleeps was burned by a KEG —
+		# the dragon has not taken a tile yet, so nothing else could have.
+		if not burned_by_keg and not bool(grid.sudden) \
+				and grid.crates_left() < crates_at_open:
+			burned_by_keg = true
+			_pass("trial-keg-burned-a-crate (%d -> %d crates, wyrm still asleep)"
+				% [crates_at_open, grid.crates_left()])
+			await _shot("trial_blast")
+		if not moved and grid.kings[0].cell != opened:
+			moved = true
+			_pass("trial-player-king-walks (%s -> %s, synthesized keys)"
+				% [str(opened), str(grid.kings[0].cell)])
+		if not boon_taken and (int(grid.kings[0].boons_taken)
+				+ int(grid.kings[1].boons_taken)) > 0:
+			boon_taken = true
+			_pass("trial-boon-taken (p%d/r%d — reach %d, jars %d, tread %.2fx)" % [
+				int(grid.kings[0].boons_taken), int(grid.kings[1].boons_taken),
+				int(grid.kings[0].radius), int(grid.kings[0].kegs_max),
+				float(grid.kings[0].speed)])
+		if bool(grid.sudden) and not _shot_taken_wyrm:
+			_shot_taken_wyrm = true
+			await _shot("trial_wyrm_ring")
+		if not grid.kings[0].alive:
+			break
+		if step >= walk.size():
+			# PHASE 2 — hands off the keyboard, let the patience clock run.
+			await _sleep_ticks(0.25)
+			continue
+		await _hold_key(walk[step], 0.45)   # PHASE 1 — inward, no jars
+		step += 1
+
+	# WHY THESE ARE RE-READ HERE. The loop sleeps in blocks of up to half a
+	# second, and the last block is where a duel usually ends — the first cut
+	# reported "no crate burned" over a log that plainly showed 13 -> 12,
+	# because the burn and the king's death landed in the same unwatched
+	# window. State is state; read it once more before calling it a failure.
+	if not moved and grid.kings[0].cell != opened:
+		moved = true
+	if not burned_by_keg and grid.crates_left() < crates_at_open:
+		burned_by_keg = true
+		_pass("trial-keg-burned-a-crate (%d -> %d crates)"
+			% [crates_at_open, grid.crates_left()])
+	if not boon_taken and (int(grid.kings[0].boons_taken)
+			+ int(grid.kings[1].boons_taken)) > 0:
+		boon_taken = true
+		_pass("trial-boon-taken (late read)")
+	print("E2E WARN trial state: t=%.1fs sudden=%s crates %d->%d kings=%s/%s cells=%s/%s"
+		% [float(grid.time), str(grid.sudden), crates_at_open, grid.crates_left(),
+			str(grid.kings[0].alive), str(grid.kings[1].alive),
+			str(grid.kings[0].cell), str(grid.kings[1].cell)])
+
+	if not moved:
+		await _fail("trial-player-king-walks",
+			"the king never left %s — the keyboard path is not reaching the arena"
+				% str(opened))
+		return
+	if not burned_by_keg:
+		await _fail("trial-keg-burned-a-crate",
+			"no crate ever burned (crates %d -> %d, t=%.1fs)"
+				% [crates_at_open, grid.crates_left(), float(grid.time)])
+		return
+	if not boon_taken:
+		await _fail("trial-boon-taken",
+			"no king ever took a boon in %.0f s of duel" % float(grid.time))
+		return
+	if not bool(grid.sudden):
+		await _fail("trial-wyrm",
+			"the wyrm never lost patience (duel ended at t=%.1fs, limit %.0fs)"
+				% [float(grid.time), float(grid.sudden_death_at)])
+		return
+	_pass("trial-wyrm-ring (sudden death — the arena is closing)")
+
+	# ── a king falls, and the verdict reaches the bracket ──────────────────
+	if not await _wait_until(func(): return grid.is_over(), 60.0):
+		await _fail("trial-decided", "the duel never resolved")
+		return
+	var winner: int = grid.winner()
+	if winner != 0 and winner != 1:
+		await _fail("trial-decided", "the arena answered '%d' — never 'nobody'" % winner)
+		return
+	_pass("trial-king-fell (winner = %s king)" % ("your" if winner == 0 else "the rival's"))
+	# THE SCORE FOLLOWED THE DUEL: fuse, then kegs, then the wyrm.
+	var tiers: Array = arena.get("music_tier_log")
+	if tiers != [0, 1, 2]:
+		await _fail("trial-music", "the score climbed %s, expected [0, 1, 2]" % str(tiers))
+		return
+	_pass("trial-music (fuse -> kegs -> dragon)")
+	await _trial_settle(game, t, before, slot, rival_house, winner == 0)
+
+
+## Shared tail: the verdict card, the bracket, the frame and the clock.
+func _trial_settle(game: Node, t, before: Dictionary, slot: Array,
+		rival_house: String, player_won: bool) -> void:
+	if not await _wait_until(func(): return bool(game.get("_victory_shown")), 30.0):
+		await _fail("trial-card", "the verdict card never opened after the trial")
+		return
+	await _shot("trial_verdict")
+	var card: Label = game.get("_victory_label")
+	var text := str(card.text) if card != null else ""
+	if not text.to_lower().contains("trial by fire"):
+		await _fail("trial-card", "the card never mentions the trial: '%s'"
+			% text.replace("\n", " · "))
+		return
+	_pass("trial-card (%s)" % text.replace("\n", " · "))
+	if player_won:
+		# A WINNER MUST NOT BE SENT HOME. `_end_sequence` calls
+		# `_show_match_end(false, ...)` for every draw — right when a draw could
+		# only ever eliminate you, wrong the moment a trial can advance you —
+		# so the card it writes offers "Return to the Hall of Banners" over a
+		# bracket that just moved on. The seam repairs that with a deferred
+		# fix-up; this is the check that the repair actually lands, and it is
+		# the reason this scenario exists.
+		if str(game.get("_next_action")) != "next_round":
+			await _fail("trial-ride-on",
+				"the winner's card offers '%s'" % str(game.get("_next_action")))
+			return
+		var btn = game.get("_continue_btn")
+		var btn_text := str(btn.text) if btn != null else "<no button>"
+		if not btn_text.begins_with("Ride to"):
+			await _fail("trial-ride-on", "the button reads '%s'" % btn_text)
+			return
+		_pass("trial-ride-on (%s)" % btn_text)
+
+	# THE VERDICT REACHED Tournament.report_result(). Proven by re-reading the
+	# same bracket slot that was pending before the duel: it is resolved now,
+	# and resolved to the side the arena named.
+	var after: Dictionary = t.bracket_state()
+	var recorded := _slot_winner(after, slot)
+	if recorded.is_empty():
+		await _fail("trial-report-result",
+			"the bracket slot is still unresolved — the verdict never reached it")
+		return
+	var expect := str(before["player_house"]) if player_won else rival_house
+	if recorded != expect:
+		await _fail("trial-report-result",
+			"the bracket recorded '%s', the arena named '%s'" % [recorded, expect])
+		return
+	_pass("trial-report-result (bracket winner = %s)" % recorded)
+	if bool(after["player_alive"]) != player_won:
+		await _fail("trial-bracket-alive", "player_alive=%s after a %s trial"
+			% [str(after["player_alive"]), "won" if player_won else "lost"])
+		return
+	_pass("trial-bracket-alive (%s)" % str(after["player_alive"]))
+
+	# ── the frame and the clock come back ──────────────────────────────────
+	if not await _wait_until(func():
+		return game.get_node_or_null(TRIAL_ARENA) == null, 10.0):
+		await _fail("trial-arena-freed", "the arena is still in the tree")
+		return
+	_pass("trial-arena-freed")
+	var match_board: Node = game.get_node_or_null("Board")
+	if match_board == null or not bool(match_board.get("visible")):
+		await _fail("trial-frame-returned", "the match board never came back")
+		return
+	var hud: Node = game.get_node_or_null("HUD")
+	if hud != null and not bool(hud.get("visible")):
+		await _fail("trial-frame-returned", "the HUD never came back")
+		return
+	var cam := get_viewport().get_camera_3d()
+	if cam == null or not game.is_ancestor_of(cam):
+		await _fail("trial-camera-returned",
+			"the viewport camera is not the match's own after the trial")
+		return
+	_pass("trial-frame-returned (board, HUD and camera)")
+	if not is_equal_approx(Engine.time_scale, 1.0):
+		await _fail("trial-timescale", "time_scale=%f after the trial" % Engine.time_scale)
+		return
+	_pass("trial-timescale-1.0")
+	_finish(0)
+
+
+## The SKIP path. Esc inside the arena must cost the round and nothing else —
+## in particular it must not quit the process, which is what Esc does when the
+## same scene runs standalone.
+func _trial_concede(game: Node, arena: Node, t, before: Dictionary,
+		slot: Array, rival_house: String) -> void:
+	await _press_key(KEY_ESCAPE)
+	if not await _wait_until(func(): return bool(arena.get("conceded")), 6.0):
+		await _fail("trial-concede", "Esc did not concede the arena")
+		return
+	_pass("trial-concede (Esc yielded the arena)")
+	if _done:
+		return
+	await _trial_settle(game, t, before, slot, rival_house, false)
+
+
+var _shot_taken_wyrm := false
 
 # ── Scenario: oracle-mock (DS4-Oracle vs the in-driver canned server) ──────
 func _scenario_oracle_mock() -> void:

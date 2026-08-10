@@ -14,6 +14,16 @@ const WILD := Color(0.42, 0.95, 0.52)
 const EMBER := Color(1.0, 0.62, 0.22)
 const PANEL := Color(0.05, 0.045, 0.04, 0.62)
 
+## THE HINT LINE MUST NOT LIE ABOUT THE CONTROLS. Standalone, R rebuilds the
+## arena and Esc quits the process. Inside a real match neither is true — R is
+## refused outright (rerolling a bracket decider is an exploit) and Esc yields
+## the ROUND, not the game. The first shipped frame of the embedded arena had
+## "R to retry · ESC to leave" printed across the bottom of a tournament
+## decider, which is exactly the copy-that-contradicts-the-verdict defect this
+## mode was already fixed for once.
+const HINT_STANDALONE := "WASD / arrows to move   ·   SPACE to set a wildfire jar   ·   R to retry   ·   ESC to leave"
+const HINT_EMBEDDED := "WASD / arrows to move   ·   SPACE to set a wildfire jar   ·   ESC yields the round"
+
 var _cards: Array[RichTextLabel] = []
 var _clock: Label
 var _clock_bar: ColorRect
@@ -75,7 +85,7 @@ func _ready() -> void:
 	_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_hint.add_theme_font_size_override("font_size", 15)
 	_hint.add_theme_color_override("font_color", DIM)
-	_hint.text = "WASD / arrows to move   ·   SPACE to set a wildfire jar   ·   R to retry   ·   ESC to leave"
+	_hint.text = HINT_STANDALONE
 	add_child(_hint)
 
 
@@ -107,6 +117,12 @@ func _box() -> StyleBoxFlat:
 
 ## Fade the title out over the opening beat — it names the mode and then gets
 ## out of the way, because the arena is the thing worth looking at.
+## Tell the HUD which set of controls is actually live (see HINT_* above).
+func set_embedded(on: bool) -> void:
+	if _hint != null and is_instance_valid(_hint):
+		_hint.text = HINT_EMBEDDED if on else HINT_STANDALONE
+
+
 func open() -> void:
 	_title.modulate.a = 1.0
 	var tw := create_tween()

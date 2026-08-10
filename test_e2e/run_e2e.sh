@@ -15,7 +15,13 @@
 #               gate), PROMOTION (94 — all four choices, the knight's
 #               check, the rook that avoids the queen's stalemate,
 #               undo back to the pawn, host authority over the
-#               promotion piece)                                  — Gate A
+#               promotion piece), the MINIGAME rules (98 — blast shape,
+#               blackstone, chains, boons, the wyrm's ring, 27 AI-vs-AI
+#               matches) and the DRAW-SEAM WIRING (88 — which draws go to the
+#               arena, the two difficulty enums agreeing 1:1, the survivors
+#               harvested from a real stalemate, the contract shape on every
+#               refusal, and the three music tiers being one 60.000 s loop)
+#                                                                  — Gate A
 #   boot        windowed: select flows to game, 32 pieces, banners+HUD dyed
 #   orientation windowed: --debug-coords labeled overlay from the default
 #               player camera, saved as labeled.png — the permanent
@@ -46,6 +52,27 @@
 #               and saves a frame of every kill
 #   tournament  windowed: 3 scripted mates to the throne, bracket + banner
 #               re-dress asserts, championship panel
+#   trial       windowed: THE TRIAL BY FIRE — a real stalemate drops both kings
+#               into the arena and the bracket finally gets a winner. Runs at
+#               SHIPPING PACING (70 s of wyrm patience, no shortened fuse):
+#               asserts the arena is built from the survivors of that war and
+#               seated on the squares the MATCH calls by the same names, the
+#               player's king walking on synthesized keys, a keg burning a
+#               crate while the wyrm still sleeps, a boon changing a king, the
+#               dragon's ring closing, a king falling, the score climbing
+#               fuse -> kegs -> dragon, and the verdict reaching
+#               Tournament.report_result() — then board, HUD, camera and
+#               time_scale handed back to the match
+#   trial-concede windowed: the SKIP path — Esc inside the arena costs the
+#               round and nothing else (it must not quit the process, which is
+#               what Esc does when the same scene runs standalone), and the
+#               card must not claim a king fell in a fight nobody took
+#   trial-win   windowed: the ADVANCE path — the one branch a scripted duel
+#               cannot be relied on to produce. The cause of the rival king's
+#               death is injected through the grid's own kill; everything
+#               after it is real. Asserts the bracket advances, player_alive
+#               holds, and the card offers "Ride to the …" instead of sending
+#               the winner home
 #   oracle-mock windowed: DS4-Oracle (Pure) vs in-driver canned HTTP mock
 #   oracle-modes windowed: Counseled Oracle — mock proposes a blunder, real
 #               stockfish counsel rejects it, revised move plays
@@ -140,6 +167,16 @@ BANTER_FEN="k7/8/8/3p3p/4P2P/8/8/3QK3 w - - 0 1"
 # king's own escape) and the mated haus leaves three pawns standing —
 # fuel for the ASHFALL pyre.
 DRAGON_FEN="6k1/5ppp/8/8/8/8/8/R3K3 w - - 0 1"
+# THE TRIAL BY FIRE position — a stalemate-in-1 that leaves an ARMY standing.
+# White Ra1 + Kh6; every other pawn is frozen head-to-head (a6/a5, c6/c5,
+# e6/e5, b4/b3, d4/d3, f4/f3 — no captures, no pushes), so after Ra1-g1 the
+# black king has g7/g8 covered by the rook, h7 by the white king, and no pawn
+# can move: STALEMATE. 13 pieces are still on the board when it happens, which
+# is the point — the arena inherits a real crate field rather than two kings in
+# an empty room. Verified against this engine before the scenario was written
+# (the first two candidates were NOT stalemates, which is why this is measured
+# and not reasoned).
+TRIAL_FEN="7k/8/p1p1p2K/P1P1P3/1p1p1p2/1P1P1P2/8/R7 w - - 0 1"
 
 mkdir -p "$RUN_DIR" "$ART_ROOT"
 
@@ -275,7 +312,8 @@ if [ ! -x "$GODOT" ]; then note "Godot binary missing: $GODOT"; exit 2; fi
 STEPS=("$@")
 [ ${#STEPS[@]} -eq 0 ] && STEPS=(preflight tests boot orientation board-truth \
   board-moves move duel castle enpassant promote slowmo kills music banter \
-  dragon-live tournament oracle-mock oracle-modes undo net-hall fullgame showcase)
+  dragon-live tournament trial trial-concede trial-win oracle-mock oracle-modes undo \
+  net-hall fullgame showcase)
 
 SUITE_RC=0
 for step in "${STEPS[@]}"; do
@@ -295,6 +333,8 @@ for step in "${STEPS[@]}"; do
       run_suite costumes-suite res://tests/test_costumes.gd || SUITE_RC=1
       run_suite net-suite res://tests/test_net.gd || SUITE_RC=1
       run_suite promotion-suite res://tests/test_promotion.gd || SUITE_RC=1
+      run_suite minigame-suite res://tests/test_minigame.gd || SUITE_RC=1
+      run_suite trial-wiring-suite res://tests/test_trial_wiring.gd || SUITE_RC=1
       ;;
     boot)      run_scenario boot || SUITE_RC=1 ;;
     orientation) run_scenario orientation "--debug-coords" || SUITE_RC=1 ;;
@@ -318,6 +358,18 @@ for step in "${STEPS[@]}"; do
                    "--e2e-timeout=90" || SUITE_RC=1 ;;
     tournament) SCENARIO_TIMEOUT=170 run_scenario tournament \
                   "--e2e-fen=$TOURN_FEN" "--e2e-timeout=150" || SUITE_RC=1 ;;
+    trial)     SCENARIO_TIMEOUT=260 run_scenario trial "--e2e-fen=$TRIAL_FEN" \
+                 "--e2e-timeout=240" || SUITE_RC=1 ;;
+                 # a REAL-PACED duel: the wyrm does not lose patience for 70 s
+                 # and then eats the arena a ring at a time. Shortening the
+                 # fuse for the test would be testing a mode nobody ships.
+    trial-concede) SCENARIO_TIMEOUT=120 run_scenario trial-concede \
+                 "--e2e-fen=$TRIAL_FEN" "--e2e-timeout=100" || SUITE_RC=1 ;;
+                 # the skip path — Esc costs the round, never the process
+    trial-win) SCENARIO_TIMEOUT=120 run_scenario trial-win \
+                 "--e2e-fen=$TRIAL_FEN" "--e2e-timeout=100" || SUITE_RC=1 ;;
+                 # the ADVANCE path: the bracket moves on and the card must
+                 # offer the next round instead of sending the winner home
     oracle-mock) run_scenario oracle-mock "--e2e-timeout=80" || SUITE_RC=1 ;;
     oracle-modes) run_scenario oracle-modes "--e2e-fen=$COUNSEL_FEN" \
                    "--e2e-timeout=90" || SUITE_RC=1 ;;
@@ -344,7 +396,7 @@ for step in "${STEPS[@]}"; do
                  # 45 s soak + tableau is ~56 s alone but needs headroom at
                  # the tail of a full sequential run (watchdogged at 90 s
                  # under end-of-suite load, 2026-08-08)
-    *) note "unknown step '$step' (use preflight|tests|boot|orientation|board-truth|board-moves|move|duel|castle|enpassant|promote|slowmo|kills|music|banter|dragon-live|tournament|oracle-mock|oracle-modes|undo|net-hall|fullgame|showcase|perf)"; SUITE_RC=1 ;;
+    *) note "unknown step '$step' (use preflight|tests|boot|orientation|board-truth|board-moves|move|duel|castle|enpassant|promote|slowmo|kills|music|banter|dragon-live|tournament|trial|trial-concede|trial-win|oracle-mock|oracle-modes|undo|net-hall|fullgame|showcase|perf)"; SUITE_RC=1 ;;
   esac
 done
 

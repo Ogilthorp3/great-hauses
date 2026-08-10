@@ -53,6 +53,23 @@ const VICTORY_TRACK := "res://assets/music/fanfare/Medieval_Victory_Theme.mp3"
 const DEFEAT_TRACK := "res://assets/music/defeat/Agnus_Dei_X.mp3"
 const CHAMPIONSHIP_TRACK := "res://assets/music/fanfare/Fanfare_for_Space.mp3"
 
+## ── TRIAL BY FIRE: three tiers of ONE loop, played at once ─────────────────
+## "Medieval music meets Kraftwerk" — original, licence-free (see
+## assets/music/trial/Trial_By_Fire.license.txt). All three files are the SAME
+## 60.000 s / 128 BPM loop rendered with progressively more layers switched on,
+## which is why they are not a playlist and never crossfade as TRACKS: all
+## three start in the SAME FRAME and only their VOLUMES move. Nothing re-seeks,
+## so a tier change cannot drop a beat and the three can never drift apart —
+## the escalation is a mix move, exactly as the stems were rendered for.
+const TRIAL_TIERS: Array[String] = [
+	"res://assets/music/trial/Trial_By_Fire_Tier1_Fuse.wav",    # 0 — the fuse
+	"res://assets/music/trial/Trial_By_Fire_Tier2_Kegs.wav",    # 1 — the kegs
+	"res://assets/music/trial/Trial_By_Fire_Tier3_Dragon.wav",  # 2 — the wyrm
+]
+const TRIAL_TIER_NAMES: Array[String] = ["fuse", "kegs", "dragon"]
+const TRIAL_FADE := 0.9         ## tier-to-tier volume ramp, seconds
+const TRIAL_OUT := 1.2          ## default fade when the trial ends
+
 ## Overridable before add_child() so tests never touch the real settings file.
 var settings_path := SETTINGS_PATH_DEFAULT
 
@@ -71,6 +88,11 @@ var _duck_db := 0.0                  # 0.0 or DUCK_DB — playlist decks only
 
 var _volume := DEFAULT_VOLUME        # 0-100
 var _muted := false
+
+# -- Trial by Fire layers (built on first use, freed when the trial ends) --
+var _trial_players: Array[AudioStreamPlayer] = []
+var _trial_tier := -1                # -1 = the trial is not playing
+var _trial_tween: Tween
 
 
 func _ready() -> void:
@@ -101,7 +123,7 @@ func _exit_tree() -> void:
 	# (ObjectDB warning on every boot log). Streams are also dropped so the
 	# resource itself can be reclaimed.
 	var was_playing := false
-	for p in [_sting_player, _fanfare_player] + Array(_decks):
+	for p in [_sting_player, _fanfare_player] + Array(_decks) + Array(_trial_players):
 		if p != null and is_instance_valid(p):
 			was_playing = was_playing or p.playing
 			p.stop()
@@ -147,6 +169,101 @@ func championship() -> void:
 	_play_fanfare(CHAMPIONSHIP_TRACK)
 
 
+## ── Trial by Fire ─────────────────────────────────────────────────────────
+##
+## Take the hall for the king-duel. The gameplay playlist fades out (the arena
+## gets its own music, not a bed under it) and all three tiers start together;
+## `tier` is which one is audible. Idempotent: calling it twice only moves the
+## tier, so a retried trial cannot stack two sets of layers.
+func play_trial(tier: int = 0) -> void:
+	if not _trial_players.is_empty():
+		trial_tier(tier)
+		return
+	_end_playlist()
+	for i in TRIAL_TIERS.size():
+		var stream := load(TRIAL_TIERS[i]) as AudioStream
+		if stream == null:
+			push_warning("MusicManager: could not load %s" % TRIAL_TIERS[i])
+			_teardown_trial()
+			return
+		var p := AudioStreamPlayer.new()
+		p.name = "Trial%d_%s" % [i + 1, TRIAL_TIER_NAMES[i]]
+		p.bus = BUS_NAME
+		p.stream = stream
+		p.volume_db = SILENCE_DB
+		add_child(p)
+		_trial_players.append(p)
+	# THE SAMPLE LOCK: every layer starts in this one frame, before any await.
+	# Start them apart and the loops phase against each other for the rest of
+	# the duel, which is the one failure a "layered" mix cannot survive.
+	for p in _trial_players:
+		p.play()
+	_trial_tier = -1
+	trial_tier(tier, 0.35)   # a short lift in, not a 0.9 s swell from silence
+
+
+## Move the mix to `tier` (0 fuse · 1 kegs · 2 dragon). Only volumes move.
+func trial_tier(tier: int, fade: float = TRIAL_FADE) -> void:
+	if _trial_players.is_empty():
+		return
+	var want := clampi(tier, 0, _trial_players.size() - 1)
+	if want == _trial_tier:
+		return
+	_trial_tier = want
+	_kill_tween(_trial_tween)
+	if is_inside_tree():
+		_trial_tween = _make_tween().set_parallel(true)
+		for i in _trial_players.size():
+			_trial_tween.tween_property(_trial_players[i], "volume_db",
+				0.0 if i == want else SILENCE_DB, fade)
+	else:
+		for i in _trial_players.size():
+			_trial_players[i].volume_db = 0.0 if i == want else SILENCE_DB
+
+
+## The trial is over: fade the layers out and release them. Safe to call when
+## no trial is running, and safe to call twice.
+func stop_trial(fade: float = TRIAL_OUT) -> void:
+	if _trial_players.is_empty():
+		return
+	_trial_tier = -1
+	_kill_tween(_trial_tween)
+	if fade <= 0.0 or not is_inside_tree():
+		_teardown_trial()
+		return
+	var doomed := _trial_players
+	_trial_players = []
+	_trial_tween = _make_tween().set_parallel(true)
+	for p in doomed:
+		_trial_tween.tween_property(p, "volume_db", SILENCE_DB, fade)
+	_trial_tween.chain().tween_callback(func() -> void:
+		for p in doomed:
+			if is_instance_valid(p):
+				p.stop()
+				p.stream = null
+				p.queue_free())
+
+
+## -1 when no trial is playing; otherwise the audible tier.
+func current_trial_tier() -> int:
+	return _trial_tier
+
+
+func trial_players() -> Array[AudioStreamPlayer]:
+	return _trial_players
+
+
+func _teardown_trial() -> void:
+	_kill_tween(_trial_tween)
+	for p in _trial_players:
+		if is_instance_valid(p):
+			p.stop()
+			p.stream = null
+			p.queue_free()
+	_trial_players = []
+	_trial_tier = -1
+
+
 ## Cinematic duck: playlist decks dip by DUCK_DB; stings/fanfares stay hot.
 func duck() -> void:
 	_set_duck(DUCK_DB)
@@ -164,6 +281,10 @@ func stop_all(fade := 1.0) -> void:
 	_kill_tween(_fade_tween)
 	_kill_tween(_duck_tween)
 	_duck_db = 0.0
+	# The trial's layers are owned separately (they are created and freed per
+	# duel) — hand them their own teardown rather than leaving three looping
+	# players behind a "stop everything" call.
+	_teardown_trial()
 	var players: Array[AudioStreamPlayer] = []
 	players.append_array(_decks)
 	players.append(_sting_player)

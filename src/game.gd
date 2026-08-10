@@ -1235,19 +1235,39 @@ func _in_tournament() -> bool:
 #        player_advances  goes straight to Tournament.report_result()
 #        lines            appended to the verdict card, in the player's words
 #
-# v1 policy, said out loud instead of hidden: this bracket has no third
-# outcome, so a drawn war advances the RIVAL — and the card says exactly that.
-func settle_tournament_draw(_result: int) -> Dictionary:
-	var tree := get_tree()
-	if tree != null:
-		await tree.process_frame   # the trial will want many; this wants one
-	return {
-		"player_advances": false,
-		"lines": [
-			"A drawn war wins no round — %s rides on in your place." % _rival_display,
-			"(Until the Trial by Fire is built, a draw does not advance you.)",
-		],
-	}
+# THE MINIGAME IS IN. A stalemate or an insufficient-material draw now drops
+# both kings into the arena (src/minigame/) and the last one standing takes the
+# round. Everything that makes that safe — harvesting the survivors, taking and
+# returning the frame, the wall-clock deadline, the fallback — lives in
+# TrialBridge, so this stays the four lines the banner above asked for.
+#
+# WHICH DRAWS: TrialBridge.BY_FIRE (stalemate + insufficient). A draw by
+# bookkeeping — threefold, fifty-move — still takes the old card, and the trial
+# is never run online (see TrialBridge._refuse_reason). In every refusal and
+# every failure the answer is the one this function shipped with: the rival
+# advances, and the `lines` say which of the two reasons it was.
+func settle_tournament_draw(result: int) -> Dictionary:
+	var bridge := TrialBridge.new()
+	var verdict: Dictionary = await bridge.run(self, result)
+	if bool(verdict.get("player_advances", false)):
+		# THE CALLER HARD-CODES DEFEAT. `_end_sequence` calls
+		# `_show_match_end(false, ...)` for every draw, which was right when a
+		# draw could only ever eliminate you — but a trial the player WINS
+		# advances the bracket while that card still offers "Return to the Hall
+		# of Banners". The seam is the only thing allowed to move in this file,
+		# so it repairs its own consequence: this runs deferred, i.e. after
+		# `_show_match_end` has written the button, and re-points it at the next
+		# round. The proper fix is one word in `_end_sequence` — pass the
+		# advance through instead of `false` — and belongs to whoever owns it.
+		var ride_on := func() -> void:
+			if not _victory_shown or Session.tournament == null \
+					or Session.tournament.is_champion():
+				return   # the throne branch already wrote its own ending
+			_next_action = "next_round"
+			if _continue_btn != null and is_instance_valid(_continue_btn):
+				_continue_btn.text = "Ride to the %s" % _next_round_name(Session.tournament)
+		ride_on.call_deferred()
+	return verdict
 
 
 func _end_sequence(result: int, player_won: bool) -> void:

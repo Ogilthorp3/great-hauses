@@ -97,9 +97,32 @@ var _shot_n := 0
 var _announced := false
 var _drive_demo := false
 
+## Set by TrialBridge when the arena runs INSIDE a live match. It changes what
+## the two "get me out of here" keys mean, and both changes are safety rather
+## than taste: standalone, Esc quits the process and R rebuilds the arena; in a
+## bracket decider, Esc quitting the game would take the tournament with it and
+## R would let a losing player reroll the maze until he wins.
+var embedded := false
+## True when the player walked away rather than fought. Kept distinct from
+## losing: the card says which one happened.
+var conceded := false
+
+## Which music tier the arena has asked for, in order. Evidence for the e2e:
+## the score is supposed to FOLLOW the duel (fuse -> kegs -> dragon), and the
+## only honest proof of that is the sequence the game actually asked for.
+var music_tier_log: Array[int] = []
+
 
 func _ready() -> void:
 	_board = get_node_or_null("Board")
+	# STANDALONE ONLY. When game.gd instances this scene the caller supplies the
+	# real survivors through start(), and an auto-start here would build a whole
+	# mocked arena first and throw it away one frame later — two halls, two
+	# grids, and 16 bannermen spawned for nothing. Auto-start is therefore
+	# conditional on BEING the scene, which is exactly when the cmdline flags
+	# below are meant for us.
+	if get_tree() != null and get_tree().current_scene != self:
+		return
 	var args := OS.get_cmdline_user_args()
 	for a in args:
 		if a == "--tbf-ai":
@@ -175,6 +198,7 @@ func start(cfg: Dictionary = {}) -> void:
 	_hud.name = "TrialHud"
 	add_child(_hud)
 	_hud.open()
+	_hud.set_embedded(embedded)   # R and Esc mean different things in a match
 
 	var hall := get_node_or_null("GreatHall")
 	if hall != null and hall.has_method("dress_for_match"):
@@ -206,11 +230,16 @@ func start(cfg: Dictionary = {}) -> void:
 
 	_running = true
 	_announced = false
+	# THE FUSE. Tier 1 is a bare motorik sequencer — the arena is quiet and
+	# nothing has been thrown yet. The other two tiers are the same loop with
+	# more layers, and they are already playing underneath at silence.
+	_music_tier(0)
 	_refresh_hud()
 
 
 func _teardown() -> void:
 	_running = false
+	_music_stop(0.0)   # a restart (R) cuts, it does not crossfade into itself
 	for n in [_fx, _incin, _wyrm, _hud]:
 		if n != null and is_instance_valid(n):
 			n.queue_free()
@@ -263,6 +292,10 @@ func _consume(events: Array) -> void:
 		match e["kind"]:
 			"keg_placed":
 				_fx.add_keg(grid.index(e["cell"]), _world(e["cell"]), e["fuse"])
+				# THE KEGS. Kick, tabor and bass arrive on the first jar that is
+				# actually thrown — the cue is the EVENT, not a stopwatch, so a
+				# cautious opening stays bare for as long as it stays cautious.
+				_music_tier(1)
 			"detonate":
 				_fx.drop_keg(grid.index(e["cell"]))
 				_fx.ignite(_world(e["cell"]))
@@ -283,6 +316,10 @@ func _consume(events: Array) -> void:
 				_begin_step(int(e["side"]), e["from"], e["to"], float(e["dur"]))
 			"sudden_death":
 				_wyrm.wake()
+				# THE WYRM. Lute, recorder and the hurdy-gurdy drone come in on
+				# the same event that wakes the dragon — the ring starts closing
+				# and the music stops being a pulse and becomes a piece.
+				_music_tier(2)
 			"torched":
 				var ti: int = grid.index(e["cell"])
 				_wyrm.torch(_world(e["cell"]))
@@ -298,10 +335,24 @@ func _consume(events: Array) -> void:
 				_finish(int(e["winner"]))
 
 
+## Walk away. The round is lost — that is the price, and it is stated on the
+## card — but the match, the bracket and the process all survive.
+func concede() -> void:
+	if not _running or _announced:
+		return
+	conceded = true
+	_running = false   # the arena stops taking input; the grid is left as it is
+	_finish(1)
+
+
 func _finish(side: int) -> void:
 	if _announced:
 		return
 	_announced = true
+	if conceded:
+		_hud.announce("YOU YIELD THE ARENA", HudScript.EMBER)
+		trial_finished.emit(side)
+		return
 	# THE DOUBLE KNOCKOUT NEEDS ITS OWN SENTENCE. When a chain takes both kings
 	# the grid still names a champion (BlastGrid.winner — a tournament cannot
 	# accept "nobody"), and the first cut announced that champion with "YOUR KING
@@ -380,6 +431,46 @@ func _play_clip(node: Node3D, clip: String, speed: float, blend: float) -> void:
 			return
 
 
+# ── the score ───────────────────────────────────────────────────────────────
+#
+# The arena drives MusicManager's three Trial-by-Fire layers; it does not own
+# an audio system of its own. The node is looked up rather than referenced as
+# the `Music` autoload global because the headless suites run this file with
+# `-s`, where no autoload exists — a hard reference would turn "no music" into
+# "no tests".
+
+
+func _music() -> Node:
+	var tree := get_tree()
+	if tree == null or tree.root == null:
+		return null
+	return tree.root.get_node_or_null("Music")
+
+
+func _music_tier(tier: int) -> void:
+	if not music_tier_log.is_empty() and music_tier_log[-1] == tier:
+		return
+	# The curve only ever climbs. Without this a jar thrown after the wyrm woke
+	# would pull the lute back out of the mix at the tensest moment in the mode.
+	if not music_tier_log.is_empty() and tier < music_tier_log[-1]:
+		return
+	music_tier_log.append(tier)
+	var m := _music()
+	if m == null:
+		return
+	if music_tier_log.size() == 1 and m.has_method("play_trial"):
+		m.play_trial(tier)
+	elif m.has_method("trial_tier"):
+		m.trial_tier(tier)
+
+
+func _music_stop(fade: float) -> void:
+	music_tier_log.clear()
+	var m := _music()
+	if m != null and m.has_method("stop_trial"):
+		m.stop_trial(fade)
+
+
 func _spawn_piece(piece_type: int, side: int, cell: Vector2i) -> Node3D:
 	var scene: PackedScene = load("res://scenes/piece_view.tscn")
 	var p: Node3D = scene.instantiate()
@@ -415,15 +506,51 @@ func _refresh_hud() -> void:
 # ── input ───────────────────────────────────────────────────────────────────
 
 
-func _unhandled_input(event: InputEvent) -> void:
-	if not (event is InputEventKey) or event.echo:
+## WHILE THE ARENA OWNS THE FRAME, IT OWNS THE KEYBOARD.
+##
+## THE SCAR, measured 2026-08-09: the match's own `_unhandled_key_input` reads
+## Esc as "return to the Hall of Banners" the moment `game_over` is set — and it
+## IS set, because the stalemate is what raised this arena. Godot runs
+## `_unhandled_key_input` BEFORE `_unhandled_input`, so the match answered first
+## and the very first Esc pressed inside a bracket decider abandoned the duel
+## and dropped the player at the menu. (In the e2e that re-entered the Hall,
+## re-installed the harness, and ran the whole scenario three times in one log —
+## which is how it was caught.) R would have reloaded the scene the same way,
+## and Cmd+Z would have offered a take-back on a war that is already over.
+##
+## `_input` runs before all of them, so embedded the arena consumes every key.
+## M is the one exception: it is the mute toggle and it harms nothing.
+func _input(event: InputEvent) -> void:
+	if not embedded or not (event is InputEventKey):
 		return
-	var key := (event as InputEventKey).keycode
+	if (event as InputEventKey).keycode == KEY_M:
+		return
+	_route_key(event as InputEventKey)
+	get_viewport().set_input_as_handled()
+
+
+## Standalone only — embedded, `_input` above has already routed the key.
+func _unhandled_input(event: InputEvent) -> void:
+	if embedded or not (event is InputEventKey):
+		return
+	_route_key(event as InputEventKey)
+
+
+func _route_key(event: InputEventKey) -> void:
+	if event.echo:
+		return
+	var key := event.keycode
 	if event.pressed:
 		match key:
 			KEY_ESCAPE:
-				get_tree().quit()
+				if embedded:
+					concede()   # a way out that costs the round, never the game
+				else:
+					get_tree().quit()
+				return
 			KEY_R:
+				if embedded:
+					return      # no rerolling a bracket decider
 				start({"seed": arena_seed + 1})
 				return
 			KEY_SPACE, KEY_ENTER, KEY_KP_ENTER:
