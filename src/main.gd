@@ -43,6 +43,11 @@ var _e2e_harness: Node = null
 
 func _ready() -> void:
 	_install_e2e_harness()   # FIRST: everything below may be under test
+	# visionOS: stand up XR BEFORE any scene is added, and hold the menu music
+	# until we know whether we are immersive (main.gd:60 fires it otherwise).
+	var xr := XRSession.start(get_tree())
+	if not xr.ok and OS.get_name() == "visionOS":
+		push_error("visionOS XR bring-up failed at '%s': %s" % [xr.step, xr.error])
 	var args := OS.get_cmdline_user_args()
 	if _wants_network_cmdline(args):
 		# DEFERRED on purpose: the SceneTree root will not accept a child while

@@ -102,5 +102,17 @@ func _main() -> void:
 	_ok("second bring_up still ok", r4.ok == true)
 	_ok("second bring_up did not re-run initialize()", not iface4.initialized)
 
+	# 5. On a non-visionOS host, is_immersive() must be false and start() must
+	#    fail at 'find' — the macOS build must keep booting normally.
+	# Case 4 leaves the once-only guard 'up' (its second bring_up succeeded
+	# without re-running anything) — reset here too, or XS.start() below would
+	# short-circuit straight to {ok: true, step: "done"} and this case would
+	# prove nothing.
+	VB._reset_for_test()
+	const XS := preload("res://src/xr/xr_session.gd")
+	_ok("macOS host is not immersive", XS.is_immersive() == false)
+	var r5 := XS.start(self)
+	_ok("macOS start() fails at find", r5.ok == false and r5.step == "find")
+
 	print("=== %s ===" % ("PASS" if failures == 0 else "%d FAILURES" % failures))
 	quit(1 if failures > 0 else 0)
