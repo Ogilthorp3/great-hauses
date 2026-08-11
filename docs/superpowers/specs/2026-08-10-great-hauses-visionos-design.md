@@ -227,11 +227,34 @@ Camera inversion spans `src/cinematics/` (4,635 lines) **and** `src/minigame/tri
 
 ### 5.1 The rig
 
-XR bring-up is four calls, every one a silent failure if missed:
-`XRServer.find_interface("visionOSXR")` → `.initialize()` (it does **not** auto-initialize,
-`visionos_xr_interface.mm:194`) → `get_viewport().use_xr = true` → `XROrigin3D.current = true`.
-`XRCamera3D` near plane pinned ≥ 0.1 m. Hand and controller trackers initialize with the
-interface (`:246-256`) and are reached as `XRServer.get_tracker("/user/hand_tracker/left")`.
+XR bring-up is four calls, every one a silent failure if missed. It splits into **two
+phases**, because the rig does not exist when the interface must come up:
+
+**Phase 1, from `main.gd._ready()`, before any scene loads:**
+`XRServer.find_interface("visionOS")` → `.initialize()` (it does **not** auto-initialize,
+`visionos_xr_interface.mm:194`) → `get_viewport().use_xr = true`.
+
+> **The interface is named `"visionOS"`, not `"visionOSXR"`.** An earlier draft of this
+> spec said the latter; `modules/visionos_xr/visionos_xr_interface.mm:64` registers
+> `const String VisionOSXRInterface::name = "visionOS";` and `grep -rn "visionOSXR"` over
+> the engine returns nothing. `find_interface` is an exact string compare, so the wrong
+> name fails at step `"find"` on every launch and looks exactly like a missing headset.
+> Log `XRServer.get_interfaces()` on a `find` failure so the next mismatch names itself.
+
+**Phase 2, from `game.gd._ready()`, once `game.tscn` is live:** resolve the rig by group
+and set `XROrigin3D.current = true` and the `XRCamera3D` near plane ≥ 0.1 m. Phase 1
+must not be given the means to attempt a rig lookup, and must not latch a once-only
+guard on a bring-up whose rig phase has not run.
+
+**`project.godot` must set `xr/shaders/enabled=true`.** It defaults to `false`
+(`rendering_server.cpp:3816`), and multiview shader variants compile only when it is true
+(`scene_shader_forward_mobile.cpp:625-627`). The **Mobile** renderer — the only one
+visionOS immersive supports — has **no lazy fallback**; Clustered does
+(`render_forward_clustered.cpp:1888-1892`). Without it stereo cannot render and nothing
+reports it. Assert it in the build gate alongside `app_role`.
+
+Hand and controller trackers initialize with the interface (`:246-256`) and are reached
+as `XRServer.get_tracker("/user/hand_tracker/left")`.
 
 ### 5.2 The duel director — staging, not camerawork
 
