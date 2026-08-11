@@ -48,12 +48,22 @@ const XS := preload("res://src/xr/xr_session.gd")
 
 var failures := 0
 
+## Every assertion this run actually executed, printed as ASSERTIONS=<n> at
+## the end. run_e2e.sh's run_suite compares it against the count written in
+## that file's own header and FAILS the suite on a mismatch — because the two
+## header counts had silently drifted to half the real number (2026-08-10
+## adversarial audit), i.e. the header described a version of these files that
+## no longer existed. A hand-maintained number with nothing checking it is a
+## comment, not a count.
+var checks := 0
+
 
 func _initialize() -> void:
 	_main()
 
 
 func _ok(label: String, cond: bool) -> void:
+	checks += 1
 	if cond:
 		print("  ok   %s" % label)
 	else:
@@ -243,8 +253,19 @@ func _main() -> void:
 	_ok("XRSession._set_near returns false with no 'xr_camera' node",
 		XS._set_near(self, 0.1) == false)
 
-	# 11. THE ASSERTION THAT WOULD HAVE CAUGHT THE ORDERING SCAR, mechanism
-	#     half. Cases 1-10 prove the CONTRACT (phase 2 requires phase 1;
+	# 11. THE MECHANISM HALF of the ordering fix — NOT the ordering guard
+	#     itself. Correction (2026-08-10 adversarial audit): this case used to
+	#     be labelled "the assertion that would have caught the ordering scar".
+	#     It would not have. It calls XS.bind_rig(self) directly, from the
+	#     test; it never routes through main.gd or game.gd, so re-introducing
+	#     the defect (start() calling bind_rig() internally, game.gd's call
+	#     removed) leaves this whole suite green — re-verified at 46/46 after
+	#     this round's fixes, so it is a standing limitation, not a stale
+	#     note. Only
+	#     tests/test_xr_rig.gd's two behavioural call-site sections see that
+	#     class of defect. What this case genuinely proves is below.
+	#
+	#     Cases 1-10 prove the CONTRACT (phase 2 requires phase 1;
 	#     phase 1 cannot touch the rig). This case proves the PAYOFF: once
 	#     phase 1 is genuinely up AND the rig genuinely exists in a live
 	#     tree — the exact situation game.gd._ready() is in when it calls
@@ -284,7 +305,22 @@ func _main() -> void:
 	var r11 := XS.bind_rig(self)
 	_ok("rig-exists-when-called -> bind_rig ok", r11.ok == true)
 	_ok("rig-exists-when-called -> step 'done'", r11.step == "done")
-	_ok("rig-exists-when-called -> XROrigin3D.current flipped true", origin11.current == true)
+	# NOT `origin11.current == true` (2026-08-10 adversarial audit): the engine
+	# writes that itself on NOTIFICATION_ENTER_TREE for the first XROrigin3D to
+	# enter any live tree (scene/3d/xr/xr_nodes.cpp), so it read true even when
+	# VisionOSBoot.bind_rig() was gutted to `_rig_bound = true; return ok`
+	# without calling either dep Callable — a green line presented as this
+	# case's payoff while proving nothing. The write-back IS the payoff: only a
+	# real get_first_node_in_group("xr_origin") plus a real assignment can
+	# drive this node to false, and _set_origin_current re-reads the property
+	# rather than trusting the write. It is the positive counterpart to case
+	# 10's true-negative. Restored to true immediately after, so this case
+	# leaves the node exactly as the engine had it.
+	var wrote_false := XS._set_origin_current(self, false)
+	var read_false := origin11.current == false
+	var wrote_true := XS._set_origin_current(self, true)
+	_ok("rig-exists-when-called -> the REAL setter round-trips on the live node: false reads back false, true reads back true",
+		wrote_false and read_false and wrote_true and origin11.current == true)
 	_ok("rig-exists-when-called -> XRCamera3D.near clamped to the floor",
 		cam11.near >= VB.MIN_NEAR)
 	_ok("rig-exists-when-called -> XRSession now reports immersive",
@@ -299,5 +335,41 @@ func _main() -> void:
 	                        # (2026-08-10 review, final gate — XS's own latch was
 	                        # not covered by VB._reset_for_test() and stayed stuck)
 
+	# ── THE TWO VALUES NOTHING ELSE IN THIS SUITE NAMES ────────────────────
+
+	# 12. Both of these are single strings/keys that fail ONLY on real
+	#     hardware, silently, and both were previously covered by accident or
+	#     not at all (2026-08-10 adversarial audit, M6 and M7).
+	#
+	#     INTERFACE_NAME: reverting it to the old "visionOSXR" typo used to
+	#     surface as two array-equality failures in cases 1 and 3 whose labels
+	#     ("no viewport touched", "order is find,use_xr") never mention the
+	#     interface name at all — a reader of that failure output learns the
+	#     wrong thing. The engine registers the interface as "visionOS"
+	#     (visionos_xr_interface.mm:64, `const String
+	#     VisionOSXRInterface::name = "visionOS";` — the CLASS is
+	#     VisionOSXRInterface; the STRING it registers under is not), and
+	#     XRServer.find_interface() is an exact string compare, so a drift
+	#     here fails step "find" on every single device launch. This assertion
+	#     names itself.
+	_ok("VisionOSBoot.INTERFACE_NAME is the engine's registered string 'visionOS' (visionos_xr_interface.mm:64), not the class name",
+		VB.INTERFACE_NAME == "visionOS")
+	#     xr/shaders/enabled: multiview shader variants are compiled ONLY when
+	#     this project setting is true (scene_shader_forward_mobile.cpp:625-627
+	#     gates enable_multiview_shader_group() on it) and it defaults to FALSE
+	#     (rendering_server.cpp:3816). The Mobile renderer this project is
+	#     pinned to has no lazy fallback for a missing multiview variant
+	#     (render_forward_mobile.cpp:1033-1035), so deleting the key ships a
+	#     build that cannot render a stereo frame. The audit deleted it and
+	#     BOTH suites stayed 100% green: the only guard was
+	#     tools/build/assert_visionos_preset.py, which runs from
+	#     tools/build/build.sh — a different gate that run_e2e.sh's Gate A does
+	#     not invoke. A dev running the test suite got green on an unshippable
+	#     build. `false` is the default passed explicitly here so a DELETED key
+	#     is read as false and fails, exactly like an explicitly false one.
+	_ok("project.godot keeps xr/shaders/enabled true — the Mobile renderer has no lazy multiview fallback",
+		ProjectSettings.get_setting("xr/shaders/enabled", false) == true)
+
+	print("ASSERTIONS=%d" % checks)
 	print("=== %s ===" % ("PASS" if failures == 0 else "%d FAILURES" % failures))
 	quit(1 if failures > 0 else 0)
