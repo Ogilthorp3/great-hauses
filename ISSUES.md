@@ -1,6 +1,8 @@
 # Issues
 
-Lightweight tracker (repo has no remote yet — this file is the issue queue).
+Historical tracker — the issue queue from before this repo had a remote. The
+live queue is now [GitHub Issues](https://github.com/Ogilthorp3/great-hauses/issues);
+file new work there. Kept for the context behind each shipped pass.
 
 ## #1 — Knights should be mounted on horses
 **Status:** fixed, 2026-08-08 (mounted-knights pass) · **Requested:** Bert, 2026-08-08
