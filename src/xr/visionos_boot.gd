@@ -86,6 +86,28 @@ static var _interface_up := false
 ## to run even though phase 1 already latched long before it.
 static var _rig_bound := false
 
+## The step the LAST bring_up() call returned at ("" = phase 1 has not been
+## attempted since boot / since the last reset). Two reasons it exists:
+##
+## 1. DIAGNOSTIC. main.gd only push_error()s the failure step on visionOS;
+##    anything that wants to ask "did phase 1 ever run on this host, and what
+##    did it conclude?" after the fact — a crash reporter, a HUD, a support
+##    dump — has no other way to find out, because a failed bring_up()
+##    deliberately changes no other state.
+##
+## 2. OBSERVABILITY OF THE CALL SITE. On every non-visionOS host phase 1 fails
+##    at "find" (XRServer has no interface by that name), and a failure leaves
+##    _interface_up false — i.e. bring_up() running and bring_up() never being
+##    called are, without this, indistinguishable from the outside. That made
+##    src/main.gd's phase-1 call site unprovable: a test could only check that
+##    the file CONTAINED the call, never that _ready() actually ran it (a
+##    2026-08-10 adversarial audit moved `XRSession.start(get_tree())` into a
+##    never-called function and every suite stayed green). This latch is the
+##    trace that makes the real thing observable — see tests/test_xr_rig.gd's
+##    "call-site wiring: behavioural (main.gd)" section, which mounts the real
+##    main.tscn and asserts this reads "find" afterwards.
+static var _last_bring_up_step := ""
+
 ## Static, not per-instance: both bring_up() and bind_rig() are called as
 ## static funcs with no object of their own to hold state on, and the guards
 ## have to survive across unrelated callers within the same run (e.g. a
@@ -99,6 +121,7 @@ static var _rig_bound := false
 static func _reset_for_test() -> void:
 	_interface_up = false
 	_rig_bound = false
+	_last_bring_up_step = ""
 
 
 ## PHASE 1 — see the class doc. deps: {find_interface, set_use_xr}.
@@ -106,9 +129,15 @@ static func _reset_for_test() -> void:
 ## attempt a rig lookup even by mistake, because nothing here is given the
 ## means to perform one.
 static func bring_up(deps: Dictionary) -> Dictionary:
+	# Every return below records its step in _last_bring_up_step first (see
+	# that var's doc): it is the ONLY trace this phase leaves on a host where
+	# it fails, and therefore the only way anything outside can tell "phase 1
+	# ran and failed at find" from "phase 1 was never called at all".
 	if _interface_up:
+		_last_bring_up_step = "done"
 		return {"ok": true, "step": "done", "error": ""}
 
+	_last_bring_up_step = "find"
 	var iface = deps["find_interface"].call(INTERFACE_NAME)
 	if iface == null:
 		# A wrong INTERFACE_NAME must not look like "no device" — it looks
@@ -127,12 +156,14 @@ static func bring_up(deps: Dictionary) -> Dictionary:
 			"error": "no XRInterface named '%s' — is this a visionOS build?" % INTERFACE_NAME}
 
 	# The interface does NOT auto-initialize.
+	_last_bring_up_step = "initialize"
 	if not iface.initialize():
 		return {"ok": false, "step": "initialize",
 			"error": "XRInterface.initialize() returned false"}
 
 	deps["set_use_xr"].call(true)
 	_interface_up = true
+	_last_bring_up_step = "done"
 	return {"ok": true, "step": "done", "error": ""}
 
 

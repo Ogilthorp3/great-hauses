@@ -21,7 +21,7 @@
 #               arena, the two difficulty enums agreeing 1:1, the survivors
 #               harvested from a real stalemate, the contract shape on every
 #               refusal, and the three music tiers being one 60.000 s loop)
-#               and the visionOS XR BRING-UP state machine (29 — the exact
+#               and the visionOS XR BRING-UP state machine (46 — the exact
 #               find/initialize/use_xr/origin/near order, every silent-
 #               failure step reported by name with a non-empty diagnostic,
 #               a second bring_up on an already-up session genuinely
@@ -37,15 +37,33 @@
 #               XRSession._set_origin_current/_set_near helpers — not just
 #               VisionOSBoot's handling of a fake false return — proven to
 #               report false on this host's genuinely empty "xr_origin"/
-#               "xr_camera" groups), and the XR RIG itself (9 — Task 5b:
-#               scenes/game.tscn's XROrigin3D/XRCamera3D resolve by the exact
-#               "xr_origin"/"xr_camera" groups xr_session.gd looks up, the
-#               camera's near plane already clears VisionOSBoot.MIN_NEAR,
-#               NEITHER new node is `current` in the saved scene, and the
-#               pre-existing CameraRig/Camera3D is untouched and still the
-#               one current camera — the assertion that catches the rig
-#               stealing the desktop viewport before test_e2e's screen-
-#               geometry scenarios would)                         — Gate A
+#               "xr_camera" groups, the real origin setter proven by a
+#               WRITE-BACK the engine does not force, and the two values
+#               nothing else names: INTERFACE_NAME == "visionOS" and
+#               project.godot's xr/shaders/enabled, without which the Mobile
+#               renderer ships a build that cannot draw a stereo frame),
+#               and the XR RIG AND ITS TWO CALL SITES (35 — Task 5b plus the
+#               ordering fix: scenes/game.tscn's XROrigin3D/XRCamera3D
+#               resolve by the exact "xr_origin"/"xr_camera" groups
+#               xr_session.gd looks up, the camera's near plane already
+#               clears VisionOSBoot.MIN_NEAR, neither node is `current` in
+#               the saved scene — the origin read from the .tscn's TEXT,
+#               because an XROrigin3D does not retain that property pre-tree
+#               and the property read could not fail — the pre-existing
+#               CameraRig/Camera3D untouched and still the one current
+#               camera, and then the part no .tscn check can cover: the real
+#               main.tscn mounted into a real tree, proving main.gd._ready()
+#               EXECUTED phase 1 (not merely contains the text — a call
+#               moved into a never-invoked function used to pass), and the
+#               real game.tscn mounted twice, once with its near plane
+#               deliberately broken to 0.01 so only a real bind can repair
+#               it, and once with the rig removed so a bind that reports
+#               success without touching a node comes back red)  — Gate A
+#
+#               The two counts above are ENFORCED, not decorative: both XR
+#               suites print ASSERTIONS=<n> and run_suite fails on a
+#               mismatch. They had drifted to half the real number before a
+#               2026-08-10 audit noticed.
 #   boot        windowed: select flows to game, 32 pieces, banners+HUD dyed
 #   orientation windowed: --debug-coords labeled overlay from the default
 #               player camera, saved as labeled.png — the permanent
@@ -288,9 +306,9 @@ run_tests() {
   return 1
 }
 
-run_suite() {  # <name> <res://script>  (suite exits 0 = green)
-  local name="$1" script="$2"
-  local log="$RUN_DIR/suite-$name.log" rc
+run_suite() {  # <name> <res://script> [expected-assertions]  (suite exits 0 = green)
+  local name="$1" script="$2" want="${3:-}"
+  local log="$RUN_DIR/suite-$name.log" rc got
   note "tests: $name suite headless"
   run_with_timeout 300 "$log" "$GODOT" --headless --path "$PROJ" -s "$script"
   rc=$?
@@ -302,12 +320,27 @@ run_suite() {  # <name> <res://script>  (suite exits 0 = green)
     record "$name" FAIL "suite failed to compile — no checks ran (log: $log)"
     return 1
   fi
-  if [ "$rc" -eq 0 ]; then
-    record "$name" PASS "exit 0"
-    return 0
+  if [ "$rc" -ne 0 ]; then
+    record "$name" FAIL "exit=$rc (log: $log)"
+    return 1
   fi
-  record "$name" FAIL "exit=$rc (log: $log)"
-  return 1
+  # An assertion COUNT, checked, for suites that print one. Exit 0 says
+  # "nothing that ran went red"; it says nothing about how much ran. This
+  # header's own counts for the two XR suites had drifted to roughly half the
+  # real number (2026-08-10 adversarial audit) — describing a version of those
+  # files that no longer existed — and nothing noticed, because a number in a
+  # comment is not a check. Now the suite prints ASSERTIONS=<n> and a
+  # mismatch with the count written above is a FAIL, so the header cannot
+  # drift again and neither can a silently gutted suite.
+  if [ -n "$want" ]; then
+    got=$(grep -Eo '^ASSERTIONS=[0-9]+' "$log" | tail -1 | cut -d= -f2)
+    if [ "$got" != "$want" ]; then
+      record "$name" FAIL "assertion count drifted: run_e2e.sh's header says $want, the suite ran ${got:-none} (log: $log)"
+      return 1
+    fi
+  fi
+  record "$name" PASS "exit 0${want:+, $want assertions}"
+  return 0
 }
 
 # ── One windowed scenario launch ───────────────────────────────────────────
@@ -365,8 +398,11 @@ for step in "${STEPS[@]}"; do
       run_suite promotion-suite res://tests/test_promotion.gd || SUITE_RC=1
       run_suite minigame-suite res://tests/test_minigame.gd || SUITE_RC=1
       run_suite trial-wiring-suite res://tests/test_trial_wiring.gd || SUITE_RC=1
-      run_suite visionos-boot-suite res://tests/test_visionos_boot.gd || SUITE_RC=1
-      run_suite xr-rig-suite res://tests/test_xr_rig.gd || SUITE_RC=1
+      # The two XR suites carry their expected assertion count (see run_suite
+      # and this file's header): exit 0 alone would not notice a suite that
+      # quietly stopped running half its checks.
+      run_suite visionos-boot-suite res://tests/test_visionos_boot.gd 46 || SUITE_RC=1
+      run_suite xr-rig-suite res://tests/test_xr_rig.gd 35 || SUITE_RC=1
       ;;
     boot)      run_scenario boot || SUITE_RC=1 ;;
     orientation) run_scenario orientation "--debug-coords" || SUITE_RC=1 ;;
