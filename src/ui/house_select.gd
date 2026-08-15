@@ -288,10 +288,8 @@ func _confirm_opponent() -> void:
 func _on_mode_pressed(i: int) -> void:
 	if phase != Phase.MODE:
 		return
-	if _mode_index == i:
-		_start_war()
-	else:
-		_set_mode_index(i)
+	_set_mode_index(i)
+	_start_war()
 
 
 func _start_war() -> void:
