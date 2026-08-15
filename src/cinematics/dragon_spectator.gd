@@ -212,9 +212,9 @@ const ASHFALL_LINES: Array[String] = [
 ## what keeps the ceremony's framing identical to the one that was tuned.
 ## Root y carries the +1.15 × rig_scale lift the ground-origin serpent-wyrm
 ## needs (DragonRig.BODY_RISE).
-@export var perch_position := Vector3(0.0, 6.02, 11.2)   ## 4.70 + 1.15×1.15
+@export var perch_position := Vector3(0.0, 9.2, 11.2)   ## perch height adjusted for big scale
 @export var perch_yaw := PI            ## face the board (-Z)
-@export var dragon_scale := 1.15
+@export var dragon_scale := 3.6        ## massive colossal dragon
 @export var idle_speed := 0.55         ## slow Flying_Idle loop in the air
 @export var bob_amplitude := 0.14
 @export var bob_speed := 0.8           ## rad/s of the bob sine
@@ -223,14 +223,6 @@ const ASHFALL_LINES: Array[String] = [
 @export var glance_max_gap := 10.0
 
 # CEREMONY wall-clock timings (exported so tests can shrink them).
-# MATCH budget: stir .55 + rise .9 + roar 1.2 (THE WAKE, 2.65) + bank 2.0
-#   + flare .7 + inhale .6 + breath 2.8 + linger 1.6 + return 1.1 ≈ 11.5 s,
-#   worst case 12.7 with the linger's bounded +1.2 wait for the last remains.
-#   The slow-mo dip runs CONCURRENTLY with the stir and costs nothing.
-#   (Was 11.65 worst before the wake; the bank gave back 0.6 and the linger's
-#   bail 1.0 — the arc costs the budget ~1 s net, and is the point of it.)
-# CHAMPIONSHIP: match minus return, plus crown-bank 1.3 + settle 1.4
-#   + caption beats ~1.7 ≈ 15.9 s <= 16 s.
 @export var ash_stir_wall := 0.55      ## the head comes off the stone
 @export var ash_rise_wall := 0.9       ## Land_Settle backwards: it stands up
 @export var ash_roar_wall := 1.2       ## THE ROAR — on the ground, before the wings
@@ -248,13 +240,13 @@ const ASHFALL_LINES: Array[String] = [
 @export var ash_collapse_wall := 0.8   ## Death_A is retimed to fit this window
 @export var ash_char_wall := 0.4       ## tint -> charcoal (Tidegrip char-in-place)
 @export var ash_crumble_wall := 0.45   ## final sink into the stone, then freed
-@export var ash_hover_height := 1.61   ## root y while breathing (0.00 + 1.15×1.4)
-@export var ash_hover_backoff := 3.6   ## distance from the losers' centroid
+@export var ash_hover_height := 3.8    ## root y while breathing for giant dragon
+@export var ash_hover_backoff := 5.2   ## distance from the losers' centroid
 @export var ashfall_slow_scale := 0.55
-@export var ceremony_scale := 1.4      ## the wyrm swells for the ceremony
-@export var champ_scale := 1.6         ## …and larger still upon the throne
-@export var bank_radius := 8.6         ## inside the ±12 walls and 10.6-radius pillars
-@export var bank_height := 5.11        ## bank floor root y (3.50 + 1.15×1.4)
+@export var ceremony_scale := 4.8      ## the wyrm swells for the ceremony
+@export var champ_scale := 5.4         ## …and larger still upon the throne
+@export var bank_radius := 9.4         ## inside the ±12 walls and 10.6-radius pillars
+@export var bank_height := 7.0         ## bank floor root y for giant dragon
 @export var failsafe_wall_sec := 20.0   ## > the championship worst case (15.9)
 
 ## Integrator references (both duck-typed, both optional):

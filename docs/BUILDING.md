@@ -33,12 +33,12 @@ Sub-targets when you don't need all of it:
 ./tools/build/build.sh freshness    # is the shipped .exe older than src/? (no Godot needed)
 ```
 
-Artifacts land in `../great-houses-dist/` (a sibling of the repo, deliberately **outside**
+Artifacts land in `../great-hauses-dist/` (a sibling of the repo, deliberately **outside**
 `res://` — a build dropped inside the project gets swept into the *next* export).
 
 ### The staleness gate — why `freshness` exists
 
-**Scar, 2026-08-09.** A `GreatHauses.exe` sat in `great-houses-dist/` with **seven source
+**Scar, 2026-08-09.** A `GreatHauses.exe` sat in `great-hauses-dist/` with **seven source
 files newer than it**, including the entire branding set. Every check we had was green:
 `file` said PE32+, the size was right, the pck index held all the expected paths. The
 artifact was simply a *photograph of an older tree*, and it was one step from being sent
@@ -70,13 +70,13 @@ To check an artifact you did **not** just build (e.g. one already zipped and abo
 sent):
 
 ```bash
-./tools/build/build.sh freshness --artifact ../great-houses-dist/windows/GreatHauses.exe
+./tools/build/build.sh freshness --artifact ../great-hauses-dist/windows/GreatHauses.exe
 ```
 
 ### Packaging for the friend
 
 ```bash
-cd ../great-houses-dist/for-a-friend
+cd ../great-hauses-dist/for-a-friend
 cp ../windows/GreatHauses.exe .
 zip -9 -X GreatHauses-windows-v0.1.0.zip GreatHauses.exe README.txt
 rm GreatHauses.exe          # keep only the zip under version-of-record
@@ -132,7 +132,7 @@ looking in the wrong place. `build.sh` checks this for you and says so in one li
 **One file: `GreatHauses.exe`.** Nothing else — no `.pck`, no runtime, no installer.
 
 What actually gets *sent* is
-`../great-houses-dist/for-a-friend/GreatHauses-windows-v0.1.0.zip` (~78 MiB): that one
+`../great-hauses-dist/for-a-friend/GreatHauses-windows-v0.1.0.zip` (~78 MiB): that one
 `.exe` plus a `README.txt`. The zip exists only because the `.exe` compresses ~47% and
 because a bare unsigned `.exe` arriving by itself is the most alarming thing you can put
 in someone's downloads folder.
@@ -169,12 +169,12 @@ echo "import rc=$?"
 
 # Windows
 "$GODOT" --headless --path . --export-release "Windows Desktop" \
-    ../great-houses-dist/windows/GreatHauses.exe
+    ../great-hauses-dist/windows/GreatHauses.exe
 echo "export rc=$?"
 
 # macOS
 "$GODOT" --headless --path . --export-release "macOS" \
-    ../great-houses-dist/macos/GreatHauses.app
+    ../great-hauses-dist/macos/GreatHauses.app
 ```
 
 `--export-release` returns **0** on success. It also returns 0 in some partial-failure
@@ -188,10 +188,10 @@ artifact that scar at the top of this file is about.
 ### Verifying a build
 
 ```bash
-file ../great-houses-dist/windows/GreatHauses.exe
+file ../great-hauses-dist/windows/GreatHauses.exe
 # -> PE32+ executable (GUI) x86-64 ..., for MS Windows
 
-python3 tools/build/pck_list.py ../great-houses-dist/windows/GreatHauses.exe \
+python3 tools/build/pck_list.py ../great-hauses-dist/windows/GreatHauses.exe \
     --count-only --assert-present hauses/index.json \
                  --assert-present hauses/winterfang/haus.json \
                  --assert-present src/houses/coats.json \

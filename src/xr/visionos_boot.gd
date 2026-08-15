@@ -179,9 +179,6 @@ static func bind_rig(deps: Dictionary) -> Dictionary:
 		return {"ok": false, "step": "not_active",
 			"error": "XR interface is not up — bring_up() must succeed before bind_rig() runs"}
 
-	if _rig_bound:
-		return {"ok": true, "step": "done", "error": ""}
-
 	if not deps["set_origin_current"].call(true):
 		return {"ok": false, "step": "origin",
 			"error": "no node made current in the 'xr_origin' group — is an XROrigin3D tagged?"}

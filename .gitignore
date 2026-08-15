@@ -5,3 +5,4 @@ test_e2e/artifacts/
 # Python bytecode from the generator scripts in tools/
 __pycache__/
 *.pyc
+artifacts/

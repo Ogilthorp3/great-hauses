@@ -17,7 +17,7 @@ Built with Godot 4.7.1. Runs on macOS and Windows.
 > 2 ms instead of hanging).
 >
 > **To send to a friend:**
-> `great-houses-dist/for-a-friend/GreatHauses-windows-v0.2.0.zip` — 85 MB zipped,
+> `great-hauses-dist/for-a-friend/GreatHauses-windows-v0.2.0.zip` — 85 MB zipped,
 > containing `GreatHauses.exe` (PE32+ GUI x86-64) and a README written for someone
 > non-technical.
 >
@@ -116,7 +116,7 @@ with no licence and no attribution required (`assets/music/trial/`).
 ### macOS
 
 ```bash
-open great-houses-dist/macos/GreatHauses.app
+open great-hauses-dist/macos/GreatHauses.app
 ```
 
 The bundle is **ad-hoc signed only and not notarized**, so on any Mac other than the

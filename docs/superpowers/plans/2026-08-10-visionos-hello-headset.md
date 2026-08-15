@@ -316,7 +316,7 @@ custom_features=""
 export_filter="all_resources"
 include_filter="*.json,*.txt,*LICENSE*"
 exclude_filter="test_e2e/*,tests/*,tools/*,hauses/_template/*,hauses/_examples/*,*.md,*.py,*.sh,assets/branding/*.ico,assets/branding/*.icns"
-export_path="../great-houses-dist/visionos/GreatHauses.xcodeproj"
+export_path="../great-hauses-dist/visionos/GreatHauses.xcodeproj"
 encryption_include_filters=""
 encryption_exclude_filters=""
 seed=0
@@ -355,8 +355,8 @@ build_visionos() {
   python3 "$(dirname "$0")/assert_visionos_preset.py" export_presets.cfg || return 1
   "$GODOT_VISIONOS_EDITOR" --headless --path . --import || return 1
   "$GODOT_VISIONOS_EDITOR" --headless --path . \
-    --export-release "visionOS" ../great-houses-dist/visionos/GreatHauses.xcodeproj || return 1
-  test -d ../great-houses-dist/visionos/GreatHauses.xcodeproj || {
+    --export-release "visionOS" ../great-hauses-dist/visionos/GreatHauses.xcodeproj || return 1
+  test -d ../great-hauses-dist/visionos/GreatHauses.xcodeproj || {
     echo "FAIL: no xcodeproj produced"; return 1; }
   echo "OK: visionOS xcodeproj exported"
 }
@@ -721,11 +721,12 @@ The end of this plan is a rendered frame on hardware. There is no simulator path
 cd /Users/bert/Projects/great-hauses
 ./tools/build/build.sh visionos
 ```
-Expected: exit 0, `OK: visionOS xcodeproj exported`, and `../great-houses-dist/visionos/GreatHauses.xcodeproj` exists.
+Expected: exit 0, `OK: visionOS xcodeproj exported`, and `../great-hauses-dist/visionos/GreatHauses.xcodeproj` exists.
 
 - [ ] **Step 2: Confirm the headset is paired and visible**
 
 ```bash
+cd ../great-hauses-dist/visionos
 xcrun devicectl list devices
 ```
 Expected: an `Apple Vision Pro` row, state `connected`. If absent, pair it in Xcode → Window → Devices and Simulators before continuing.
@@ -733,7 +734,7 @@ Expected: an `Apple Vision Pro` row, state `connected`. If absent, pair it in Xc
 - [ ] **Step 3: Build and install to the device**
 
 ```bash
-cd ../great-houses-dist/visionos
+cd ../great-hauses-dist/visionos
 xcodebuild -project GreatHauses.xcodeproj -scheme GreatHauses \
   -destination 'generic/platform=visionOS' \
   -configuration Release \

@@ -134,12 +134,9 @@ const THRONE_POS := Vector3(0.0, FLOOR_Y, 10.7)
 ## author: new_root_y = old_root_y + 1.15 × rig_scale. At DRAGON_SCALE 1.6
 ## that is 2.2 + 1.84 = 4.04, and the body still reads at the same y 5.56 it
 ## always did — which is why throne_focus() below did NOT move.
-const DRAGON_HOVER := Vector3(0.0, 4.04, 9.9)
-## Ceremony sizing (2026-08-08): the tableau dragon reads at 1.6 — the same
-## scale the DragonSpectator championship ceremony settles at, so the
-## hand-off from ashfall to tableau never pops. (test_dragon.gd asserts
-## both the scale and DRAGON_HOVER stay in sync with the spectator.)
-const DRAGON_SCALE := 1.6
+const DRAGON_HOVER := Vector3(0.0, 7.2, 9.9)
+## Ceremony sizing for imposing dragon in the Great Hall.
+const DRAGON_SCALE := 5.4
 
 ## Which house a piece of cloth belongs to. THE SEAM IS x = 0: everything on
 ## the player's side of the hall (x < 0, the west) flies the player, the
@@ -548,13 +545,14 @@ func _build_pillars() -> void:
 
 
 func _build_tables() -> void:
-	## Two feast tables along the side aisles (long axis runs Z), scaled to
+	## Feast table along the west aisle (long axis runs Z), scaled to
 	## the warriors' size, a pair of candle stands on each.
+	## (The east aisle table was removed to give the colossal dragon an open court).
 	var table_mesh := _extract_mesh(TABLE_SCENE)
 	var candle_mesh := _extract_mesh(CANDLE_SCENE)
-	for sx in [-1.0, 1.0]:
+	for sx in [-1.0]:
 		var table := MeshInstance3D.new()
-		table.name = "FeastTable_E" if sx > 0.0 else "FeastTable_W"
+		table.name = "FeastTable_W"
 		table.mesh = table_mesh
 		table.position = Vector3(9.0 * sx, FLOOR_Y, 0.0)
 		table.scale = Vector3.ONE * 0.65
@@ -785,7 +783,12 @@ func throne_dais() -> Vector3:
 ## rides 1.15 × spectator scale (1.15) higher than the old mid-air-root rig
 ## did — 5.0 + 1.3225 — and the body still reads at the same y 7.11.
 func spectator_perch() -> Vector3:
-	return Vector3(0.0, FLOOR_Y + 6.3225, WALL_HALF - 0.8)
+	return Vector3(0.0, FLOOR_Y + 9.2, WALL_HALF - 0.8)
+
+
+## Where the spectator wyrm sleeps: on the open stone in the east aisle beside the board.
+func dragon_rest() -> Vector3:
+	return Vector3(7.6, FLOOR_Y, 0.0)
 
 
 func _build_fill_lights() -> void:

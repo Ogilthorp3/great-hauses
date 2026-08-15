@@ -244,6 +244,67 @@ func _ready() -> void:
 	var xr_bind := XRSession.bind_rig(get_tree())
 	if not xr_bind.ok and OS.get_name() == "visionOS":
 		push_error("visionOS XR rig bind failed at '%s': %s" % [xr_bind.step, xr_bind.error])
+	# ---- XR DIAGNOSTIC LOG PHASE 2 (2026-08-12 bring-up) ----
+	var _xr_log := FileAccess.open("user://xr_debug.log", FileAccess.READ_WRITE)
+	if _xr_log:
+		_xr_log.seek_end()
+		_xr_log.store_line("\n--- Phase 2: game.gd._ready() ---")
+		_xr_log.store_line("xr_bind.ok: %s" % str(xr_bind.ok))
+		_xr_log.store_line("xr_bind.step: %s" % str(xr_bind.step))
+		_xr_log.store_line("xr_bind.error: %s" % str(xr_bind.get("error", "")))
+		_xr_log.store_line("XRSession.is_immersive(): %s" % str(XRSession.is_immersive()))
+		_xr_log.store_line("tree.root.use_xr: %s" % str(get_tree().root.use_xr))
+		var vp_size = get_tree().root.size
+		_xr_log.store_line("tree.root.size: %s" % str(vp_size))
+		var primary_iface = XRServer.primary_interface
+		_xr_log.store_line("XRServer.primary_interface: %s" % (primary_iface.name if primary_iface else "null"))
+		if primary_iface:
+			_xr_log.store_line("  initialized: %s" % str(primary_iface.is_initialized()))
+			_xr_log.store_line("  play_area_mode: %s" % str(primary_iface.xr_play_area_mode))
+		var xr_origin = get_tree().get_first_node_in_group("xr_origin")
+		var xr_cam = get_tree().get_first_node_in_group("xr_camera")
+		_xr_log.store_line("xr_origin: %s (current=%s, global_pos=%s)" % [
+			xr_origin.name if xr_origin else "null",
+			str(xr_origin.current) if xr_origin else "?",
+			str(xr_origin.global_position) if xr_origin else "?"])
+		_xr_log.store_line("xr_camera: %s (current=%s, global_pos=%s)" % [
+			xr_cam.name if xr_cam else "null",
+			str(xr_cam.current) if xr_cam else "?",
+			str(xr_cam.global_position) if xr_cam else "?"])
+		var orbit_cam = get_node_or_null("CameraRig/Camera3D")
+		_xr_log.store_line("orbit_cam.current: %s" % (str(orbit_cam.current) if orbit_cam else "null"))
+		_xr_log.store_line("--- end ---")
+		_xr_log.close()
+	# Camera setup: XR on visionOS, OrbitCamera on desktop
+	if XRSession.is_immersive():
+		var orbit_cam := get_node_or_null("CameraRig/Camera3D")
+		if orbit_cam:
+			orbit_cam.current = false
+		var orbit_rig := get_node_or_null("CameraRig")
+		if orbit_rig:
+			orbit_rig.set_process(false)
+			orbit_rig.set_process_unhandled_input(false)
+		var xr_cam := get_tree().get_first_node_in_group("xr_camera")
+		if xr_cam:
+			xr_cam.current = true
+	else:
+		var orbit_cam := get_node_or_null("CameraRig/Camera3D")
+		if orbit_cam:
+			orbit_cam.current = true
+
+	# Snapshot SubViewport for visual test tooling
+	var snap_vp := SubViewport.new()
+	snap_vp.name = "SnapViewport"
+	snap_vp.size = Vector2i(1280, 720)
+	snap_vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	snap_vp.use_xr = false
+	var snap_cam := Camera3D.new()
+	snap_cam.name = "SnapCamera"
+	snap_cam.fov = 50.0
+	snap_cam.near = 0.1
+	snap_cam.far = 100.0
+	snap_vp.add_child(snap_cam)
+	add_child(snap_vp)
 	var fen := ""
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--difficulty="):
@@ -395,6 +456,8 @@ func _setup_spectator() -> void:
 	var hall: GreatHall = get_node_or_null("GreatHall")
 	if hall != null:
 		spectator.perch_position = hall.spectator_perch()
+		if hall.has_method("dragon_rest"):
+			spectator.rest_position = hall.dragon_rest()
 		# The ceremony caption may never land on the throne or on the champion
 		# standing at its foot — it slides around them (CineCaption).
 		spectator.ceremony_avoid = [
@@ -530,6 +593,8 @@ func _spawn_from_state() -> void:
 		var piece_side := PieceView.House.FROST \
 			if ChessState.piece_color(c) == player_color else PieceView.House.EMBER
 		_spawn(CHAR_TO_TYPE[str(c).to_lower()], piece_side, sq_of(idx))
+	if board:
+		board.set_occupied_squares(views.keys())
 
 
 func _spawn(piece_type: PieceView.Type, piece_side: PieceView.House, sq: Vector2i) -> PieceView:
@@ -998,6 +1063,8 @@ func _animate_move(move, mover_is_ember: bool) -> void:
 
 func _refresh_turn_moves() -> void:
 	_turn_moves = state.legal_moves(true)
+	if board:
+		board.set_occupied_squares(views.keys())
 
 
 # -- undo / take-back (fat-finger insurance) --------------------------------
@@ -1644,7 +1711,28 @@ func _flash_oracle(text: String, sec: float) -> void:
 			_oracle_flash.visible = false)
 
 
+var _frame_diag_done := false
+var _frame_diag_count := 0
+
 func _process(_delta: float) -> void:
+	# Periodic visual frame capture from SnapViewport for tools/visionos/snap.py
+	_frame_diag_count += 1
+	var snap_cam: Camera3D = get_node_or_null("SnapViewport/SnapCamera")
+	var xr_cam := get_tree().get_first_node_in_group("xr_camera")
+	if snap_cam:
+		if xr_cam and is_instance_valid(xr_cam):
+			snap_cam.global_transform = xr_cam.global_transform
+		else:
+			var xr_orig: Node3D = get_tree().get_first_node_in_group("xr_origin")
+			if xr_orig and is_instance_valid(xr_orig):
+				snap_cam.global_position = xr_orig.global_position + Vector3(0, 1.2, 0)
+				snap_cam.look_at(Vector3(0, 0.22, 0), Vector3.UP)
+	if _frame_diag_count % 30 == 0:
+		var snap_vp: SubViewport = get_node_or_null("SnapViewport")
+		if snap_vp:
+			var img := snap_vp.get_texture().get_image()
+			if img:
+				img.save_png("user://screenshot_latest.png")
 	## Oracle thinking shimmer + elapsed seconds counter.
 	if oracle_thinking and _turn_label != null and not game_over:
 		var elapsed := (Time.get_ticks_msec() - _oracle_think_start_ms) / 1000.0
