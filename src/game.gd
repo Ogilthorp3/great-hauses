@@ -130,6 +130,7 @@ var _turn_moves: Array = []         # SAN-notated legal moves for side to move
 var _san_log: Array[String] = []
 
 var _turn_label: Label
+var _casualty_label: RichTextLabel
 var _move_list: RichTextLabel
 var _oracle_flash: Label
 var _oracle_caption: Label
@@ -1895,6 +1896,21 @@ func _build_hud() -> void:
 	_turn_label.position.y = 66
 	hud.add_child(_turn_label)
 
+	_casualty_label = RichTextLabel.new()
+	_casualty_label.name = "CasualtyLabel"
+	_casualty_label.bbcode_enabled = true
+	_casualty_label.fit_content = true
+	_casualty_label.scroll_active = false
+	_casualty_label.autowrap_mode = TextServer.AUTOWRAP_OFF
+	_casualty_label.add_theme_font_size_override("normal_font_size", 14)
+	_casualty_label.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	_casualty_label.anchor_left = 0.5
+	_casualty_label.anchor_right = 0.5
+	_casualty_label.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_casualty_label.position.y = 90
+	_casualty_label.custom_minimum_size = Vector2(800, 24)
+	hud.add_child(_casualty_label)
+
 	var ctx := Label.new()
 	ctx.name = "MatchContext"
 	if Session.configured:
@@ -1943,7 +1959,7 @@ func _build_hud() -> void:
 	_oracle_flash.anchor_left = 0.5
 	_oracle_flash.anchor_right = 0.5
 	_oracle_flash.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	_oracle_flash.position.y = 96
+	_oracle_flash.position.y = 118
 	hud.add_child(_oracle_flash)
 
 	# The take-back control: subtle, parked just above the move list it edits.
@@ -1995,7 +2011,7 @@ func _build_hud() -> void:
 	# showcase/10_throne_room.png — the best frame in the game had no readable
 	# dragon head. Everything a cinematic must not have to draw around is
 	# listed here; captions and the victory card are deliberately absent.
-	_hud_chrome.append_array([title, mottos, _turn_label, ctx,
+	_hud_chrome.append_array([title, mottos, _turn_label, _casualty_label, ctx,
 		_oracle_flash, _undo_btn, _move_list, _oracle_caption])
 	if _net_status != null:
 		_hud_chrome.append(_net_status)
@@ -2157,6 +2173,97 @@ func _update_turn_label(ai_thinking := false) -> void:
 			else "sending your move..."
 	else:
 		_turn_label.text = "%s to move" % _player_display
+	_update_casualties_hud()
+
+
+const PIECE_GLYPHS := {
+	"p": "♟",
+	"n": "♞",
+	"b": "♝",
+	"r": "♜",
+	"q": "♛",
+}
+
+
+func _compute_casualties() -> Dictionary:
+	var initial_w := {"p": 8, "n": 2, "b": 2, "r": 2, "q": 1}
+	var initial_b := {"p": 8, "n": 2, "b": 2, "r": 2, "q": 1}
+	var current_w := {"p": 0, "n": 0, "b": 0, "r": 0, "q": 0}
+	var current_b := {"p": 0, "n": 0, "b": 0, "r": 0, "q": 0}
+
+	if state != null and state.pieces != null:
+		for p in state.pieces:
+			if p == null:
+				continue
+			var p_str := str(p)
+			var p_lower := p_str.to_lower()
+			if p_lower == "k":
+				continue
+			if p_str == p_lower:
+				current_b[p_lower] = current_b.get(p_lower, 0) + 1
+			else:
+				current_w[p_lower] = current_w.get(p_lower, 0) + 1
+
+	var lost_w: Dictionary = {}
+	var lost_b: Dictionary = {}
+	var val_w := 0
+	var val_b := 0
+	var piece_values := {"p": 1, "n": 3, "b": 3, "r": 5, "q": 9}
+
+	for k in ["p", "n", "b", "r", "q"]:
+		var diff_w = maxi(0, initial_w[k] - current_w[k])
+		if diff_w > 0:
+			lost_w[k] = diff_w
+			val_w += diff_w * piece_values[k]
+		var diff_b = maxi(0, initial_b[k] - current_b[k])
+		if diff_b > 0:
+			lost_b[k] = diff_b
+			val_b += diff_b * piece_values[k]
+
+	return {
+		"lost_white": lost_w,
+		"lost_black": lost_b,
+		"val_white_lost": val_w,
+		"val_black_lost": val_b,
+		"advantage_white": val_b - val_w,
+	}
+
+
+func _format_casualty_side(lost: Dictionary) -> String:
+	if lost.is_empty():
+		return "[color=#666]none[/color]"
+	var parts: Array[String] = []
+	for k in ["q", "r", "b", "n", "p"]:
+		if lost.has(k) and lost[k] > 0:
+			var count: int = lost[k]
+			if count == 1:
+				parts.append(PIECE_GLYPHS[k])
+			else:
+				parts.append("%s×%d" % [PIECE_GLYPHS[k], count])
+	return " ".join(parts)
+
+
+func _update_casualties_hud() -> void:
+	if _casualty_label == null or state == null:
+		return
+	var cas := _compute_casualties()
+	var white_str := _format_casualty_side(cas["lost_white"])
+	var black_str := _format_casualty_side(cas["lost_black"])
+
+	var is_player_white := (player_color == 0)
+	var player_losses := white_str if is_player_white else black_str
+	var rival_losses := black_str if is_player_white else white_str
+	var player_adv: int = cas["advantage_white"] if is_player_white else -int(cas["advantage_white"])
+
+	var adv_str := ""
+	if player_adv > 0:
+		adv_str = "  [b][color=#ffd700]+%d[/color][/b]" % player_adv
+	elif player_adv < 0:
+		adv_str = "  [b][color=#e57373]-%d[/color][/b]" % abs(player_adv)
+
+	_casualty_label.text = "[center][color=#94a3b8]%s losses:[/color] %s%s   [color=#555]│[/color]   [color=#f59e0b]%s losses:[/color] %s[/center]" % [
+		_player_display, player_losses, adv_str, _rival_display, rival_losses
+	]
 
 
 # -- e2e hooks -------------------------------------------------------------
