@@ -71,11 +71,11 @@ const LOOPED_ANIMS := ["Idle_A", "Idle_B", "Walking_A", "Walking_B", "Walking_C"
 ## order; GRADE_ORDER there carries the same reasoning.
 const TYPE_HEIGHT := {
 	0: 0.78,   # PAWN
-	1: 1.02,   # ROOK (TowerBody stone height)
-	2: 1.22,   # KNIGHT (mounted: rider's helm atop the destrier)
-	3: 0.94,   # BISHOP
-	4: 1.14,   # QUEEN
-	5: 1.26,   # KING
+	1: 0.92,   # ROOK (TowerBody stone height)
+	2: 1.04,   # KNIGHT (mounted: rider's helm atop the destrier)
+	3: 0.86,   # BISHOP
+	4: 0.98,   # QUEEN (elegant, majestic crown, clear overhead sightlines)
+	5: 1.08,   # KING (majestic monarch, crowns the army without blocking pawns)
 }
 
 ## TYPE layer — the adventurer cast (all houses except Tidegrip).
