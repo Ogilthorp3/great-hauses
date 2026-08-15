@@ -1477,9 +1477,11 @@ func _die_burning() -> void:
 	lit.tween_method(flash, 0.0, 1.0, 0.18).set_trans(Tween.TRANS_QUAD)
 	await lit.finished
 	_ember_wisps()
-	_anim.speed_scale = 1.05
-	_anim.play(ANIM_DEATH, 0.06)
-	var window := PieceAssets.anim_length(ANIM_DEATH) / 1.05
+	var window := 0.8
+	if _anim != null:
+		_anim.speed_scale = 1.05
+		_anim.play(ANIM_DEATH, 0.06)
+		window = PieceAssets.anim_length(ANIM_DEATH) / 1.05
 	if piece_type == Type.KNIGHT:
 		_mounted_fall(window)
 	var char_it := func(f: float) -> void:
@@ -1489,8 +1491,9 @@ func _die_burning() -> void:
 				m.albedo_color = (e[1] as Color).lerp(CHAR_COLOR, f)
 				m.emission = CHAR_FLASH * (1.2 * (1.0 - f))   # the glow cools
 	var burn := create_tween()
-	burn.tween_method(char_it, 0.0, 1.0, window).set_trans(Tween.TRANS_SINE)
-	await burn.finished
+	if burn != null:
+		burn.tween_method(char_it, 0.0, 1.0, window).set_trans(Tween.TRANS_SINE)
+		await burn.finished
 
 
 ## Every surface on this piece, duplicated so the fire owns its own copy.
@@ -2683,14 +2686,18 @@ func _drop_banner() -> void:
 	banner.global_transform = xform
 	var mat := banner.material_override as StandardMaterial3D
 	if mat != null:
+		mat = mat.duplicate()
+		banner.material_override = mat
 		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	var tw := banner.create_tween().set_parallel(true)
-	tw.tween_property(banner, "position:y", banner.position.y - 0.55, 0.7) \
-		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
-	tw.tween_property(banner, "rotation:x", banner.rotation.x - 0.9, 0.7)
-	if mat != null:
-		tw.tween_property(mat, "albedo_color:a", 0.0, 0.7)
-	tw.chain().tween_callback(banner.queue_free)
+	var tw := banner.create_tween()
+	if tw != null:
+		tw.set_parallel(true)
+		tw.tween_property(banner, "position:y", banner.position.y - 0.55, 0.7) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+		tw.tween_property(banner, "rotation:x", banner.rotation.x - 0.9, 0.7)
+		if mat != null:
+			tw.tween_property(mat, "albedo_color:a", 0.0, 0.7)
+		tw.chain().tween_callback(banner.queue_free)
 
 
 ## THE TYPE VALUE LADDER — per-rank corrections to the house tint's VALUE.
