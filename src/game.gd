@@ -150,6 +150,8 @@ var blunder_count := 0               # e2e evidence: the blunder hook fired
 var _victory_panel: PanelContainer
 var _victory_label: Label
 var _continue_btn: Button
+var _concede_panel: PanelContainer
+var _concede_btn: Button
 var _victory_shown := false
 var _next_action := "rematch"       # "rematch" | "next_round" | "hall"
 
@@ -289,9 +291,12 @@ func _ready() -> void:
 		if xr_cam:
 			xr_cam.current = true
 	else:
-		var orbit_cam := get_node_or_null("CameraRig/Camera3D")
+		var orbit_cam := get_node_or_null("CameraRig/Camera3D") as Camera3D
 		if orbit_cam:
 			orbit_cam.current = true
+		var xr_cam := get_tree().get_first_node_in_group("xr_camera") as Camera3D
+		if xr_cam:
+			xr_cam.current = false
 
 	# Snapshot SubViewport for visual test tooling
 	var snap_vp := SubViewport.new()
@@ -639,6 +644,9 @@ func _on_square_clicked(sq: Vector2i) -> void:
 			_select(sq)
 		return
 	if sq == selected:
+		if is_own and piece != null and str(piece).to_lower() == "k":
+			_request_concede()
+			return
 		_clear_selection()
 		return
 	if is_own:
@@ -663,9 +671,12 @@ func _select(sq: Vector2i) -> void:
 	selected = sq
 	board.set_selected(sq)
 	_set_selected_glow(true)
+	var from_idx := idx_of(sq)
+	var piece = state.pieces[from_idx]
+	if _concede_btn != null:
+		_concede_btn.visible = (piece != null and str(piece).to_lower() == "k")
 	var targets: Array[Vector2i] = []
 	var captures: Array[Vector2i] = []
-	var from_idx := idx_of(sq)
 	for m in _turn_moves:
 		if m.from_square != from_idx:
 			continue
@@ -681,6 +692,8 @@ func _select(sq: Vector2i) -> void:
 func _clear_selection() -> void:
 	_set_selected_glow(false)
 	selected = null
+	if _concede_btn != null:
+		_concede_btn.visible = false
 	board.clear_highlights()
 
 
@@ -1576,6 +1589,46 @@ func _return_to_hall() -> void:
 	get_tree().change_scene_to_file(MAIN_SCENE)
 
 
+func _request_concede() -> void:
+	if game_over or busy:
+		return
+	if _concede_panel != null:
+		_concede_panel.visible = true
+
+
+func _confirm_concede() -> void:
+	if _concede_panel != null:
+		_concede_panel.visible = false
+	if game_over or busy:
+		return
+	busy = true
+	game_over = true
+	_clear_selection()
+
+	# Find player's King and animate the royal fall
+	var king_sq: Variant = null
+	for sq in views:
+		var pv: PieceView = views[sq]
+		if is_instance_valid(pv) and pv.piece_type == PieceView.Type.KING \
+				and pv.piece_side == (PieceView.House.FROST if not player_color else PieceView.House.EMBER):
+			king_sq = sq
+			break
+
+	if king_sq != null and views.has(king_sq):
+		var king_pv: PieceView = views[king_sq]
+		if is_instance_valid(king_pv):
+			await king_pv.die("crumble")
+
+	if spectator != null and is_instance_valid(spectator):
+		spectator.react_capture(sq_of(0))
+
+	_show_match_end(false, "The King has fallen upon his sword!\n%s yields the Iron Throne — %s triumphs." % [
+		_player_display, _rival_display
+	])
+	busy = false
+	_update_turn_label()
+
+
 func _unhandled_key_input(event: InputEvent) -> void:
 	if not (event is InputEventKey and event.pressed and not event.echo):
 		return
@@ -1964,6 +2017,24 @@ func _build_hud() -> void:
 
 	# The take-back control: subtle, parked just above the move list it edits.
 	_undo_btn = Button.new()
+	# Concede prompt button (shown when King is selected)
+	_concede_btn = Button.new()
+	_concede_btn.name = "ConcedeButton"
+	_concede_btn.flat = true
+	_concede_btn.focus_mode = Control.FOCUS_NONE
+	_concede_btn.text = "🗡️ Fall Upon Thy Sword"
+	_concede_btn.tooltip_text = "Surrender the crown and yield the match"
+	_concede_btn.add_theme_font_size_override("font_size", 13)
+	_concede_btn.add_theme_color_override("font_color", Color(0.95, 0.45, 0.4))
+	_concede_btn.add_theme_color_override("font_hover_color", Color(1.0, 0.7, 0.65))
+	_concede_btn.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	_concede_btn.offset_left = -200
+	_concede_btn.offset_top = 18
+	_concede_btn.offset_right = -16
+	_concede_btn.visible = false
+	_concede_btn.pressed.connect(_request_concede)
+	hud.add_child(_concede_btn)
+
 	_undo_btn.name = "UndoButton"
 	_undo_btn.flat = true
 	_undo_btn.focus_mode = Control.FOCUS_NONE
@@ -1979,6 +2050,64 @@ func _build_hud() -> void:
 	_undo_btn.pressed.connect(_request_undo)
 	hud.add_child(_undo_btn)
 	_update_undo_button()
+
+	_concede_panel = PanelContainer.new()
+	_concede_panel.name = "ConcedePanel"
+	_concede_panel.visible = false
+	var c_style := StyleBoxFlat.new()
+	c_style.bg_color = Color(0.06, 0.04, 0.045, 0.96)
+	c_style.border_color = Color(0.8, 0.28, 0.2)
+	c_style.set_border_width_all(2)
+	c_style.corner_radius_top_left = 8
+	c_style.corner_radius_top_right = 8
+	c_style.corner_radius_bottom_left = 8
+	c_style.corner_radius_bottom_right = 8
+	c_style.set_content_margin_all(24)
+	_concede_panel.add_theme_stylebox_override("panel", c_style)
+	_concede_panel.set_anchors_preset(Control.PRESET_CENTER)
+	_concede_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_concede_panel.grow_vertical = Control.GROW_DIRECTION_BOTH
+
+	var cvbox := VBoxContainer.new()
+	cvbox.add_theme_constant_override("separation", 14)
+
+	var c_title := Label.new()
+	c_title.text = "FALL UPON THY SWORD?"
+	c_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	c_title.add_theme_font_size_override("font_size", 20)
+	c_title.add_theme_color_override("font_color", Color(0.95, 0.35, 0.3))
+	_outline(c_title, 5)
+	cvbox.add_child(c_title)
+
+	var c_desc := Label.new()
+	c_desc.text = "Will the King surrender the throne and drink the bitter draft of defeat?\nThe bards will sing of this craven surrender for a hundred winters."
+	c_desc.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	c_desc.add_theme_font_size_override("font_size", 14)
+	c_desc.add_theme_color_override("font_color", HUD_DIM)
+	_outline(c_desc, 3)
+	cvbox.add_child(c_desc)
+
+	var chbox := HBoxContainer.new()
+	chbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	chbox.add_theme_constant_override("separation", 20)
+
+	var c_yes := Button.new()
+	c_yes.text = "🗡️ I Yield the Crown (Resign)"
+	c_yes.add_theme_font_size_override("font_size", 14)
+	c_yes.add_theme_color_override("font_color", Color(1.0, 0.5, 0.45))
+	c_yes.pressed.connect(_confirm_concede)
+	chbox.add_child(c_yes)
+
+	var c_no := Button.new()
+	c_no.text = "🛡️ Fight to the Bitter End"
+	c_no.add_theme_font_size_override("font_size", 14)
+	c_no.add_theme_color_override("font_color", HUD_GOLD)
+	c_no.pressed.connect(func(): _concede_panel.visible = false)
+	chbox.add_child(c_no)
+
+	cvbox.add_child(chbox)
+	_concede_panel.add_child(cvbox)
+	hud.add_child(_concede_panel)
 
 	_move_list = RichTextLabel.new()
 	_move_list.name = "MoveList"
@@ -2250,10 +2379,10 @@ func _update_casualties_hud() -> void:
 	var white_str := _format_casualty_side(cas["lost_white"])
 	var black_str := _format_casualty_side(cas["lost_black"])
 
-	var is_player_white := (player_color == 0)
+	var is_player_white: bool = not player_color
 	var player_losses := white_str if is_player_white else black_str
 	var rival_losses := black_str if is_player_white else white_str
-	var player_adv: int = cas["advantage_white"] if is_player_white else -int(cas["advantage_white"])
+	var player_adv: int = int(cas["advantage_white"]) if is_player_white else -int(cas["advantage_white"])
 
 	var adv_str := ""
 	if player_adv > 0:

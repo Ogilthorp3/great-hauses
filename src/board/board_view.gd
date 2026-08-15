@@ -105,8 +105,11 @@ func pick_square(screen_pos: Vector2) -> Variant:
 var occupied_squares: Array[Vector2i] = []
 
 
-func set_occupied_squares(sqs: Array[Vector2i]) -> void:
-	occupied_squares = sqs.duplicate()
+func set_occupied_squares(sqs: Array) -> void:
+	occupied_squares.clear()
+	for s in sqs:
+		if s is Vector2i:
+			occupied_squares.append(s)
 
 
 func pick_square_ray(ray_origin: Vector3, ray_dir: Vector3) -> Variant:
