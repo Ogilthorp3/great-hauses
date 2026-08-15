@@ -61,7 +61,7 @@ const HOUSE_KEYS: Array[String] = ["FROST", "EMBER"]
 @export var duel_slow_hold_wall := 1.1  ## dwell at full slow-mo (the strike beat)
 @export var duel_ramp_up_wall := 0.7    ## time back up to 1.0 (death plays out)
 @export var duel_tail_wall := 1.2       ## hold when no strike callable is given
-@export var duel_slow_scale := 0.25
+@export var duel_slow_scale := 0.18
 @export var promo_wall := 2.2           ## promotion flourish hold
 @export var promo_slow_scale := 0.6
 @export var checkmate_slow_scale := 0.15
@@ -924,9 +924,22 @@ func _cam_orbit_checkmate(king: Node3D, seq: int) -> void:
 		await tree.process_frame
 
 
+var _prev_xr_transform: Transform3D = Transform3D.IDENTITY
+var _is_xr := false
+
+
 ## Adopt the viewport camera pose and become current. False when headless
 ## test rigs have no camera (camera phases are then skipped entirely).
 func _cam_take_viewport() -> bool:
+	var xr_orig: Node3D = get_tree().get_first_node_in_group("xr_origin") if get_tree() else null
+	if (OS.get_name() == "visionOS" or XRServer.primary_interface != null) and xr_orig != null:
+		_is_xr = true
+		_prev_xr_transform = xr_orig.global_transform
+		_cam_on = true
+		_last_tick = Time.get_ticks_msec()
+		return true
+
+	_is_xr = false
 	var vp := get_viewport()
 	if vp == null:
 		return false
@@ -946,6 +959,23 @@ func _cam_take_viewport() -> bool:
 
 func _cam_glide(seq: int, target: Transform3D, target_fov: float,
 		dur: float, arc: float) -> void:
+	if _is_xr:
+		var xr_orig: Node3D = get_tree().get_first_node_in_group("xr_origin") if get_tree() else null
+		if xr_orig != null and is_instance_valid(xr_orig):
+			var start_xf := xr_orig.global_transform
+			var sq := start_xf.basis.get_rotation_quaternion()
+			var target_pos := target.origin
+			if target != _prev_xr_transform:
+				target_pos.y = maxf(target.origin.y - 1.15, -0.65)
+			var tq := target.basis.get_rotation_quaternion()
+			var setter := func(e: float) -> void:
+				if not is_instance_valid(xr_orig):
+					return
+				var pos := start_xf.origin.lerp(target_pos, e) + Vector3.UP * (sin(e * PI) * arc)
+				xr_orig.global_transform = Transform3D(Basis(sq.slerp(tq, e)), pos)
+			await _wall_lerp(seq, setter, 0.0, 1.0, dur)
+			return
+
 	var start := _cam_base
 	var start_fov := _cam.fov
 	var sq := start.basis.get_rotation_quaternion()
@@ -961,6 +991,10 @@ func _cam_exit(seq: int) -> void:
 	if not _cam_on:
 		return
 	_shake_target = 0.0
+	if _is_xr:
+		await _cam_glide(seq, _prev_xr_transform, 50.0, return_wall, 0.0)
+		_cam_restore()
+		return
 	var end := _prev_cam.global_transform if is_instance_valid(_prev_cam) else _cam_base
 	var end_fov := _prev_cam.fov if is_instance_valid(_prev_cam) else _cam.fov
 	await _cam_glide(seq, end, end_fov, return_wall, 0.0)
@@ -970,6 +1004,14 @@ func _cam_exit(seq: int) -> void:
 func _cam_restore() -> void:
 	if not _cam_on:
 		return
+	if _is_xr:
+		var xr_orig: Node3D = get_tree().get_first_node_in_group("xr_origin") if get_tree() else null
+		if xr_orig != null and is_instance_valid(xr_orig):
+			xr_orig.global_transform = _prev_xr_transform
+		_cam_on = false
+		_is_xr = false
+		return
+
 	if is_instance_valid(_prev_cam):
 		_prev_cam.current = true
 	_cam.current = false

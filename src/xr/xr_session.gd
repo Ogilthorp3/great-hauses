@@ -89,6 +89,7 @@ static func _set_near(tree: SceneTree, v: float) -> bool:
 ## boot (game.tscn has not loaded). See bind_rig() for phase 2.
 static func start(tree: SceneTree) -> Dictionary:
 	var viewport := tree.root
+	viewport.vrs_mode = Viewport.VRS_XR
 	return VisionOSBootScript.bring_up({
 		"find_interface": func(n: String): return XRServer.find_interface(n),
 		"set_use_xr": func(v: bool) -> void: viewport.use_xr = v,

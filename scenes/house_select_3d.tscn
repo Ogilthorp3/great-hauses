@@ -1,0 +1,46 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://src/ui/house_select_3d.gd" id="1_h3d"]
+[ext_resource type="PackedScene" path="res://scenes/house_select.tscn" id="2_h2d"]
+
+[sub_resource type="Environment" id="Environment_h3d"]
+background_mode = 1
+background_color = Color(0.015, 0.012, 0.01, 1)
+ambient_light_source = 2
+ambient_light_color = Color(0.5, 0.48, 0.45, 1)
+ambient_light_energy = 0.9
+tonemap_mode = 3
+tonemap_exposure = 1.0
+
+[sub_resource type="QuadMesh" id="QuadMesh_panel"]
+size = Vector2(2.56, 1.44)
+
+[node name="HouseSelect3D" type="Node3D"]
+script = ExtResource("1_h3d")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_h3d")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.866, -0.25, 0.433, 0, 0.866, 0.5, -0.5, -0.433, 0.75, 0, 4, 0)
+light_color = Color(1, 0.95, 0.9, 1)
+light_energy = 1.0
+
+[node name="XROrigin3D" type="XROrigin3D" parent="." groups=["xr_origin"]]
+
+[node name="XRCamera3D" type="XRCamera3D" parent="XROrigin3D" groups=["xr_camera"]]
+current = true
+near = 0.1
+
+[node name="PanelMesh" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.25, -2.0)
+mesh = SubResource("QuadMesh_panel")
+
+[node name="SubViewport" type="SubViewport" parent="."]
+disable_3d = true
+msaa_2d = 2
+screen_space_aa = 1
+size = Vector2i(1920, 1080)
+render_target_update_mode = 4
+
+[node name="HouseSelect" parent="SubViewport" instance=ExtResource("2_h2d")]

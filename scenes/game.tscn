@@ -14,17 +14,14 @@
 ; stay dark; it is the BOARD that must read.
 [sub_resource type="Environment" id="Environment_gh"]
 background_mode = 1
-background_color = Color(0.027, 0.024, 0.031, 1)
+background_color = Color(0.02, 0.02, 0.04, 1)
 ambient_light_source = 2
-ambient_light_color = Color(0.3, 0.275, 0.265, 1)
-ambient_light_energy = 0.66
-tonemap_mode = 2
-tonemap_exposure = 1.12
-glow_enabled = true
-glow_intensity = 0.35
-fog_enabled = true
-fog_light_color = Color(0.1, 0.093, 0.115, 1)
-fog_density = 0.006
+ambient_light_color = Color(0.3, 0.28, 0.26, 1)
+ambient_light_energy = 0.4
+tonemap_mode = 3
+tonemap_exposure = 0.95
+glow_enabled = false
+fog_enabled = false
 
 [node name="Game" type="Node3D"]
 script = ExtResource("1_game")
@@ -41,67 +38,26 @@ script = ExtResource("3_cam")
 
 [node name="Camera3D" type="Camera3D" parent="CameraRig"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 11.5)
-current = true
+current = false
 fov = 50.0
 
-; The hall's one shadow caster. Its shadow was painted to full black and
-; hard-edged, so every piece sat in a punched hole (ISSUES.md #17). The RAKE
-; is unchanged (43 deg — lowering it only smears longer streaks across the
-; tiles); what changed is that the shadow is now a shadow and not a hole:
-; opacity 0.55, an angular penumbra, and blur. The ambient lift in the
-; Environment above does the rest of the work under each piece.
 [node name="Sun" type="DirectionalLight3D" parent="."]
 transform = Transform3D(-0.7738, 0.5645, -0.2866, 0, 0.4525, 0.8917, 0.6331, 0.69, -0.3503, 0, 8, 0)
-light_color = Color(0.64, 0.7, 0.82, 1)
-light_energy = 0.72
+light_color = Color(1.0, 0.94, 0.88, 1)
+light_energy = 1.1
 shadow_enabled = true
-shadow_opacity = 0.55
-shadow_blur = 1.6
+shadow_opacity = 0.8
+shadow_blur = 1.2
 light_angular_distance = 2.2
-; PERF #1 — the cascade was covering a world that does not exist.
-; directional_shadow_mode was the engine default (PARALLEL_4_SPLITS) over the
-; default 100 m. This hall is 24 m across and the orbit camera never leaves a
-; 4-13 m ring around the board, so EVERY caster sat inside all four splits and
-; was re-submitted four times: the shadow pass measured 417 of 855 draw calls
-; and 795 k of 1.02 M primitives, 3.6x the main pass. One split over 30 m
-; covers everything the camera can physically see (13 m orbit + 12 m far wall
-; + margin) and submits each caster once.
 directional_shadow_mode = 0
 directional_shadow_max_distance = 30.0
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="."]
 environment = SubResource("Environment_gh")
 
-; visionOS XR rig (Task 5b). XRSession._set_origin_current/_set_near
-; (src/xr/xr_session.gd) resolve these two nodes by GROUP, not by path — the
-; group names below must match "xr_origin"/"xr_camera" exactly, or bring-up
-; fails at step "origin"/"near" only on real hardware, never in this editor.
-;
-; Neither node sets `current` here in the saved file. XRCamera3D.current
-; is only ever flipped by XRSession.bind_rig() (phase 2, src/game.gd's
-; _ready(), gated on phase 1 — XRSession.start() in src/main.gd — already
-; having found the real XRInterface named "visionOS" via
-; XRServer.find_interface(), which returns null on Windows/macOS).
-;
-; CORRECTION (2026-08-10 review, final gate — IMPORTANT 1): the line that
-; used to be here claimed leaving XROrigin3D.current false in this file was
-; part of what keeps CameraRig/Camera3D the one current camera on desktop.
-; That is not true and was never testable that way: any XROrigin3D that
-; enters ANY live tree is forced `current = true` by the engine itself
-; (scene/3d/xr/xr_nodes.cpp NOTIFICATION_ENTER_TREE, "first entry always
-; becomes current") the instant this scene loads, on every platform,
-; regardless of bind_rig(). That is harmless and expected — XROrigin3D.
-; current governs which origin XR pose tracking applies against, not which
-; Camera3D the viewport renders through. The property that actually keeps
-; the desktop viewport on CameraRig/Camera3D is XRCamera3D.current staying
-; false (only bind_rig() ever sets it, and only past a real visionOS
-; interface), reinforced by CameraRig/Camera3D itself explicitly saving
-; `current = true` below and being declared first in this file — Godot
-; hands a Viewport's camera to the first Camera3D added when none is yet
-; current, so XRCamera3D would need BOTH of those to fail before it could
-; ever contend for it. tests/test_xr_rig.gd's BEHAVIOURAL call-site section
-; proves both halves on the real, tree-mounted scene.
 [node name="XROrigin3D" type="XROrigin3D" parent="." groups=["xr_origin"]]
+transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 0, 3.2, -5.8)
 
 [node name="XRCamera3D" type="XRCamera3D" parent="XROrigin3D" groups=["xr_camera"]]
+current = true
 near = 0.1

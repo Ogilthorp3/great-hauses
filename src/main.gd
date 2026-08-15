@@ -26,6 +26,7 @@ extends Node
 
 const GAME_SCENE := "res://scenes/game.tscn"
 const SELECT_SCENE: PackedScene = preload("res://scenes/house_select.tscn")
+const SELECT_3D_SCENE: PackedScene = preload("res://scenes/house_select_3d.tscn")
 const PROBE_FLAGS := ["--smoke", "--dump-tree", "--env-fps", "--env-banner-test", "--skip-select"]
 
 ## Where the last address a player joined is remembered between sessions.
@@ -43,35 +44,50 @@ var _e2e_harness: Node = null
 
 func _ready() -> void:
 	_install_e2e_harness()   # FIRST: everything below may be under test
-	# visionOS: stand up XR (phase 1) BEFORE any scene is added — see
-	# src/xr/visionos_boot.gd's class doc for why it has to happen here.
-	#
-	# CORRECTION (2026-08-10 review, final gate — IMPORTANT 3): this used to
-	# also claim menu music was held "until we know whether we are
-	# immersive." It never was — Music.play_menu() below runs unconditionally,
-	# on every platform, whether or not `xr.ok` came back true. That claim
-	# was also never completable at this line even in principle: `xr` only
-	# reports phase 1 (the XRInterface up); XRSession.is_immersive() is
-	# deliberately false until phase 2 (bind_rig(), src/game.gd's _ready())
-	# also succeeds, and game.tscn has not even loaded yet here — House
-	# Select is the very next thing this function shows, on every platform,
-	# regardless of `xr.ok`. Whether menu music should ever be held for a
-	# visionOS launch is an open product question, not something this file
-	# does today.
+	# visionOS: stand up XR (phase 1) BEFORE any scene is added
+	var _xr_log := FileAccess.open("user://xr_debug.log", FileAccess.WRITE)
+	if _xr_log:
+		_xr_log.store_line("=== XR DIAGNOSTIC LOG ===")
+		_xr_log.store_line("timestamp: %s" % Time.get_datetime_string_from_system())
+		_xr_log.store_line("OS.get_name(): %s" % OS.get_name())
+		_xr_log.store_line("--- Phase 1: XRSession.start() ---")
 	var xr := XRSession.start(get_tree())
+	if _xr_log:
+		_xr_log.store_line("xr.ok: %s" % str(xr.ok))
 	if not xr.ok and OS.get_name() == "visionOS":
 		push_error("visionOS XR bring-up failed at '%s': %s" % [xr.step, xr.error])
+
 	var args := OS.get_cmdline_user_args()
-	if _wants_network_cmdline(args):
-		# DEFERRED on purpose: the SceneTree root will not accept a child while
-		# the main scene is still being set up, and NetMatch has to live at
-		# /root to survive the swap into the match.
-		_boot_network_from_cmdline.call_deferred(args)
+	var all_args := OS.get_cmdline_args()
+	if _wants_network_cmdline(args) or _wants_network_cmdline(all_args):
+		_boot_network_from_cmdline.call_deferred(args if not args.is_empty() else all_args)
 		return
 	for flag in PROBE_FLAGS:
-		if args.has(flag):
+		if args.has(flag) or all_args.has(flag):
 			get_tree().change_scene_to_file.call_deferred(GAME_SCENE)
 			return
+
+	if xr.ok:
+		if _xr_log:
+			_xr_log.store_line("--- Launching 3D House Selection ---")
+			_xr_log.close()
+		var select_3d = SELECT_3D_SCENE.instantiate()
+		select_3d.name = "HouseSelect3D"
+		add_child(select_3d)
+		_select = select_3d.get_node_or_null("SubViewport/HouseSelect")
+		Music.play_menu()
+		select_3d.selection_complete.connect(_on_selection_complete)
+		if _select:
+			_select.net_host_requested.connect(_on_net_host_requested)
+			_select.net_join_requested.connect(_on_net_join_requested)
+			_select.net_cancelled.connect(_on_net_cancelled)
+			_select.net_remembered_address(_load_remembered_address())
+		_probe_oracle()
+		_probe_maester()
+		return
+
+	if _xr_log:
+		_xr_log.close()
 	_select = SELECT_SCENE.instantiate()
 	_select.name = "HouseSelect"
 	add_child(_select)
