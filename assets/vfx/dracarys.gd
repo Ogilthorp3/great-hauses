@@ -84,6 +84,11 @@ signal finished
 ## Seconds of ash drift after the embers are gone.
 @export var ash_tail: float = 4.5
 
+const JET_STEM_SHADER := preload("res://assets/vfx/jet_stem.gdshader")
+const GROUND_GLOW_SHADER := preload("res://assets/vfx/ground_glow.gdshader")
+const SHOCK_RING_SHADER := preload("res://assets/vfx/shock_ring.gdshader")
+const HEAT_SHIMMER_SHADER := preload("res://assets/vfx/heat_shimmer.gdshader")
+
 # ── palette (HDR — values above 1.0 are what makes glow bloom) ─────────────
 
 # Values above 1.0 bloom. They are deliberately MODEST: additive particles
@@ -842,7 +847,7 @@ func _build_core_jet() -> void:
 	_stem_mesh.cap_bottom = false
 
 	_stem_mat = ShaderMaterial.new()
-	_stem_mat.shader = load(_kit_dir() + "/jet_stem.gdshader")
+	_stem_mat.shader = JET_STEM_SHADER
 	_stem_mat.set_shader_parameter("noise_tex", _noise_tex)
 	_stem_mat.set_shader_parameter("energy", 1.5 * intensity)
 	_stem_mat.set_shader_parameter("tip_bite", 1.7)
@@ -1073,7 +1078,7 @@ func _build_embers_and_smoke() -> void:
 func _build_ground() -> void:
 	# the no-Light3D firelight pool
 	_glow_mat = ShaderMaterial.new()
-	_glow_mat.shader = load(_kit_dir() + "/ground_glow.gdshader")
+	_glow_mat.shader = GROUND_GLOW_SHADER
 	_glow_mat.set_shader_parameter("noise_tex", _noise_tex)
 	_glow_mat.set_shader_parameter("energy", 1.05 * intensity)
 	_glow_mat.set_shader_parameter("hot_core", 0.10)
@@ -1091,7 +1096,7 @@ func _build_ground() -> void:
 	ground.add_child(_glow)
 
 	_ground_ring_mat = ShaderMaterial.new()
-	_ground_ring_mat.shader = load(_kit_dir() + "/shock_ring.gdshader")
+	_ground_ring_mat.shader = SHOCK_RING_SHADER
 	_ground_ring_mat.set_shader_parameter("ring_color", Color(1.0, 0.62, 0.24))
 	var rq := QuadMesh.new()
 	rq.size = Vector2(1.0, 1.0)
@@ -1267,7 +1272,7 @@ func _build_ground() -> void:
 
 	# muzzle shock ring lives on the muzzle, built here for material reuse
 	_muzzle_ring_mat = ShaderMaterial.new()
-	_muzzle_ring_mat.shader = load(_kit_dir() + "/shock_ring.gdshader")
+	_muzzle_ring_mat.shader = SHOCK_RING_SHADER
 	_muzzle_ring_mat.set_shader_parameter("ring_color", Color(1.0, 0.80, 0.48))
 	_muzzle_ring_mat.set_shader_parameter("inner_glow", 0.45)
 	var mq := QuadMesh.new()
@@ -1312,7 +1317,7 @@ func _build_shimmer() -> void:
 	if not heat_shimmer_enabled:
 		return
 	_shimmer_mat = ShaderMaterial.new()
-	_shimmer_mat.shader = load(_kit_dir() + "/heat_shimmer.gdshader")
+	_shimmer_mat.shader = HEAT_SHIMMER_SHADER
 	_shimmer_mat.set_shader_parameter("noise_tex", _noise_tex)
 	_shimmer_mat.set_shader_parameter("amount", 0.0)
 	# 0.055 of SCREEN_UV is 5.5% of the frame — that is a liquid smear, not
