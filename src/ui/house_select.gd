@@ -497,37 +497,41 @@ func _build_backdrop() -> void:
 
 
 func _build_title() -> void:
+	var header := VBoxContainer.new()
+	header.name = "Header"
+	header.alignment = BoxContainer.ALIGNMENT_CENTER
+	header.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	header.anchor_left = 0.5
+	header.anchor_right = 0.5
+	header.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	header.position.y = 8
+	header.add_theme_constant_override("separation", 2)
+	add_child(header)
+
 	var mark := TextureRect.new()
 	mark.name = "Wordmark"
 	mark.texture = load("res://assets/branding/wordmark-great-houses-flat.png")
 	mark.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	mark.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	mark.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	mark.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	mark.position.y = 8
-	mark.custom_minimum_size = Vector2(1920, 56)
+	mark.custom_minimum_size = Vector2(360, 42)
 	mark.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(mark)
+	header.add_child(mark)
 
 	var title := Label.new()
 	title.name = "Title"
 	title.text = "THE HALL OF BANNERS"
-	title.add_theme_font_size_override("font_size", 22)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 20)
 	title.add_theme_color_override("font_color", TEXT_WARM)
-	title.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	title.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	title.position.y = 64
-	add_child(title)
+	header.add_child(title)
 
 	var sub := Label.new()
 	sub.name = "Subtitle"
 	sub.text = "Nine banners. One throne."
-	sub.add_theme_font_size_override("font_size", 16)
+	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sub.add_theme_font_size_override("font_size", 14)
 	sub.add_theme_color_override("font_color", TEXT_DIM)
-	sub.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	sub.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	sub.position.y = 92
-	add_child(sub)
+	header.add_child(sub)
 
 
 func _build_ring() -> void:
@@ -591,12 +595,23 @@ func _on_crest_hovered(index: int) -> void:
 func _layout_ring() -> void:
 	if _crests.is_empty():
 		return
-	var center := size * 0.5 + Vector2(0, 16)
-	var radius := minf(size.x, size.y) * RING_RADIUS_FRAC
+	var top_bound := 125.0
+	var bottom_bound := maxf(top_bound + 220.0, size.y - 70.0)
+	var center_y := (top_bound + bottom_bound) * 0.5
+	var center := Vector2(size.x * 0.5, center_y)
+
+	var max_radius_y := (bottom_bound - top_bound) * 0.5 - CREST_SIZE.y * 0.5 - 6.0
+	var max_radius_x := size.x * 0.5 - CREST_SIZE.x * 0.5 - 24.0
+	var radius := clampf(minf(max_radius_x, max_radius_y), 110.0, minf(size.x, size.y) * 0.35)
+
 	for i in _crests.size():
 		var ang := -TAU / 4.0 + TAU * i / _crests.size()
 		var pos := center + Vector2(cos(ang), sin(ang)) * radius - CREST_SIZE * 0.5
 		_crests[i].position = pos
+
+	if _preview != null:
+		_preview.set_anchors_preset(Control.PRESET_TOP_LEFT)
+		_preview.position = center - _preview.size * 0.5
 
 
 func _build_preview() -> void:
