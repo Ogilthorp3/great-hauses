@@ -1605,26 +1605,40 @@ func _confirm_concede() -> void:
 	game_over = true
 	_clear_selection()
 
-	# Find player's King and animate the royal fall
-	var king_sq: Variant = null
+	# 1. Collect all of the resigning player's living pieces
+	var loser_side: int = PieceView.House.FROST if not player_color else PieceView.House.EMBER
+	var loser_pieces: Array = []
+	var king_pv: PieceView = null
+
 	for sq in views:
 		var pv: PieceView = views[sq]
-		if is_instance_valid(pv) and pv.piece_type == PieceView.Type.KING \
-				and pv.piece_side == (PieceView.House.FROST if not player_color else PieceView.House.EMBER):
-			king_sq = sq
-			break
+		if is_instance_valid(pv) and pv.side == loser_side:
+			loser_pieces.append(pv)
+			if pv.piece_type == PieceView.Type.KING:
+				king_pv = pv
 
-	if king_sq != null and views.has(king_sq):
-		var king_pv: PieceView = views[king_sq]
-		if is_instance_valid(king_pv):
-			await king_pv.die("crumble")
+	# 2. The King dramatically falls upon his own blade
+	if king_pv != null and is_instance_valid(king_pv):
+		if king_pv._anim != null:
+			king_pv._anim.play("Death_B" if king_pv._anim.has_animation("Death_B") else "Death_A", 0.08)
+			king_pv._anim.speed_scale = 1.15
+		var tw := king_pv.create_tween().set_parallel(true)
+		if tw != null:
+			tw.tween_property(king_pv, "rotation:x", king_pv.rotation.x - 0.72, 0.42).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+			tw.tween_property(king_pv, "position:y", king_pv.position.y - 0.15, 0.42)
+			await tw.finished
+		await get_tree().create_timer(0.35).timeout
 
-	if spectator != null and is_instance_valid(spectator):
-		spectator.react_capture(sq_of(0))
+	# 3. The Dragon awakens, roars, and scorches the whole defeated army in fire!
+	if spectator != null and is_instance_valid(spectator) and not loser_pieces.is_empty():
+		_chrome_for_cinematic(true)
+		await spectator.play_ashfall(loser_side, _rival_display, loser_pieces, false)
+		_chrome_for_cinematic(false)
+		for lsq in views.keys():
+			if not is_instance_valid(views[lsq]):
+				views.erase(lsq)
 
-	_show_match_end(false, "The King has fallen upon his sword!\n%s yields the Iron Throne — %s triumphs." % [
-		_player_display, _rival_display
-	])
+	_show_match_end(false, "The King has fallen upon his sword!\nThe dragon consumes the fallen realm in fire — %s triumphs." % _rival_display)
 	busy = false
 	_update_turn_label()
 
