@@ -110,3 +110,20 @@ func _test_procedural_props() -> void:
 	check("flurry: node created", true, flurry != null)
 	check("flurry: contains 32 feathers", 32, flurry.get_child_count())
 	flurry.free()
+
+	# Verify Triforce sigil banner file and Haus Hyrule manifest
+	check("sigil: hyrule Triforce PNG exists", true, FileAccess.file_exists("res://assets/sigils/hyrule.png"))
+	var sigil_img := Image.load_from_file(ProjectSettings.globalize_path("res://assets/sigils/hyrule.png"))
+	check("sigil: loaded 512x512 image", true, sigil_img != null and sigil_img.get_width() == 512)
+
+	# Verify secret unlock of Haus Hyrule
+	var hs_dummy := Node.new()
+	var egg := ZeldaEasterEggsScript.new()
+	egg.trigger_zelda_secret(hs_dummy, "TRIFORCE SECRET!")
+	var hyrule: Dictionary = HouseRegistry.get_house("hyrule")
+	check("house: Haus Hyrule registered on secret", true, not hyrule.is_empty())
+	check("house: seat is Temple of Time", "Temple of Time", hyrule.get("seat", ""))
+	check("house: sigil is hyrule.png", "res://assets/sigils/hyrule.png", hyrule.get("sigil", ""))
+	check("house: coat is white_grey steed", "white_grey", hyrule.get("coat", ""))
+	egg.free()
+	hs_dummy.free()
