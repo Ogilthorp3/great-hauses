@@ -113,15 +113,29 @@ func set_occupied_squares(sqs: Array) -> void:
 
 
 func pick_square_ray(ray_origin: Vector3, ray_dir: Vector3) -> Variant:
-	## 3D volumetric ray picking for gaze & pinch on visionOS and XR.
-	## Tests 3D piece volumes ONLY on occupied squares (where pieces actually stand),
-	## then falls back to the board-top plane for empty destination tiles.
+	## 3D volumetric ray picking for desktop mouse, gaze & pinch on visionOS.
+	## Accurately tests piece bounding cylinders (R=0.30m, H=0.85m-1.15m) on occupied
+	## squares against floor plane hits, ensuring destination clicks are never blocked
+	## by foreground pieces.
 	var local_orig := global_transform.affine_inverse() * ray_origin
 	var local_dir := global_transform.basis.inverse() * ray_dir.normalized()
 
-	# 1. Test 3D piece cylinders ONLY on squares with actual living pieces
-	var best_sq: Variant = null
-	var best_t: float = 1e9
+	# 1. Compute floor plane intersection distance
+	var t_plane := 1e9
+	var plane_sq: Variant = null
+	var denom := Vector3.UP.dot(local_dir)
+	if absf(denom) > 1e-5:
+		var tp := (TILE_HEIGHT - local_orig.y) / denom
+		if tp > 0.0:
+			t_plane = tp
+			var hit := local_orig + local_dir * tp
+			var sq := world_to_square(hit)
+			if is_on_board(sq):
+				plane_sq = sq
+
+	# 2. Test 3D piece bounding cylinders on occupied squares
+	var best_piece_sq: Variant = null
+	var best_piece_t: float = 1e9
 	var o_xz := Vector2(local_orig.x, local_orig.z)
 	var d_xz := Vector2(local_dir.x, local_dir.z)
 	var d_len_sq := d_xz.length_squared()
@@ -132,30 +146,24 @@ func pick_square_ray(ray_origin: Vector3, ray_dir: Vector3) -> Variant:
 			var c_xz := Vector2(center3.x, center3.z)
 			var v := c_xz - o_xz
 			var t_val := v.dot(d_xz) / d_len_sq
-			if t_val <= 0.0 or t_val >= best_t:
+			if t_val <= 0.0 or t_val >= best_piece_t or t_val >= t_plane:
 				continue
 			var closest_xz := o_xz + d_xz * t_val
 			var dist_sq := (closest_xz - c_xz).length_squared()
-			if dist_sq <= (0.48 * 0.48):
+			# Accurate chibi piece radius: 0.32m
+			if dist_sq <= (0.32 * 0.32):
 				var y_at_t := local_orig.y + local_dir.y * t_val
-				if y_at_t >= TILE_HEIGHT - 0.05 and y_at_t <= TILE_HEIGHT + 1.6:
-					best_t = t_val
-					best_sq = sq
+				# Accurate piece height: 0.85m to 1.15m above tile height
+				if y_at_t >= TILE_HEIGHT - 0.02 and y_at_t <= TILE_HEIGHT + 1.15:
+					best_piece_t = t_val
+					best_piece_sq = sq
 
-	if best_sq != null:
-		return best_sq
+	# If a piece's upper body physically blocked the ray before reaching the floor, return that piece
+	if best_piece_sq != null and best_piece_t < t_plane:
+		return best_piece_sq
 
-	# 2. Fall back to flat board plane for empty destination tiles
-	var denom := Vector3.UP.dot(local_dir)
-	if absf(denom) > 1e-5:
-		var t_plane := (TILE_HEIGHT - local_orig.y) / denom
-		if t_plane > 0.0:
-			var hit := local_orig + local_dir * t_plane
-			var sq := world_to_square(hit)
-			if is_on_board(sq):
-				return sq
-
-	return null
+	# Otherwise, return the floor tile that was clicked
+	return plane_sq
 
 
 # -- input -----------------------------------------------------------------
