@@ -1,0 +1,73 @@
+{
+  "format": 1,
+  "id": "vinterdread",
+  "name": "Haus Vinterdread",
+  "archetype": "wolf",
+  "seat": "Jötunheim Keep",
+  "motto": "Winter is the final boss. We are its heralds.",
+  "colors": {
+    "primary": "#0d2838",
+    "secondary": "#48cae4",
+    "accent": "#e76f51"
+  },
+  "tints": {
+    "piece": "#90e0ef",
+    "tower": "#588b9e",
+    "kit": "#0077b6",
+    "saturation": 0.40
+  },
+  "coat": "dapple_grey",
+  "sigil": "sigil.png",
+  "crest": "crest.glb",
+  "pawn_helm": "pawn_helm.glb",
+  "materials": {
+    "vinterdread_antlers": "natural:bone",
+    "vinterdread_dreads": "natural:leather",
+    "vinterdread_cap": "kit"
+  },
+  "army": {
+    "pawn": "res://assets/kaykit-adventurers/Barbarian.glb",
+    "knight": "res://assets/kaykit-adventurers/Knight.glb",
+    "bishop": "res://assets/kaykit-adventurers/Mage.glb",
+    "queen": "res://assets/kaykit-adventurers/Rogue_Hooded.glb",
+    "king": "res://assets/kaykit-adventurers/Mage.glb"
+  },
+  "banter": {
+    "game_start": [
+      "The northern blizzard awakens. Let the ice decide our fates.",
+      "The ravens circle above the board. Valhalla awaits the fallen.",
+      "From the whiteout of Jötunheim, the Dread Wizard enters.",
+      "Draw your blades. In this winter, only the resolute endure."
+    ],
+    "player_captured": [
+      "A worthy sacrifice to the northern gale.",
+      "The Valkyries sing your piece to sleep.",
+      "Runes carved in frost cannot be unwritten.",
+      "The cold claims another."
+    ],
+    "rival_captured": [
+      "A fierce strike, but the blizzard only thickens.",
+      "Blood on the snow. The wolves smell the turning tide.",
+      "You wound the mountain, yet the mountain stands.",
+      "A fine trade. The Allfather smiles upon boldness."
+    ],
+    "check_given": [
+      "The frost-staff points at your king. Yield to the storm.",
+      "Check. The antlers of the Wendigo cast a long shadow.",
+      "Nowhere to run on this frozen board.",
+      "The final boss has arrived for your crown."
+    ],
+    "check_received": [
+      "A sharp frostbite, but our roots run deep in the permafrost.",
+      "You press the sovereign, yet winter does not yield.",
+      "The blizzard swirls tighter around our king.",
+      "Bold advance. Let us see if your line holds the frost."
+    ],
+    "game_end": [
+      "Skål! The winter feast begins in the great hall.",
+      "A glorious saga etched into the ice for all time.",
+      "The storm clears. Honor to all who crossed the board.",
+      "The saga is sung. Until the next blizzard."
+    ]
+  }
+}
