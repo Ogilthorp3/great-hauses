@@ -1309,14 +1309,15 @@ func _spawn_remains(piece: Node3D) -> Dictionary:
 	shell.add_child(model)
 	var raw_h := _mesh_height(model)
 	model.scale = Vector3.ONE * (victim_h / maxf(raw_h, 0.01))
-	# Charred pitch-black bones with glowing crimson/orange nuclear embers
+	# Zelda-Grade Scorched Bone Material: Realistic calcified ashen bone with subtle soot and faint dying ember warmth
 	var mats := _override_mats(model)
 	for e in mats:
 		var m: StandardMaterial3D = e[0]
-		m.albedo_color = Color(0.05, 0.05, 0.05)   # pitch-black charred soot
-		m.roughness = 0.95
+		m.albedo_color = Color(0.22, 0.20, 0.19)   # realistic weathered bone & charcoal ivory
+		m.roughness = 0.92
+		m.metallic = 0.0
 		m.emission_enabled = true
-		m.emission = Color(1.0, 0.32, 0.02) * 1.5    # Terminator 2 glowing nuclear ember seams
+		m.emission = Color(0.95, 0.45, 0.12) * 0.18    # delicate, realistic dying ember warmth
 	# The shared Rig_Medium library (PieceAssets autoload) animates the
 	# bones; without it (headless unit tests) they stand in rest pose and
 	# fall via the crumble fallback.
@@ -1352,10 +1353,10 @@ func _collapse_remains(entry: Dictionary, seq: int) -> void:
 		return   # _ash_finish sweeps the field
 
 	if keep_skeletons:
-		# Terminator 2 Grim Mode: Charred skeletons STAY on the stone floor!
+		# Zelda-Grade Realistic Bone: Subtle, faint warm ember trace in the bone fissures
 		for e in entry["mats"]:
 			var m: StandardMaterial3D = e[0]
-			m.emission = Color(1.0, 0.28, 0.02) * 0.75
+			m.emission = Color(0.85, 0.35, 0.08) * 0.04   # subtle, grounded, zero neon glow
 		return
 
 	var smoke = entry.get("smoke")
