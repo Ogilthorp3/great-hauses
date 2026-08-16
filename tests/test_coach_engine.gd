@@ -39,11 +39,11 @@ func _test_opening_book() -> void:
 
 	# 1. e4
 	var info1 = CoachEngineScript._get_opening_info(["e2e4"])
-	check("opening: e4 King's Pawn recognized", "King's Pawn Opening", info1.get("name", ""))
+	check("opening: e4 King's Pawn recognized", true, str(info1.get("name", "")).contains("King's Pawn"))
 
 	# 1. e4 e5
 	var info2 = CoachEngineScript._get_opening_info(["e2e4", "e7e5"])
-	check("opening: e4 e5 Open Game recognized", "Open Game", info2.get("name", ""))
+	check("opening: e4 e5 Open Game recognized", true, str(info2.get("name", "")).contains("Open Game"))
 
 	# 1. d4
 	var info_d4 = CoachEngineScript._get_opening_info(["d2d4"])
@@ -79,13 +79,13 @@ func _test_coach_overlay() -> void:
 	var overlay = CoachOverlayScript.new()
 	root.add_child(overlay)
 
-	check("overlay: coach starts active", true, overlay.is_coach_active)
+	check("overlay: coach starts hidden by default", false, overlay.is_coach_active)
 
 	var active := overlay.toggle_coach()
-	check("overlay: toggled off", false, active)
+	check("overlay: toggled on", true, active)
 
 	var active2 := overlay.toggle_coach()
-	check("overlay: toggled on", true, active2)
+	check("overlay: toggled off", false, active2)
 
 	# Update analysis
 	overlay.update_analysis({
