@@ -162,7 +162,26 @@ func play_duel(attacker: Node3D, victim: Node3D, meta: Dictionary = {},
 	_arm_failsafe(seq, failsafe_wall_sec)
 	_audio_capture()
 	var line := pick_kill_line(duel_context(attacker, victim, meta))
-	_cam_enter_duel(attacker, victim, seq)   # concurrent swoop
+
+	var tier: int = int(meta.get("tier", 0))
+	var cur_slow_scale: float = duel_slow_scale
+	var cur_hold_wall: float = duel_slow_hold_wall
+	var cur_ramp_down: float = duel_ramp_down_wall
+
+	if tier == 2:
+		cur_slow_scale = 0.15   # Deep cinematic showstopper slow-mo
+		cur_hold_wall = 1.10
+		cur_ramp_down = 0.18
+	elif tier == 1:
+		cur_slow_scale = 0.32   # Tactical flourish slow-mo
+		cur_hold_wall = 0.65
+		cur_ramp_down = 0.22
+	else:
+		cur_slow_scale = 0.55   # Standard strike
+		cur_hold_wall = 0.35
+		cur_ramp_down = 0.28
+
+	_cam_enter_duel(attacker, victim, seq, tier)   # concurrent swoop
 	# FACE TO FACE: both combatants turn to meet BEFORE the strike begins,
 	# then a per-frame yaw hold keeps them locked through it — a stale
 	# _face_home tween left by the preceding walk can never again leave a
@@ -176,9 +195,9 @@ func play_duel(attacker: Node3D, victim: Node3D, meta: Dictionary = {},
 		runner.call()
 	_face_hold(seq, attacker, victim, strike_done)   # concurrent yaw lock
 	_impact_shake(seq, victim)                       # concurrent: kick on the kill
-	await _wall_lerp(seq, _set_ts, Engine.time_scale, duel_slow_scale, duel_ramp_down_wall)
+	await _wall_lerp(seq, _set_ts, Engine.time_scale, cur_slow_scale, cur_ramp_down)
 	_show_caption(line, seq)
-	await _wall_wait(seq, duel_slow_hold_wall)
+	await _wall_wait(seq, cur_hold_wall)
 	await _wall_lerp(seq, _set_ts, Engine.time_scale, _prev_time_scale, duel_ramp_up_wall)
 	if not strike.is_valid():
 		await _wall_wait(seq, duel_tail_wall)
@@ -811,7 +830,7 @@ const FIGHTER_TOP := [0.95, 1.24, 1.52, 1.18, 1.40, 1.58]
 
 ## Swoop from the current viewport camera to a low side angle framing both
 ## fighters. No-op when there is no active camera (headless unit tests).
-func _cam_enter_duel(attacker: Node3D, victim: Node3D, seq: int) -> void:
+func _cam_enter_duel(attacker: Node3D, victim: Node3D, seq: int, tier: int = 0) -> void:
 	if not _cam_take_viewport():
 		return
 	var a := attacker.global_position if is_instance_valid(attacker) else Vector3.ZERO
@@ -820,17 +839,28 @@ func _cam_enter_duel(attacker: Node3D, victim: Node3D, seq: int) -> void:
 		[2.0, 0.42, duel_fov, 0.8])
 	# A small per-duel jitter on top of the type's frame: the same rank killing
 	# twice in a row is filmed from two slightly different places.
-	var lift: float = float(frame[1]) + randf_range(-0.08, 0.16)
+	var lift: float = float(frame[1]) + randf_range(-0.06, 0.12)
+	if tier == 2:
+		lift = 0.24 + randf_range(-0.03, 0.05) # Chessboard-level GoT battle camera!
+	elif tier == 1:
+		lift = 0.34 + randf_range(-0.04, 0.08)
+
 	var axis := v - a
 	axis.y = 0.0
 	axis = axis.normalized() if axis.length() > 0.01 else Vector3.FORWARD
 	var side := axis.cross(Vector3.UP).normalized()
 	var fov: float = float(frame[2])
+	if tier == 2:
+		fov = clampf(fov - 4.0, 26.0, 48.0) # Tighter cinematic lens
+
 	var fit := _duel_fit(a, v, axis, float(frame[3]),
 		maxf(_fighter_top(attacker), _fighter_top(victim)), fov)
 	var focus: Vector3 = fit["focus"]
 	var back := clampf(maxf(float(fit["back"]), float(frame[0]) * randf_range(0.97, 1.06)),
 		1.8, BACK_MAX)
+	if tier == 2:
+		back = clampf(back * 0.88, 1.75, BACK_MAX) # Closer intimate combat angle
+
 	# The point on the duel line the lens is SQUARE to (DUEL_FRAMES' 5th field,
 	# a FRACTION of the shot so it scales with it). The look-at stays `focus`
 	# either way — only the eye slides along the line.
