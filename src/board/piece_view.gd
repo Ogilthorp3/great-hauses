@@ -576,6 +576,48 @@ func play_capture(victim: PieceView) -> void:
 			await _kill_execution(victim)
 		_:
 			await _kill_stab(victim)
+	await play_victory_flourish()
+
+
+## Celebratory victory flourish after landing a capture (Dejarik HoloChess battle style)
+func play_victory_flourish() -> void:
+	var base_pos := position
+	match piece_type:
+		Type.KNIGHT:
+			var tw := create_tween()
+			tw.tween_property(self, "rotation:x", rotation.x - deg_to_rad(32.0), 0.16).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+			tw.parallel().tween_property(self, "position:y", base_pos.y + 0.25, 0.16)
+			tw.tween_property(self, "rotation:x", rotation.x, 0.14).set_trans(Tween.TRANS_BOUNCE).set_ease(Tween.EASE_OUT)
+			tw.parallel().tween_property(self, "position:y", base_pos.y, 0.14)
+			await tw.finished
+		Type.BISHOP:
+			var tw := create_tween()
+			tw.tween_property(self, "position:y", base_pos.y + 0.35, 0.2).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+			tw.parallel().tween_property(self, "rotation:y", rotation.y + TAU, 0.35)
+			tw.tween_property(self, "position:y", base_pos.y, 0.15).set_trans(Tween.TRANS_SINE)
+			await tw.finished
+		Type.ROOK:
+			var tw := create_tween()
+			tw.tween_property(self, "scale", Vector3(0.9, 1.18, 0.9), 0.12)
+			tw.tween_property(self, "scale", Vector3(1.15, 0.88, 1.15), 0.1)
+			tw.tween_property(self, "scale", Vector3(1.0, 1.0, 1.0), 0.12)
+			await tw.finished
+		Type.QUEEN:
+			var tw := create_tween()
+			tw.tween_property(self, "rotation:y", rotation.y + TAU, 0.28).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+			tw.parallel().tween_property(self, "position:y", base_pos.y + 0.15, 0.14)
+			tw.tween_property(self, "position:y", base_pos.y, 0.14)
+			await tw.finished
+		Type.KING:
+			var tw := create_tween()
+			tw.tween_property(self, "scale", Vector3(1.15, 1.15, 1.15), 0.15)
+			tw.tween_property(self, "scale", Vector3(1.0, 1.0, 1.0), 0.15)
+			await tw.finished
+		_: # Pawn
+			var tw := create_tween()
+			tw.tween_property(self, "position:y", base_pos.y + 0.2, 0.12).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+			tw.tween_property(self, "position:y", base_pos.y, 0.12).set_trans(Tween.TRANS_BOUNCE)
+			await tw.finished
 
 
 ## Hit reaction, death animation, then the corpse sinks into the stone.

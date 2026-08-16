@@ -177,6 +177,10 @@ func handle_key_input(event: InputEventKey, host: Node) -> bool:
 				_key_buffer = ""
 				trigger_cucco_attack(host)
 				return true
+			elif _key_buffer.ends_with("falcon") or _key_buffer.ends_with("wookiee") or _key_buffer.ends_with("dejarik"):
+				_key_buffer = ""
+				trigger_holochess_secret(host)
+				return true
 
 	# 3. Direct cheat key 'C' in debug/easter mode
 	if event.keycode == KEY_C and event.is_command_or_control_pressed():
@@ -255,6 +259,22 @@ static func _ensure_hyrule_registered() -> void:
 	}
 	HouseRegistry._by_id["hyrule"] = hyrule_data
 	HouseRegistry._order.append("hyrule")
+
+
+## Trigger Millennium Falcon Dejarik HoloChess Secret
+func trigger_holochess_secret(host: Node) -> void:
+	if host == null or not host.is_inside_tree():
+		return
+
+	# If host has HoloChessGamification, activate it
+	var hc: Node = host.get_node_or_null("HoloChessGamification")
+	var board_node: Node3D = host.get_node_or_null("Board")
+	if hc != null and board_node != null:
+		if hc.has_method("toggle_holochess_mode"):
+			hc.call("toggle_holochess_mode", board_node)
+
+	play_sound(host, get_fanfare_stream(), 0.9, 3.0)
+	_show_retro_banner(host, "★ LET THE WOOKIEE WIN ★", "Dejarik Holographic Battle Matrix Active")
 
 
 ## Trigger Master Sword drop and fanfare
