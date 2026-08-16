@@ -4,6 +4,8 @@ extends RefCounted
 ## Provides real-time tactical pattern recognition, blunder radar,
 ## threat evaluation, opening master book coaching, and strategic move explanations.
 
+const StockfishBridgeScript := preload("res://src/coach/stockfish_bridge.gd")
+
 const OPENING_BOOK := {
 	"e2e4": {
 		"name": "King's Pawn Opening",
@@ -55,6 +57,7 @@ static func analyze_position(state: ChessState, player_color: bool, move_history
 		"opening_name": "",      # Current opening
 		"opening_tip": "",       # Strategic opening guidance
 		"eval_score": 0.0,       # Centipawn evaluation
+		"engine_name": "Stockfish 18 NNUE (3600+ Elo)",
 		"threat_level": "SAFE"   # SAFE, CAUTION, DANGER
 	}
 
@@ -93,11 +96,32 @@ static func analyze_position(state: ChessState, player_color: bool, move_history
 	if not result["threats"].is_empty():
 		result["threat_level"] = "DANGER"
 
-	# 3. Find Best Recommended Tactical Move
-	var best_move = _find_best_move(state, legal_moves, player_color)
-	if best_move != null:
-		result["recommended_move"] = best_move
-		result["explanation"] = _explain_move(state, best_move, player_color)
+	# 3. Find Best Recommended Tactical Move via Stockfish 18 NNUE
+	if state.has_method("get_fen"):
+		var sf_info = StockfishBridgeScript.analyze_fen(state.get_fen(), 120)
+		if sf_info.get("available", false) and not sf_info.get("bestmove_uci", "").is_empty():
+			var sf_uci: String = sf_info["bestmove_uci"]
+			for m in legal_moves:
+				if m.to_uci() == sf_uci:
+					result["recommended_move"] = m
+					break
+			result["engine_name"] = sf_info.get("engine", "Stockfish 18 NNUE")
+			result["eval_score"] = sf_info.get("eval_cp", 0.0)
+			var pv_arr: Array = sf_info.get("pv", [])
+			var pv_text := " ".join(pv_arr.slice(0, 4))
+			var base_exp := _explain_move(state, result["recommended_move"], player_color) if result["recommended_move"] != null else ""
+			var sign := "+" if result["eval_score"] >= 0 else ""
+			result["explanation"] = "👑 Stockfish 18 (Eval %s%.2f): %s%s" % [
+				sign, result["eval_score"], base_exp,
+				(" [Line: %s]" % pv_text) if not pv_text.is_empty() else ""
+			]
+
+	# Fallback to internal minimax if Stockfish is absent
+	if result["recommended_move"] == null:
+		var best_move = _find_best_move(state, legal_moves, player_color)
+		if best_move != null:
+			result["recommended_move"] = best_move
+			result["explanation"] = _explain_move(state, best_move, player_color)
 
 	return result
 
