@@ -48,6 +48,11 @@ const PIECE_NAME := {
 const BLUNDER_CP := 150.0            # eval swing that counts as a player blunder
 const BLUNDER_DEPTH := 8             # shallow probe — a signal, not counsel
 
+const CaptureLedgerScript := preload("res://src/cinematics/capture_ledger.gd")
+const MomentContextScript := preload("res://src/cinematics/moment_context.gd")
+const MomentScoreScript := preload("res://src/cinematics/moment_score.gd")
+const MomentGovernorScript := preload("res://src/cinematics/moment_governor.gd")
+
 const TOURNAMENT_UNDO_LIMIT := 3     # take-backs per tournament game (single: unlimited)
 
 const RESULT_TEXT := {
@@ -154,6 +159,10 @@ var _concede_panel: PanelContainer
 var _concede_btn: Button
 var _victory_shown := false
 var _next_action := "rematch"       # "rematch" | "next_round" | "hall"
+
+# 3-Tier Cinematic VFX Moments System
+var ledger = CaptureLedgerScript.new()
+var governor = MomentGovernorScript.new()
 
 # ── THE CEREMONY OWNS THE FRAME (critic defect P2, 2026-08-09) ─────────────
 # Three separate pieces of UI were sitting ON TOP of the best shot in the
@@ -587,6 +596,10 @@ static func idx_of(sq: Vector2i) -> int:
 ## move.
 func _spawn_from_state() -> void:
 	_hovered_view = null   # the freed views take any hover reveal with them
+	if ledger != null:
+		ledger.reset_from(state)
+	if governor != null:
+		governor.reset_game()
 	for sq in views:
 		(views[sq] as PieceView).queue_free()
 	views.clear()
@@ -976,6 +989,7 @@ func _ai_ply() -> void:
 func _execute_ply(move) -> void:
 	## Engine first (authoritative), then the choreography catches up.
 	var mover_is_ember: bool = state.turn != player_color   # the RIVAL is moving
+	var is_white_mover: bool = (not mover_is_ember) if player_color == false else mover_is_ember
 	var fen_before := "" if mover_is_ember else str(state.get_fen())
 	_record_san(move)
 	state.apply_move(move)
@@ -983,7 +997,26 @@ func _execute_ply(move) -> void:
 		banter.note_ply()                      # the rate limiter's clock
 	var fen_after := "" if mover_is_ember else str(state.get_fen())
 	_refresh_turn_moves()
-	await _animate_move(move, mover_is_ember)
+
+	var moment_info: Dictionary = {}
+	if move.is_capture():
+		var victim_rec: Dictionary = ledger.note_move(move, is_white_mover)
+		var sit: Dictionary = MomentContextScript.situation(state, move, _turn_moves, ledger, victim_rec)
+		var scored: Dictionary = MomentScoreScript.score(sit)
+		var gives_check: bool = bool(sit.get("gives_check", false))
+		var is_mate: bool = (_turn_moves.is_empty() and gives_check)
+		var decision: Dictionary = {"tier": 0, "reason": "mate"} if is_mate else governor.decide(float(scored["notability"]))
+		moment_info = {
+			"tier": int(decision.get("tier", 0)),
+			"tag": str(scored.get("tag", "")),
+			"notability": float(scored.get("notability", 0.0)),
+			"lead": str(scored.get("lead", "")),
+			"reason": str(decision.get("reason", ""))
+		}
+	else:
+		ledger.note_move(move, is_white_mover)
+
+	await _animate_move(move, mover_is_ember, moment_info)
 	if spectator != null and is_instance_valid(spectator):
 		spectator.notice_move(sq_of(move.to_square))   # glance target + rate limiter
 	_fire_banter_beats(move, mover_is_ember)
@@ -1023,7 +1056,7 @@ func _duel_meta(mover_is_ember: bool) -> Dictionary:
 	return {"attacker_house": atk, "victim_house": vic}
 
 
-func _animate_move(move, mover_is_ember: bool) -> void:
+func _animate_move(move, mover_is_ember: bool, moment_info: Dictionary = {}) -> void:
 	var from_sq := sq_of(move.from_square)
 	var to_sq := sq_of(move.to_square)
 	var mover: PieceView = views.get(from_sq)
@@ -1048,8 +1081,10 @@ func _animate_move(move, mover_is_ember: bool) -> void:
 			var edge := target - dir * 0.55
 			await mover.move_to(edge, _walk_time(mover.position, edge))
 			# The slow-mo duel: the strike callable IS the old choreography,
-			# now running under the director's time curve and battle cam.
-			await duel_director.play_duel(mover, victim, _duel_meta(mover_is_ember),
+			# now running under the director's time curve, moments governor, and battle cam.
+			var d_meta := _duel_meta(mover_is_ember)
+			d_meta.merge(moment_info)
+			await duel_director.play_duel(mover, victim, d_meta,
 				func(): await mover.play_capture(victim))
 			if spectator != null and is_instance_valid(spectator):
 				spectator.react_capture(sq_of(move.captured_square))  # flinch, self-rate-limited
@@ -1163,6 +1198,8 @@ func _perform_undo() -> void:
 	if spectator != null and is_instance_valid(spectator) \
 			and spectator.has_method("rewind_moves"):
 		spectator.rewind_moves(undone)   # ships with dragon_spectator.gd
+	if ledger != null:
+		ledger.rewind_to(state.move_stack.size())
 	_spawn_from_state()     # captured pieces resurrect
 	_refresh_turn_moves()
 	_update_turn_label()
