@@ -61,7 +61,7 @@ If you touched anything that ships, also read `docs/BUILDING.md` and run
 ## 5. What never goes in a commit
 
 `.godot/`, `test_e2e/artifacts/` and `__pycache__/` are gitignored — keep them
-that way. Build artifacts belong in `../great-houses-dist/`, deliberately
+that way. Build artifacts belong in `../great-hauses-dist/`, deliberately
 **outside** `res://`, because a build dropped inside the project gets swept into
 the next export. Never commit an exported binary.
 

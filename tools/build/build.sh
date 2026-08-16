@@ -61,6 +61,7 @@ ASSERT_PRESENT=(
   "scenes/main.tscn"
   "src/board/piece_assets.gd"
   "src/audio/music_manager.gd"
+  "assets/cinematics/opening_intro.ogv"
 )
 # Things that must NEVER reach a player. test_e2e/ is the whole E2E harness:
 # it was autoloaded from project.godot until 2026-08-09, so a 90 KB .gdc of

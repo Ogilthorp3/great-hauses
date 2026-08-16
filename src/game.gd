@@ -372,6 +372,8 @@ func _ready() -> void:
 	_coach_overlay.name = "CoachOverlay"
 	add_child(_coach_overlay)
 	_coach_overlay.hint_requested.connect(_on_coach_hint_requested)
+	_coach_overlay.stockfish_hint_requested.connect(_on_stockfish_hint_requested)
+	_coach_overlay.leela_hint_requested.connect(_on_leela_hint_requested)
 	_setup_spectator()
 	_lt("spectator")
 	if Session.configured and str(Session.opponent.get("kind", "")) == "ds4_oracle":
@@ -679,7 +681,11 @@ func _unhandled_input(event: InputEvent) -> void:
 				get_viewport().set_input_as_handled()
 				return
 		elif event.keycode == KEY_T:
-			_on_coach_hint_requested()
+			_on_stockfish_hint_requested()
+			get_viewport().set_input_as_handled()
+			return
+		elif event.keycode == KEY_L:
+			_on_leela_hint_requested()
 			get_viewport().set_input_as_handled()
 			return
 		if _easter_eggs != null:
@@ -1178,9 +1184,30 @@ func _refresh_turn_moves() -> void:
 
 
 func _on_coach_hint_requested() -> void:
+	_on_stockfish_hint_requested()
+
+
+func _on_stockfish_hint_requested() -> void:
 	if state == null or state.turn != player_color or _last_coach_analysis.is_empty():
 		return
-	var best_m = _last_coach_analysis.get("recommended_move")
+	var sf_dict = _last_coach_analysis.get("stockfish", {})
+	var best_m = sf_dict.get("move")
+	if best_m == null:
+		best_m = _last_coach_analysis.get("recommended_move")
+	if best_m != null:
+		var from_sq := sq_of(best_m.from_square)
+		var to_sq := sq_of(best_m.to_square)
+		_select(from_sq)
+		board.show_legal_moves([to_sq], [to_sq] if best_m.is_capture() else [])
+
+
+func _on_leela_hint_requested() -> void:
+	if state == null or state.turn != player_color or _last_coach_analysis.is_empty():
+		return
+	var leela_dict = _last_coach_analysis.get("leela", {})
+	var best_m = leela_dict.get("move")
+	if best_m == null:
+		best_m = _last_coach_analysis.get("recommended_move")
 	if best_m != null:
 		var from_sq := sq_of(best_m.from_square)
 		var to_sq := sq_of(best_m.to_square)

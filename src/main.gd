@@ -27,6 +27,7 @@ extends Node
 const GAME_SCENE := "res://scenes/game.tscn"
 const SELECT_SCENE: PackedScene = preload("res://scenes/house_select.tscn")
 const SELECT_3D_SCENE: PackedScene = preload("res://scenes/house_select_3d.tscn")
+const OpeningCinematicScript: Script = preload("res://src/cinematics/opening_cinematic.gd")
 const PROBE_FLAGS := ["--smoke", "--dump-tree", "--env-fps", "--env-banner-test", "--skip-select"]
 
 ## Where the last address a player joined is remembered between sessions.
@@ -88,6 +89,25 @@ func _ready() -> void:
 
 	if _xr_log:
 		_xr_log.close()
+
+	var is_e2e_or_test := _e2e_harness != null
+	if not is_e2e_or_test:
+		for a in all_args:
+			if str(a).begins_with("--e2e") or a in PROBE_FLAGS:
+				is_e2e_or_test = true
+				break
+	if is_e2e_or_test:
+		_setup_house_select()
+	else:
+		var intro = OpeningCinematicScript.new()
+		intro.name = "OpeningCinematic"
+		add_child(intro)
+		intro.cinematic_completed.connect(_setup_house_select)
+
+
+func _setup_house_select() -> void:
+	if _select != null:
+		return
 	_select = SELECT_SCENE.instantiate()
 	_select.name = "HouseSelect"
 	add_child(_select)
