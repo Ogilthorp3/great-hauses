@@ -298,6 +298,11 @@ build_macos() {
     return 1
   fi
   note "macos build verified (booted clean)"
+  if [ -d "/Applications" ] && [ -w "/Applications" ]; then
+    note "syncing to /Applications/GreatHauses.app"
+    rm -rf "/Applications/GreatHauses.app"
+    cp -R "$target" "/Applications/GreatHauses.app"
+  fi
   return 0
 }
 
