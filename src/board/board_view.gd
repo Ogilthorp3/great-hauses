@@ -92,22 +92,71 @@ func is_on_board(sq: Vector2i) -> bool:
 
 
 func pick_square(screen_pos: Vector2) -> Variant:
-	## Vector2i of the square under screen_pos, or null. No physics bodies:
-	## casts the camera ray directly against the board-top plane for pixel-precise desktop mouse clicks.
+	## Vector2i of the square under screen_pos, or null.
+	## Casts the camera ray through 3D piece bounding volumes and the board plane.
 	var cam := get_viewport().get_camera_3d()
 	if cam == null:
 		return null
 	var origin := cam.project_ray_origin(screen_pos)
 	var dir := cam.project_ray_normal(screen_pos)
-	var denom := Vector3.UP.dot(dir)
-	if absf(denom) < 1e-5:
-		return null
-	var t := (TILE_HEIGHT - origin.y) / denom
-	if t <= 0.0:
-		return null
-	var hit := origin + dir * t
-	var sq := world_to_square(hit)
-	return sq if is_on_board(sq) else null
+	return pick_square_ray(origin, dir)
+
+
+var occupied_squares: Array[Vector2i] = []
+
+
+func set_occupied_squares(sqs: Array) -> void:
+	occupied_squares.clear()
+	for s in sqs:
+		if s is Vector2i:
+			occupied_squares.append(s)
+
+
+func pick_square_ray(ray_origin: Vector3, ray_dir: Vector3) -> Variant:
+	## 3D volumetric ray picking for gaze & pinch on visionOS and XR.
+	## Tests 3D piece volumes ONLY on occupied squares (where pieces actually stand),
+	## then falls back to the board-top plane for empty destination tiles.
+	var local_orig := global_transform.affine_inverse() * ray_origin
+	var local_dir := global_transform.basis.inverse() * ray_dir.normalized()
+
+	# 1. Test 3D piece cylinders ONLY on squares with actual living pieces
+	var best_sq: Variant = null
+	var best_t: float = 1e9
+	var o_xz := Vector2(local_orig.x, local_orig.z)
+	var d_xz := Vector2(local_dir.x, local_dir.z)
+	var d_len_sq := d_xz.length_squared()
+
+	if d_len_sq > 1e-6 and not occupied_squares.is_empty():
+		for sq in occupied_squares:
+			var center3 := square_to_world(sq)
+			var c_xz := Vector2(center3.x, center3.z)
+			var v := c_xz - o_xz
+			var t_val := v.dot(d_xz) / d_len_sq
+			if t_val <= 0.0 or t_val >= best_t:
+				continue
+			var closest_xz := o_xz + d_xz * t_val
+			var dist_sq := (closest_xz - c_xz).length_squared()
+			if dist_sq <= (0.48 * 0.48):
+				var y_at_t := local_orig.y + local_dir.y * t_val
+				if y_at_t >= TILE_HEIGHT - 0.05 and y_at_t <= TILE_HEIGHT + 1.6:
+					best_t = t_val
+					best_sq = sq
+
+	if best_sq != null:
+		return best_sq
+
+	# 2. Fall back to flat board plane for empty destination tiles
+	var denom := Vector3.UP.dot(local_dir)
+	if absf(denom) > 1e-5:
+		var t_plane := (TILE_HEIGHT - local_orig.y) / denom
+		if t_plane > 0.0:
+			var hit := local_orig + local_dir * t_plane
+			var sq := world_to_square(hit)
+			if is_on_board(sq):
+				return sq
+
+	return null
+>>>>>>> feat/visionos-immersive
 
 
 var occupied_squares: Array[Vector2i] = []
