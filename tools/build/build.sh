@@ -278,11 +278,9 @@ build_macos() {
   build_pck_args
   python3 "$SCRIPT_DIR/pck_list.py" "$target" --count-only "${PCK_ARGS[@]}" || {
     fail "pck content assertions failed for $target"; return 1; }
-  # Freshness is asked of the .pck, not the .app: a bundle DIRECTORY's mtime
-  # moves when anything inside it is touched (the boot smoke test below writes
-  # nothing into it, but codesign does), whereas the pck is written exactly
-  # once, by the export.
-  verify_freshness "$target/Contents/Resources/Great Hauses.pck" || return 1
+  local pck_path
+  pck_path="$(ls "$target/Contents/Resources/"*.pck 2>/dev/null | head -1)"
+  verify_freshness "$pck_path" || return 1
 
   # The macOS bundle is the ONLY artifact we can actually execute here, so it
   # doubles as the smoke test for filters that are shared with Windows: a
