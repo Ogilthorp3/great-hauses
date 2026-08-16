@@ -53,6 +53,7 @@ const MomentContextScript := preload("res://src/cinematics/moment_context.gd")
 const MomentScoreScript := preload("res://src/cinematics/moment_score.gd")
 const MomentGovernorScript := preload("res://src/cinematics/moment_governor.gd")
 const ZeldaEasterEggsScript := preload("res://src/cinematics/zelda_easter_eggs.gd")
+const HoloChessGamificationScript := preload("res://src/cinematics/holochess_gamification.gd")
 
 const TOURNAMENT_UNDO_LIMIT := 3     # take-backs per tournament game (single: unlimited)
 
@@ -73,6 +74,7 @@ var duel_director: DuelDirector
 var banter: BanterEngine = null      # non-null only with a registry rival (legacy skin skipped)
 var spectator: DragonSpectator = null
 var _easter_eggs = null
+var _holochess = null
 var oracle: Ds4Opponent = null       # non-null only vs DS4-Oracle
 var oracle_thinking := false
 var oracle_think_count := 0          # e2e evidence: thinking HUD fired
@@ -359,6 +361,9 @@ func _ready() -> void:
 	_easter_eggs = ZeldaEasterEggsScript.new()
 	_easter_eggs.name = "ZeldaEasterEggs"
 	add_child(_easter_eggs)
+	_holochess = HoloChessGamificationScript.new()
+	_holochess.name = "HoloChessGamification"
+	add_child(_holochess)
 	_setup_spectator()
 	_lt("spectator")
 	if Session.configured and str(Session.opponent.get("kind", "")) == "ds4_oracle":
@@ -631,11 +636,15 @@ func _spawn(piece_type: PieceView.Type, piece_side: PieceView.House, sq: Vector2
 	p.position = board.square_to_world(sq)
 	p.died.connect(_on_piece_died.bind(p))
 	views[sq] = p
+	if _holochess != null:
+		_holochess.register_piece(p)
 	return p
 
 
 func _on_piece_died(p: PieceView) -> void:
 	death_log.append(p.death_anim)
+	if _holochess != null:
+		_holochess.unregister_piece(p)
 
 
 func _kick_ai_opening() -> void:
@@ -650,9 +659,16 @@ func _kick_ai_opening() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventKey and _easter_eggs != null:
-		if _easter_eggs.handle_key_input(event, self):
-			get_viewport().set_input_as_handled()
+	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_H:
+			if _holochess != null:
+				_holochess.toggle_holochess_mode(board)
+				get_viewport().set_input_as_handled()
+				return
+		if _easter_eggs != null:
+			if _easter_eggs.handle_key_input(event, self):
+				get_viewport().set_input_as_handled()
+				return
 
 
 func _on_square_clicked(sq: Vector2i) -> void:
@@ -1103,6 +1119,9 @@ func _animate_move(move, mover_is_ember: bool, moment_info: Dictionary = {}) -> 
 			d_meta.merge(moment_info)
 			await duel_director.play_duel(mover, victim, d_meta,
 				func(): await mover.play_capture(victim))
+			if _holochess != null and is_instance_valid(_holochess):
+				var tier_val: int = d_meta.get("tier", 0)
+				_holochess.record_capture(tier_val, str(mover.piece_type), str(victim.piece_type), target)
 			if spectator != null and is_instance_valid(spectator):
 				spectator.react_capture(sq_of(move.captured_square))  # flinch, self-rate-limited
 	await mover.move_to(target, _walk_time(mover.position, target))
