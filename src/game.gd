@@ -54,6 +54,8 @@ const MomentScoreScript := preload("res://src/cinematics/moment_score.gd")
 const MomentGovernorScript := preload("res://src/cinematics/moment_governor.gd")
 const ZeldaEasterEggsScript := preload("res://src/cinematics/zelda_easter_eggs.gd")
 const HoloChessGamificationScript := preload("res://src/cinematics/holochess_gamification.gd")
+const CoachEngineScript := preload("res://src/coach/coach_engine.gd")
+const CoachOverlayScript := preload("res://src/coach/coach_overlay.gd")
 
 const TOURNAMENT_UNDO_LIMIT := 3     # take-backs per tournament game (single: unlimited)
 
@@ -75,6 +77,8 @@ var banter: BanterEngine = null      # non-null only with a registry rival (lega
 var spectator: DragonSpectator = null
 var _easter_eggs = null
 var _holochess = null
+var _coach_overlay = null
+var _last_coach_analysis: Dictionary = {}
 var oracle: Ds4Opponent = null       # non-null only vs DS4-Oracle
 var oracle_thinking := false
 var oracle_think_count := 0          # e2e evidence: thinking HUD fired
@@ -364,6 +368,10 @@ func _ready() -> void:
 	_holochess = HoloChessGamificationScript.new()
 	_holochess.name = "HoloChessGamification"
 	add_child(_holochess)
+	_coach_overlay = CoachOverlayScript.new()
+	_coach_overlay.name = "CoachOverlay"
+	add_child(_coach_overlay)
+	_coach_overlay.hint_requested.connect(_on_coach_hint_requested)
 	_setup_spectator()
 	_lt("spectator")
 	if Session.configured and str(Session.opponent.get("kind", "")) == "ds4_oracle":
@@ -665,6 +673,15 @@ func _unhandled_input(event: InputEvent) -> void:
 				_holochess.toggle_holochess_mode(board)
 				get_viewport().set_input_as_handled()
 				return
+		elif event.keycode == KEY_C:
+			if _coach_overlay != null:
+				_coach_overlay.toggle_coach()
+				get_viewport().set_input_as_handled()
+				return
+		elif event.keycode == KEY_T:
+			_on_coach_hint_requested()
+			get_viewport().set_input_as_handled()
+			return
 		if _easter_eggs != null:
 			if _easter_eggs.handle_key_input(event, self):
 				get_viewport().set_input_as_handled()
@@ -1150,6 +1167,25 @@ func _refresh_turn_moves() -> void:
 	_turn_moves = state.legal_moves(true)
 	if board:
 		board.set_occupied_squares(views.keys())
+	if state != null and state.turn == player_color and _coach_overlay != null:
+		var uci_history: Array = []
+		if "move_stack" in state and state.move_stack != null:
+			for m in state.move_stack:
+				if m != null and m.has_method("to_uci"):
+					uci_history.append(m.to_uci())
+		_last_coach_analysis = CoachEngineScript.analyze_position(state, player_color, uci_history)
+		_coach_overlay.update_analysis(_last_coach_analysis)
+
+
+func _on_coach_hint_requested() -> void:
+	if state == null or state.turn != player_color or _last_coach_analysis.is_empty():
+		return
+	var best_m = _last_coach_analysis.get("recommended_move")
+	if best_m != null:
+		var from_sq := sq_of(best_m.from_square)
+		var to_sq := sq_of(best_m.to_square)
+		_select(from_sq)
+		board.show_legal_moves([to_sq], [to_sq] if best_m.is_capture() else [])
 
 
 # -- undo / take-back (fat-finger insurance) --------------------------------
