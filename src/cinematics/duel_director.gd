@@ -169,17 +169,17 @@ func play_duel(attacker: Node3D, victim: Node3D, meta: Dictionary = {},
 	var cur_ramp_down: float = duel_ramp_down_wall
 
 	if tier == 2:
-		cur_slow_scale = 0.15   # Deep cinematic showstopper slow-mo
-		cur_hold_wall = 1.10
-		cur_ramp_down = 0.18
+		cur_slow_scale = minf(duel_slow_scale, 0.15)   # Deep cinematic showstopper slow-mo
+		cur_hold_wall = maxf(duel_slow_hold_wall, 1.10)
+		cur_ramp_down = duel_ramp_down_wall * 0.7
 	elif tier == 1:
-		cur_slow_scale = 0.32   # Tactical flourish slow-mo
-		cur_hold_wall = 0.65
-		cur_ramp_down = 0.22
+		cur_slow_scale = minf(duel_slow_scale, 0.32)   # Tactical flourish slow-mo
+		cur_hold_wall = maxf(duel_slow_hold_wall, 0.65)
+		cur_ramp_down = duel_ramp_down_wall * 0.85
 	else:
-		cur_slow_scale = 0.55   # Standard strike
-		cur_hold_wall = 0.35
-		cur_ramp_down = 0.28
+		cur_slow_scale = duel_slow_scale
+		cur_hold_wall = duel_slow_hold_wall
+		cur_ramp_down = duel_ramp_down_wall
 
 	_cam_enter_duel(attacker, victim, seq, tier)   # concurrent swoop
 	# FACE TO FACE: both combatants turn to meet BEFORE the strike begins,
