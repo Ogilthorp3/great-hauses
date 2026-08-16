@@ -250,7 +250,8 @@ static func _ensure_hyrule_registered() -> void:
 			"saturation": 0.40
 		},
 		"coat": "white_grey",
-		"sigil": "res://assets/sigils/hyrule.png"
+		"sigil": "res://assets/sigils/hyrule.png",
+		"crest": "res://assets/custom-props/crests/crest_hyrule.glb"
 	}
 	HouseRegistry._by_id["hyrule"] = hyrule_data
 	HouseRegistry._order.append("hyrule")
