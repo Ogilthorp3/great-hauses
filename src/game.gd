@@ -52,6 +52,7 @@ const CaptureLedgerScript := preload("res://src/cinematics/capture_ledger.gd")
 const MomentContextScript := preload("res://src/cinematics/moment_context.gd")
 const MomentScoreScript := preload("res://src/cinematics/moment_score.gd")
 const MomentGovernorScript := preload("res://src/cinematics/moment_governor.gd")
+const ZeldaEasterEggsScript := preload("res://src/cinematics/zelda_easter_eggs.gd")
 
 const TOURNAMENT_UNDO_LIMIT := 3     # take-backs per tournament game (single: unlimited)
 
@@ -71,6 +72,7 @@ var ai_difficulty := ChessAI.Difficulty.MEDIUM
 var duel_director: DuelDirector
 var banter: BanterEngine = null      # non-null only with a registry rival (legacy skin skipped)
 var spectator: DragonSpectator = null
+var _easter_eggs = null
 var oracle: Ds4Opponent = null       # non-null only vs DS4-Oracle
 var oracle_thinking := false
 var oracle_think_count := 0          # e2e evidence: thinking HUD fired
@@ -354,6 +356,9 @@ func _ready() -> void:
 		Music.unduck()
 		_chrome_for_cinematic(false))
 	_lt("duel-director")
+	_easter_eggs = ZeldaEasterEggsScript.new()
+	_easter_eggs.name = "ZeldaEasterEggs"
+	add_child(_easter_eggs)
 	_setup_spectator()
 	_lt("spectator")
 	if Session.configured and str(Session.opponent.get("kind", "")) == "ds4_oracle":
@@ -644,6 +649,12 @@ func _kick_ai_opening() -> void:
 # -- interaction -----------------------------------------------------------
 
 
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and _easter_eggs != null:
+		if _easter_eggs.handle_key_input(event, self):
+			get_viewport().set_input_as_handled()
+
+
 func _on_square_clicked(sq: Vector2i) -> void:
 	if busy or game_over or state == null or state.turn != player_color \
 			or _net_disconnected or promo_picker != null \
@@ -652,6 +663,12 @@ func _on_square_clicked(sq: Vector2i) -> void:
 	var idx := idx_of(sq)
 	var piece = state.pieces[idx]
 	var is_own: bool = piece != null and ChessState.piece_color(piece) == player_color
+
+	if _easter_eggs != null and piece != null:
+		var is_king := (is_own and str(piece).to_lower() == "k")
+		var p_type: int = CHAR_TO_TYPE.get(str(piece).to_lower(), 0)
+		_easter_eggs.handle_piece_clicked(p_type, is_king, self)
+
 	if selected == null:
 		if is_own:
 			_select(sq)

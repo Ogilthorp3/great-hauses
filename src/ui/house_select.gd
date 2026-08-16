@@ -46,6 +46,8 @@ const MODES: Array[Dictionary] = [
 		"desc": "Direct exhibition battle in the torch-lit Great Hall"},
 ]
 
+const ZeldaEasterEggsScript := preload("res://src/cinematics/zelda_easter_eggs.gd")
+
 var phase := Phase.HOUSE
 var selected_house := ""
 var selected_opponent: Dictionary = {}
@@ -99,9 +101,12 @@ var _net_primary := ""
 var _net_busy := false
 var net_copied_count := 0
 var net_last_copied := ""
+var _easter_eggs = null
 
 
 func _ready() -> void:
+	_easter_eggs = ZeldaEasterEggsScript.new()
+	add_child(_easter_eggs)
 	_house_ids = HouseRegistry.house_ids()
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	_build_backdrop()
@@ -171,6 +176,10 @@ func _opp_disabled_reason(i: int) -> String:
 func _unhandled_input(event: InputEvent) -> void:
 	if phase == Phase.DONE:
 		return
+	if event is InputEventKey:
+		if _easter_eggs != null and _easter_eggs.handle_key_input(event, self):
+			accept_event()
+			return
 	var used := true
 	if event.is_action_pressed("ui_cancel"):
 		_step_back()
@@ -545,6 +554,21 @@ func _build_ring() -> void:
 		var crest := _make_crest(house, i)
 		_ring.add_child(crest)
 		_crests.append(crest)
+
+
+func _rebuild_ring() -> void:
+	if _ring != null:
+		for c in _crests:
+			if is_instance_valid(c):
+				c.queue_free()
+		_crests.clear()
+		for i in _house_ids.size():
+			var house := HouseRegistry.get_house(_house_ids[i])
+			var crest := _make_crest(house, i)
+			_ring.add_child(crest)
+			_crests.append(crest)
+		_layout_ring()
+		_update_preview()
 
 
 func _make_crest(house: Dictionary, index: int) -> Control:
