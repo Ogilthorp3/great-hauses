@@ -248,6 +248,7 @@ const ASHFALL_LINES: Array[String] = [
 @export var bank_radius := 6.8         ## inside the ±12 walls and 10.6-radius pillars
 @export var bank_height := 5.11        ## bank floor root y for giant dragon
 @export var failsafe_wall_sec := 20.0   ## > the championship worst case (15.9)
+@export var keep_skeletons := true      ## Terminator 2: charred skeletons remain on the board
 
 ## Integrator references (both duck-typed, both optional):
 ## anything with is_active() gates reactions off the duel-cam;
@@ -984,11 +985,12 @@ func _ash_finish(seq: int) -> void:
 		if is_instance_valid(p) and p is Node3D:
 			p.queue_free()
 	_ash_losers.clear()
-	for entry in _remains:   # …and every smoldering skeleton with them
-		var n = entry.get("node")
-		if is_instance_valid(n):
-			n.queue_free()
-	_remains.clear()
+	if not keep_skeletons or _ash_skip:
+		for entry in _remains:   # clean smoldering skeletons on skip or non-persistent mode
+			var n = entry.get("node")
+			if is_instance_valid(n):
+				n.queue_free()
+		_remains.clear()
 	_cam_release()
 	# Tier-aware end pose: a match ends back ASLEEP on the stone at 1.15;
 	# a championship ends awake on the throne perch at 1.6 with the ember
@@ -1007,6 +1009,15 @@ func _ash_finish(seq: int) -> void:
 	if _champ_mode:
 		_ensure_drift()
 	ashfall_finished.emit()
+
+
+## Clean up any persistent charred skeletons from the battlefield.
+func clear_remains() -> void:
+	for entry in _remains:
+		var n = entry.get("node")
+		if is_instance_valid(n):
+			n.queue_free()
+	_remains.clear()
 
 
 func _exit_tree() -> void:
@@ -1298,14 +1309,14 @@ func _spawn_remains(piece: Node3D) -> Dictionary:
 	shell.add_child(model)
 	var raw_h := _mesh_height(model)
 	model.scale = Vector3.ONE * (victim_h / maxf(raw_h, 0.01))
-	# Charred near-black bones with a dying ember glow (no lights).
+	# Charred pitch-black bones with glowing crimson/orange nuclear embers
 	var mats := _override_mats(model)
 	for e in mats:
 		var m: StandardMaterial3D = e[0]
-		m.albedo_color = CHARCOAL * 0.7   # charred near-black bone
-		m.roughness = 1.0
+		m.albedo_color = Color(0.05, 0.05, 0.05)   # pitch-black charred soot
+		m.roughness = 0.95
 		m.emission_enabled = true
-		m.emission = EMBER_GLOW * 0.22    # a dying inner glow, not a paint job
+		m.emission = Color(1.0, 0.32, 0.02) * 1.5    # Terminator 2 glowing nuclear ember seams
 	# The shared Rig_Medium library (PieceAssets autoload) animates the
 	# bones; without it (headless unit tests) they stand in rest pose and
 	# fall via the crumble fallback.
@@ -1339,6 +1350,14 @@ func _collapse_remains(entry: Dictionary, seq: int) -> void:
 		await _wall_lerp(seq, fall, 0.0, 1.0, ash_collapse_wall)
 	if _ash_seq != seq or _ash_skip:
 		return   # _ash_finish sweeps the field
+
+	if keep_skeletons:
+		# Terminator 2 Grim Mode: Charred skeletons STAY on the stone floor!
+		for e in entry["mats"]:
+			var m: StandardMaterial3D = e[0]
+			m.emission = Color(1.0, 0.28, 0.02) * 0.75
+		return
+
 	var smoke = entry.get("smoke")
 	if is_instance_valid(smoke):
 		smoke.emitting = false
@@ -1419,7 +1438,7 @@ func _field_resolved() -> bool:
 	for p in _ash_losers:
 		if is_instance_valid(p):
 			return false
-	return _remains.is_empty()
+	return keep_skeletons or _remains.is_empty()
 
 
 # ── THE FIRE — the DRACARYS kit (res://assets/vfx/dracarys.gd) ─────────────

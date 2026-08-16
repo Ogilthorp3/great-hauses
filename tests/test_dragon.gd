@@ -144,6 +144,7 @@ func _fast_spectator() -> DragonSpectator:
 	s.ash_char_wall = 0.05
 	s.ash_crumble_wall = 0.05
 	s.failsafe_wall_sec = 6.0
+	s.keep_skeletons = false
 	root.add_child(s)
 	return s
 
