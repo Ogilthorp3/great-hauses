@@ -272,7 +272,7 @@ func play_manual(clip: String) -> bool:
 func seek_clip(t: float) -> void:
 	if anim == null:
 		return
-	anim.seek(maxf(t, 0.0), true)
+	anim.seek(maxf(t, 0.0), false)
 
 
 # -- THE SLUMBER POSE ------------------------------------------------------

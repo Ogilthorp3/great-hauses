@@ -212,9 +212,9 @@ const ASHFALL_LINES: Array[String] = [
 ## what keeps the ceremony's framing identical to the one that was tuned.
 ## Root y carries the +1.15 × rig_scale lift the ground-origin serpent-wyrm
 ## needs (DragonRig.BODY_RISE).
-@export var perch_position := Vector3(0.0, 9.2, 11.2)   ## perch height adjusted for big scale
+@export var perch_position := Vector3(0.0, 6.0225, 11.2)   ## matches GreatHall.spectator_perch()
 @export var perch_yaw := PI            ## face the board (-Z)
-@export var dragon_scale := 3.6        ## massive colossal dragon
+@export var dragon_scale := 1.15
 @export var idle_speed := 0.55         ## slow Flying_Idle loop in the air
 @export var bob_amplitude := 0.14
 @export var bob_speed := 0.8           ## rad/s of the bob sine
@@ -240,13 +240,13 @@ const ASHFALL_LINES: Array[String] = [
 @export var ash_collapse_wall := 0.8   ## Death_A is retimed to fit this window
 @export var ash_char_wall := 0.4       ## tint -> charcoal (Tidegrip char-in-place)
 @export var ash_crumble_wall := 0.45   ## final sink into the stone, then freed
-@export var ash_hover_height := 3.8    ## root y while breathing for giant dragon
-@export var ash_hover_backoff := 5.2   ## distance from the losers' centroid
+@export var ash_hover_height := 1.61    ## root y while breathing for giant dragon
+@export var ash_hover_backoff := 3.6   ## distance from the losers' centroid
 @export var ashfall_slow_scale := 0.55
-@export var ceremony_scale := 4.8      ## the wyrm swells for the ceremony
-@export var champ_scale := 5.4         ## …and larger still upon the throne
-@export var bank_radius := 9.4         ## inside the ±12 walls and 10.6-radius pillars
-@export var bank_height := 7.0         ## bank floor root y for giant dragon
+@export var ceremony_scale := 1.4      ## the wyrm swells for the ceremony
+@export var champ_scale := 1.6         ## …and larger still upon the throne
+@export var bank_radius := 6.8         ## inside the ±12 walls and 10.6-radius pillars
+@export var bank_height := 5.11        ## bank floor root y for giant dragon
 @export var failsafe_wall_sec := 20.0   ## > the championship worst case (15.9)
 
 ## Integrator references (both duck-typed, both optional):
@@ -718,17 +718,14 @@ func play_ashfall(losing_side: int, winning_house: String = "",
 		var r := lerpf(bank_radius, 5.2, e)
 		var h := lerpf(bank_height + 1.0, bank_height, e)
 		var target := Vector3(sin(th) * r, h, cos(th) * r)
-		# THE CLIMB. The bank no longer starts from a perch already in the
-		# air: it starts on the hall floor, so the first third of the lap IS
-		# the takeoff, blended over 0.35 (was 0.15 — at 0.15 the wyrm did not
-		# leave the ground, it teleported off it).
+		# The smooth climb: the takeoff blends over the first third of the lap
 		var p := start_pos.lerp(target, _ease_cubic(clampf(u / 0.35, 0.0, 1.0)))
 		var v := p - prev_p
 		prev_p = p
 		position = p
 		if v.length() > 0.001:
 			rotation.y = lerp_angle(rotation.y, atan2(v.x, v.z), 0.35)
-		rotation.z = -0.35 * sin(u * PI)   # lean into the turn
+		rotation.z = -0.32 * sin(u * PI)   # smooth banking lean into the turn
 		if not beats_eased and u >= 0.4:
 			beats_eased = true   # off the floor: hard beats settle into cruise
 			rig.play_loop("Fast_Flying", 0.8, 0.5)
