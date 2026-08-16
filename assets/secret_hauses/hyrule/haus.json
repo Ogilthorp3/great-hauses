@@ -1,0 +1,21 @@
+{
+  "format": 1,
+  "id": "hyrule",
+  "name": "Haus Hyrule",
+  "archetype": "courage",
+  "seat": "Temple of Time",
+  "motto": "Courage need not be remembered, for it is never forgotten.",
+  "colors": {
+    "primary": "#10782b",
+    "secondary": "#f5c518",
+    "accent": "#205493"
+  },
+  "tints": {
+    "piece": "#a8e6b0",
+    "tower": "#8ec498",
+    "kit": "#10782b",
+    "saturation": 0.40
+  },
+  "coat": "white_grey",
+  "sigil": "res://assets/sigils/hyrule.png"
+}

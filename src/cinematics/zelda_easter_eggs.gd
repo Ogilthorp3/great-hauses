@@ -213,14 +213,47 @@ func handle_piece_clicked(piece_type: int, is_player_king: bool, host: Node) -> 
 
 ## Trigger Secret Chime & Haus Hyrule Unlock
 func trigger_zelda_secret(host: Node, subtitle: String = "THE SECRET OF HYRULE") -> void:
+	_ensure_hyrule_registered()
+
 	if host != null and host.is_inside_tree():
 		play_sound(host, get_secret_chime_stream(), 1.0, 3.0)
 		_show_retro_banner(host, "★ %s ★" % subtitle, "Haus of Courage is with you.")
 
-	# If in HouseSelect, inject Hyrule Haus
+	# If in HouseSelect, inject Hyrule Haus into UI ring
 	if host is HouseSelect or (host != null and host.get_parent() is HouseSelect):
 		var hs: HouseSelect = host if host is HouseSelect else host.get_parent()
-		_inject_hyrule_house(hs)
+		if not hs._house_ids.has("hyrule"):
+			hs._house_ids.append("hyrule")
+			hs._rebuild_ring()
+			hs._set_ring_index(hs._house_ids.size() - 1)
+
+
+## Register Haus Hyrule with Zelda Triforce sigil banner into HouseRegistry
+static func _ensure_hyrule_registered() -> void:
+	if HouseRegistry._by_id.has("hyrule"):
+		return
+	var hyrule_data: Dictionary = {
+		"id": "hyrule",
+		"name": "Haus Hyrule",
+		"archetype": "courage",
+		"seat": "Temple of Time",
+		"motto": "Courage need not be remembered, for it is never forgotten.",
+		"colors": {
+			"primary": "#10782b",
+			"secondary": "#f5c518",
+			"accent": "#205493"
+		},
+		"tints": {
+			"piece": "#a8e6b0",
+			"tower": "#8ec498",
+			"kit": "#10782b",
+			"saturation": 0.40
+		},
+		"coat": "white_grey",
+		"sigil": "res://assets/sigils/hyrule.png"
+	}
+	HouseRegistry._by_id["hyrule"] = hyrule_data
+	HouseRegistry._order.append("hyrule")
 
 
 ## Trigger Master Sword drop and fanfare
@@ -446,39 +479,3 @@ static func _build_feather_flurry() -> Node3D:
 		tw.parallel().tween_property(feather, "rotation:z", 0.5 * sin(float(i)), drop_dur)
 
 	return container
-
-
-## Dynamically inject Haus Hyrule into HouseSelect if unlocked
-func _inject_hyrule_house(hs: HouseSelect) -> void:
-	if hs._house_ids.has("hyrule"):
-		return
-
-	# Inject into HouseRegistry static cache
-	var hyrule_data: Dictionary = {
-		"id": "hyrule",
-		"name": "Haus Hyrule",
-		"archetype": "courage",
-		"seat": "Hyrule Castle",
-		"motto": "Courage need not be remembered, for it is never forgotten.",
-		"colors": {
-			"primary": "#10782b",
-			"secondary": "#f2c94c",
-			"accent": "#2980b9"
-		},
-		"tints": {
-			"piece": "#a8e6cf",
-			"tower": "#88d8b0",
-			"kit": "#10782b",
-			"saturation": 0.4
-		},
-		"coat": "white",
-		"sigil": "res://assets/sigils/winterfang.png",
-		"crest": "res://assets/custom-props/crests/crest_winterfang.glb",
-		"pawn_helm": "res://assets/custom-props/pawn-helms/pawn_helm_winterfang.glb"
-	}
-	HouseRegistry._by_id["hyrule"] = hyrule_data
-	HouseRegistry._order.append("hyrule")
-
-	hs._house_ids.append("hyrule")
-	hs._rebuild_ring()
-	hs._set_ring_index(hs._house_ids.size() - 1)
