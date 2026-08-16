@@ -21,7 +21,7 @@ set -uo pipefail
 GODOT="${GODOT:-/Applications/Godot.app/Contents/MacOS/Godot}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJ="$(cd "$SCRIPT_DIR/../.." && pwd)"
-OUT="${OUT:-$(cd "$PROJ/.." && pwd)/great-houses-dist}"
+OUT="${OUT:-$(cd "$PROJ/.." && pwd)/great-hauses-dist}"
 TEMPLATE_ROOT="$HOME/Library/Application Support/Godot/export_templates"
 
 WIN_PRESET="Windows Desktop"
@@ -177,7 +177,7 @@ do_import() {
 }
 
 # ── Freshness ──────────────────────────────────────────────────────────────
-# THE STALENESS DEFECT (2026-08-09): a Windows .exe sat in great-houses-dist/
+# THE STALENESS DEFECT (2026-08-09): a Windows .exe sat in great-hauses-dist/
 # with SEVEN source files newer than it — the entire branding set had landed
 # after the export. Nothing caught it. `file` was happy, the pck assertions
 # were happy, the size was right; the artifact was simply a photograph of an
