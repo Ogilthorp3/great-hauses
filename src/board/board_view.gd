@@ -92,22 +92,14 @@ func is_on_board(sq: Vector2i) -> bool:
 
 
 func pick_square(screen_pos: Vector2) -> Variant:
-	## Vector2i of the square under screen_pos, or null. No physics bodies:
-	## casts the camera ray directly against the board-top plane for pixel-precise desktop mouse clicks.
+	## Vector2i of the square under screen_pos, or null.
+	## Casts the camera ray through 3D piece bounding volumes and the board plane.
 	var cam := get_viewport().get_camera_3d()
 	if cam == null:
 		return null
 	var origin := cam.project_ray_origin(screen_pos)
 	var dir := cam.project_ray_normal(screen_pos)
-	var denom := Vector3.UP.dot(dir)
-	if absf(denom) < 1e-5:
-		return null
-	var t := (TILE_HEIGHT - origin.y) / denom
-	if t <= 0.0:
-		return null
-	var hit := origin + dir * t
-	var sq := world_to_square(hit)
-	return sq if is_on_board(sq) else null
+	return pick_square_ray(origin, dir)
 
 
 var occupied_squares: Array[Vector2i] = []
