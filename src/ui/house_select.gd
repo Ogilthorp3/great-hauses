@@ -638,6 +638,12 @@ func _layout_ring() -> void:
 		_preview.set_anchors_preset(Control.PRESET_TOP_LEFT)
 		_preview.position = center - _preview.size * 0.5
 
+	if _opp_panel != null:
+		var scroll: ScrollContainer = _opp_panel.find_child("OppScroll", true, false)
+		if scroll != null:
+			scroll.custom_minimum_size.y = clampf(size.y - 230.0, 240.0, 520.0)
+			scroll.custom_minimum_size.x = minf(size.x * 0.85, 620.0)
+
 
 func _build_preview() -> void:
 	_preview = VBoxContainer.new()
@@ -750,7 +756,7 @@ func _build_opp_panel() -> void:
 	style.bg_color = Color(0.06, 0.05, 0.05, 0.96)
 	style.border_color = Color(0.65, 0.5, 0.25)
 	style.set_border_width_all(2)
-	style.set_content_margin_all(24)
+	style.set_content_margin_all(20)
 	style.corner_radius_top_left = 10
 	style.corner_radius_top_right = 10
 	style.corner_radius_bottom_left = 10
@@ -762,14 +768,14 @@ func _build_opp_panel() -> void:
 	_opp_panel.visible = false
 
 	var root := VBoxContainer.new()
-	root.add_theme_constant_override("separation", 12)
+	root.add_theme_constant_override("separation", 10)
 	_opp_panel.add_child(root)
 
 	var top_bar := HBoxContainer.new()
 	var back_btn := Button.new()
 	back_btn.text = "← BACK TO HOUSES"
 	back_btn.focus_mode = Control.FOCUS_NONE
-	back_btn.add_theme_font_size_override("font_size", 15)
+	back_btn.add_theme_font_size_override("font_size", AdaptiveScaleScript.font(15, self))
 	back_btn.add_theme_color_override("font_color", TEXT_DIM)
 	back_btn.pressed.connect(_step_back)
 	top_bar.add_child(back_btn)
@@ -778,22 +784,32 @@ func _build_opp_panel() -> void:
 	head.text = "CHOOSE YOUR OPPONENT"
 	head.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	head.add_theme_font_size_override("font_size", 24)
+	head.add_theme_font_size_override("font_size", AdaptiveScaleScript.font(24, self))
 	head.add_theme_color_override("font_color", TEXT_WARM)
 	top_bar.add_child(head)
 	root.add_child(top_bar)
 
+	var scroll := ScrollContainer.new()
+	scroll.name = "OppScroll"
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	scroll.custom_minimum_size = Vector2(580, clampf(size.y - 220.0, 280.0, 480.0))
+	root.add_child(scroll)
+
 	var list_box := VBoxContainer.new()
+	list_box.name = "OppList"
+	list_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	list_box.add_theme_constant_override("separation", 6)
-	root.add_child(list_box)
+	scroll.add_child(list_box)
 
 	for i in OPPONENTS.size():
 		var b := Button.new()
 		b.set_meta("label", str(OPPONENTS[i]["label"]))
 		b.set_meta("desc", str(OPPONENTS[i].get("desc", "")))
 		b.focus_mode = Control.FOCUS_NONE
-		b.custom_minimum_size = Vector2(560, 48)
-		b.add_theme_font_size_override("font_size", 20)
+		b.custom_minimum_size = Vector2(560, 56)
+		b.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		b.add_theme_font_size_override("font_size", AdaptiveScaleScript.font(17, self))
 		b.pressed.connect(_on_opponent_pressed.bind(i))
 		_style_opp_button(b, i == 0)
 		list_box.add_child(b)
@@ -803,7 +819,7 @@ func _build_opp_panel() -> void:
 	_opp_confirm_btn.text = "CONTINUE TO WAR MODE  →"
 	_opp_confirm_btn.focus_mode = Control.FOCUS_NONE
 	_opp_confirm_btn.custom_minimum_size = Vector2(560, 46)
-	_opp_confirm_btn.add_theme_font_size_override("font_size", 20)
+	_opp_confirm_btn.add_theme_font_size_override("font_size", AdaptiveScaleScript.font(19, self))
 	_opp_confirm_btn.add_theme_color_override("font_color", GOLD)
 	
 	var cstyle := StyleBoxFlat.new()

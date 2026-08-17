@@ -21,10 +21,10 @@ static func get_scale(node: Node = null) -> float:
 	var is_retina := (dpi > 150) or (OS.get_name() == "macOS" and DisplayServer.screen_get_scale() > 1.2)
 
 	# Calculate responsive scale based on resolution & DPI
-	var res_factor: float = clampf(maxf(vp_size.x / 1440.0, vp_size.y / 900.0), 1.0, 2.4)
-	var dpi_mult: float = 1.35 if is_retina else 1.15
+	var res_factor: float = clampf(minf(vp_size.x / 1440.0, vp_size.y / 900.0), 0.85, 2.0)
+	var dpi_mult: float = 1.25 if is_retina else 1.0
 
-	return clampf(res_factor * dpi_mult, 1.15, 2.5)
+	return clampf(res_factor * dpi_mult, 0.9, 2.2)
 
 
 static func font(base_pt: int, node: Node = null) -> int:
