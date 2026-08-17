@@ -33,9 +33,7 @@ const OPPONENTS: Array[Dictionary] = [
 	{"kind": "engine", "level": "godmode", "difficulty": ChessAI.Difficulty.HARD,
 		"label": "💀 God Mode", "desc": "Unconstrained superhuman mastery — IDDQD / Nightmare (~3500+ Elo)"},
 	{"kind": "jedi_council", "council_mode": "jedi_council",
-		"label": "⚔️ The Jedi Council of Sanctum", "desc": "Pure LLM Collaboration: Master Yoda, Master Windu & Master Qwen 3.8"},
-	{"kind": "jedi_council", "council_mode": "qwen_3_8",
-		"label": "⚡ Master Qwen 3.8", "desc": "Pure LLM Grand Sage of Tactics: rapid neural combinations"},
+		"label": "⚔️ The Jedi Council of Sanctum", "desc": "5-Mind Pure LLM: Yoda (Fable), Windu (Gemini), Qui-Gon, Cilghal & Mundi"},
 	{"kind": "network", "level": "friend", "label": "👥 Play a Friend", "desc": "Direct head-to-head multiplayer duel"},
 ]
 
