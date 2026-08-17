@@ -95,15 +95,21 @@ func _build_ui() -> void:
 	_quick_bar.add_theme_constant_override("separation", 6)
 	scroll.add_child(_quick_bar)
 
+	_add_quick_btn("🎬 Finishers", "finishers")
+	_add_quick_btn("🏇 Knight vs King", "duel knight king")
+	_add_quick_btn("👑 Queen vs King", "duel queen king")
+	_add_quick_btn("🧙 Bishop vs King", "duel bishop king")
+	_add_quick_btn("👑 King vs King", "duel king king")
+	_add_quick_btn("🏰 Rook vs King", "duel rook king")
+	_add_quick_btn("🛡️ Pawn vs King", "duel pawn king")
+	_add_quick_btn("🏇 Knight vs Rook", "duel knight rook")
+	_add_quick_btn("👑 Queen vs Queen", "duel queen queen")
+	_add_quick_btn("🧙 Bishop vs Rook", "duel bishop rook")
+	_add_quick_btn("🏰 Rook vs Knight", "duel rook knight")
 	_add_quick_btn("🏰 Houses", "houses")
-	_add_quick_btn("⚔️ Duel Kill", "duel")
 	_add_quick_btn("🐉 Dragon Wake", "dragon wake")
 	_add_quick_btn("🔥 Dragon Breath", "dragon breathe")
 	_add_quick_btn("🌋 Ashfall", "dragon ashfall")
-	_add_quick_btn("🏇 Knight Rush", "anim knight")
-	_add_quick_btn("🧙 Bishop Spell", "anim bishop")
-	_add_quick_btn("🏰 Rook Crush", "anim rook")
-	_add_quick_btn("👑 King Strike", "anim king")
 	_add_quick_btn("🗡️ Master Sword", "easter sword")
 	_add_quick_btn("🐔 Cucco Storm", "easter cucco")
 	_add_quick_btn("✨ HoloChess", "holochess")
@@ -163,8 +169,11 @@ func log_line(msg: String) -> void:
 		_output_box.append_text(msg + "\n")
 
 
-func toggle_console() -> void:
-	_is_open = !_is_open
+func toggle_console(force_state: Variant = null) -> void:
+	if force_state != null and force_state is bool:
+		_is_open = bool(force_state)
+	else:
+		_is_open = !_is_open
 	var tw := create_tween()
 	if _is_open:
 		_panel.visible = true
@@ -273,8 +282,8 @@ func _execute_command(line: String) -> void:
 			_cmd_anim(args)
 		"duel", "kill":
 			_cmd_duel(args)
-		"kills", "choreography":
-			_cmd_kills()
+		"finishers", "gallery", "kills", "choreography":
+			_cmd_finishers()
 		"dragon", "wyrm":
 			_cmd_dragon(args)
 		"trial", "minigame":
@@ -370,20 +379,51 @@ func _cmd_anim(args: Array) -> void:
 		_game_ref.test_piece_animation(type_idx)
 
 
-func _cmd_duel(_args: Array) -> void:
-	log_line("[color=#EBC85A]⚔️ Staging 3D Signature Kill Duel in Slow-Motion...[/color]")
+func _cmd_duel(args: Array) -> void:
+	var type_map := {
+		"pawn": 0, "p": 0,
+		"rook": 1, "r": 1,
+		"knight": 2, "n": 2,
+		"bishop": 3, "b": 3,
+		"queen": 4, "q": 4,
+		"king": 5, "k": 5
+	}
+	var a_type := -1
+	var v_type := -1
+	if args.size() >= 1:
+		a_type = type_map.get(str(args[0]).to_lower(), -1)
+	if args.size() >= 2:
+		v_type = type_map.get(str(args[1]).to_lower(), -1)
+
+	var a_name: String = str(args[0]).capitalize() if args.size() >= 1 else "Knight"
+	var v_name: String = str(args[1]).capitalize() if args.size() >= 2 else "King"
+	log_line("[color=#EBC85A]⚔️ Staging 3D Finisher: [b]%s vs %s[/b] in Slow-Motion...[/color]" % [a_name, v_name])
+
 	if _game_ref != null and _game_ref.has_method("test_stage_duel"):
-		_game_ref.test_stage_duel()
+		toggle_console(false)
+		await _game_ref.test_stage_duel(a_type, v_type)
+		await get_tree().create_timer(0.3).timeout
+		toggle_console(true)
+
+
+func _cmd_finishers() -> void:
+	log_line("[color=#EBC85A][b]🎬 Signature Kill Choreographies & Matchup Finishers Gallery (11):[/b][/color]")
+	log_line("  • [color=#60A5FA][b]duel knight king[/b][/color]   — “Royal Regicide” (Destrier rear-up & lance impale)")
+	log_line("  • [color=#60A5FA][b]duel knight rook[/b][/color]   — “Castle Breaker” (Leap onto battlements & broadsword cleave)")
+	log_line("  • [color=#60A5FA][b]duel knight bishop[/b][/color] — “Spellbreaker Joust” (Shield charge through arcane wards)")
+	log_line("  • [color=#EC4899][b]duel queen king[/b][/color]    — “The Kingslayer / Red Wedding” (Shadow vanish behind crown & throat cross)")
+	log_line("  • [color=#EC4899][b]duel queen queen[/b][/color]   — “Dance of Queens” (360° acrobatic dual-dagger spin)")
+	log_line("  • [color=#A855F7][b]duel bishop king[/b][/color]   — “Apocalyptic Judgement” (Triple sigil levitation & celestial lightning)")
+	log_line("  • [color=#A855F7][b]duel bishop rook[/b][/color]   — “Cataclysm Fracture” (Tile fissure & blue hellfire)")
+	log_line("  • [color=#EBC85A][b]duel king king[/b][/color]     — “Clash of Kings” (Barbarian greatsword clash & decapitation chop)")
+	log_line("  • [color=#64748B][b]duel rook king[/b][/color]     — “The Iron Tomb” (Fortress stone avalanche crush)")
+	log_line("  • [color=#64748B][b]duel rook knight[/b][/color]   — “Portcullis Slam” (Iron spiked gate shockwave)")
+	log_line("  • [color=#10B981][b]duel pawn king[/b][/color]     — “David vs Goliath” (Low heroic slide & spear thrust)")
+	log_line("[color=#94A3B8]Click any button in the top toolbar or type [b]duel <attacker> <victim>[/b] to watch instantly![/color]")
 
 
 func _cmd_kills() -> void:
-	log_line("[color=#EBC85A][b]Signature Kill Choreographies:[/b][/color]")
-	log_line("  • [b]Knight Lance Rush[/b]  - 1.4s galloping charge, lance impale & back-kick")
-	log_line("  • [b]Bishop Arcane Blast[/b]- Levitate, sigil burst, and thunder strike")
-	log_line("  • [b]Rook Tower Crash[/b]    - Earthquake stomp, stone fracture, and pillar crush")
-	log_line("  • [b]Queen Shadow Strike[/b]- Dual-dagger vanish, backstab, and flourish")
-	log_line("  • [b]King Decapitation[/b]  - Two-handed greatsword raise, execution blow")
-	log_line("  • [b]Pawn Phalanx[/b]        - Shield bash, spear thrust into the stone")
+	_cmd_finishers()
 
 
 func _cmd_dragon(args: Array) -> void:
