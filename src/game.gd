@@ -56,6 +56,7 @@ const ZeldaEasterEggsScript := preload("res://src/cinematics/zelda_easter_eggs.g
 const HoloChessGamificationScript := preload("res://src/cinematics/holochess_gamification.gd")
 const CoachEngineScript := preload("res://src/coach/coach_engine.gd")
 const CoachOverlayScript := preload("res://src/coach/coach_overlay.gd")
+const DevConsoleScript := preload("res://src/ui/dev_console.gd")
 
 const TOURNAMENT_UNDO_LIMIT := 3     # take-backs per tournament game (single: unlimited)
 
@@ -78,6 +79,7 @@ var spectator: DragonSpectator = null
 var _easter_eggs = null
 var _holochess = null
 var _coach_overlay = null
+var _dev_console = null
 var _last_coach_analysis: Dictionary = {}
 var oracle: Ds4Opponent = null       # non-null only vs DS4-Oracle
 var oracle_thinking := false
@@ -241,6 +243,83 @@ func _init() -> void:
 	_perf_init_us = Time.get_ticks_usec()
 
 
+func _apply_visual_profile() -> void:
+	# Keep empty stub or default visual profile settings
+	pass
+
+
+# ── Developer Console Live 3D Testing Hooks ───────────────────────────────
+
+
+func test_switch_house(new_hid: String) -> void:
+	if not HouseRegistry.has_house(new_hid):
+		return
+	player_house_id = new_hid
+	Session.player_house = new_hid
+	_player_display = _house_name(player_house_id)
+	_dress_hall()
+	_update_turn_label()
+	_spawn_from_state()
+
+
+func test_stage_duel(attacker_type: int = -1, victim_type: int = -1) -> void:
+	if duel_director == null or views.is_empty():
+		return
+	var attacker: PieceView = null
+	var victim: PieceView = null
+	for sq in views:
+		var pv: PieceView = views[sq]
+		if pv == null:
+			continue
+		if attacker == null and pv.house == PieceView.House.FROST:
+			if attacker_type < 0 or pv.piece_type == attacker_type:
+				attacker = pv
+		elif victim == null and pv.house == PieceView.House.EMBER:
+			if victim_type < 0 or pv.piece_type == victim_type:
+				victim = pv
+	if attacker == null or victim == null:
+		for sq in views:
+			var pv: PieceView = views[sq]
+			if attacker == null:
+				attacker = pv
+			elif victim == null and pv != attacker:
+				victim = pv
+	if attacker != null and victim != null:
+		var d_meta := _duel_meta(false)
+		d_meta["tier"] = 2
+		await duel_director.play_duel(attacker, victim, d_meta, func():
+			await attacker.play_capture(victim)
+		)
+
+
+func test_piece_animation(piece_type: int = -1) -> void:
+	for sq in views:
+		var pv: PieceView = views[sq]
+		if pv != null and (piece_type < 0 or pv.piece_type == piece_type):
+			await pv.play_victory_flourish()
+			return
+
+
+func test_dragon_action(action: String) -> void:
+	if spectator == null:
+		return
+	match action.to_lower():
+		"wake":
+			spectator.react_brilliant()
+		"roar":
+			spectator.react_blunder()
+		"breathe", "fire":
+			spectator.react_capture(Vector2i(4, 4))
+		"ashfall":
+			spectator.play_ashfall(false, player_house_id)
+
+
+func test_dragon_scale(scale_val: float) -> void:
+	if spectator != null and spectator.rig != null:
+		spectator.dragon_scale = scale_val
+		spectator.rig.scale = Vector3.ONE * scale_val
+
+
 func _enter_tree() -> void:
 	_perf_tree_us = Time.get_ticks_usec()
 
@@ -374,6 +453,10 @@ func _ready() -> void:
 	_coach_overlay.hint_requested.connect(_on_coach_hint_requested)
 	_coach_overlay.stockfish_hint_requested.connect(_on_stockfish_hint_requested)
 	_coach_overlay.leela_hint_requested.connect(_on_leela_hint_requested)
+	_dev_console = DevConsoleScript.new()
+	_dev_console.name = "DevConsole"
+	_dev_console.set_game_ref(self)
+	add_child(_dev_console)
 	_setup_spectator()
 	_lt("spectator")
 	if Session.configured and str(Session.opponent.get("kind", "")) == "ds4_oracle":
@@ -670,7 +753,12 @@ func _kick_ai_opening() -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
-		if event.keycode == KEY_H:
+		if event.keycode in [KEY_QUOTELEFT, KEY_F1, KEY_F12, KEY_SECTION]:
+			if _dev_console != null:
+				_dev_console.toggle_console()
+				get_viewport().set_input_as_handled()
+				return
+		elif event.keycode == KEY_H:
 			if _holochess != null:
 				_holochess.toggle_holochess_mode(board)
 				get_viewport().set_input_as_handled()
@@ -697,7 +785,8 @@ func _unhandled_input(event: InputEvent) -> void:
 func _on_square_clicked(sq: Vector2i) -> void:
 	if busy or game_over or state == null or state.turn != player_color \
 			or _net_disconnected or promo_picker != null \
-			or (duel_director != null and duel_director.is_active()):
+			or (duel_director != null and duel_director.is_active()) \
+			or (_dev_console != null and _dev_console.is_open()):
 		return  # not interactive during animations/cinematics, after the end, or on the rival's turn
 	var idx := idx_of(sq)
 	var piece = state.pieces[idx]
