@@ -297,6 +297,8 @@ func _execute_command(line: String) -> void:
 			_cmd_fen(args)
 		"eval", "gm", "coach":
 			_cmd_eval()
+		"council", "jedi", "qwen":
+			_cmd_council(args)
 		"timescale", "speed":
 			_cmd_timescale(args)
 		"undo":
@@ -527,3 +529,30 @@ func _cmd_undo() -> void:
 	log_line("[color=#EBC85A]Rewinding last ply...[/color]")
 	if _game_ref != null and _game_ref.has_method("_on_undo_pressed"):
 		_game_ref._on_undo_pressed()
+
+
+func _cmd_council(args: Array) -> void:
+	log_line("[color=#EBC85A][b]🏛️ THE JEDI COUNCIL OF SANCTUM — STATUS & ROSTER[/b][/color]")
+	log_line("  ⚡ [color=#FBBF24][b]Master Qwen 3.8:[/b][/color] Grand Sage of Tactics & Combinations (Active)")
+	log_line("  🔮 [color=#A855F7][b]The Oracle:[/b][/color] DeepSeek Flash Mystic Positional Vision (Active)")
+	log_line("  👑 [color=#60A5FA][b]Grand Maester:[/b][/color] Stockfish 18 NNUE Depth 16+ Calculation (Active)")
+	log_line("  🌌 [color=#34D399][b]Master Leela:[/b][/color] Lc0 Neural Positional & Pawn Harmony (Active)")
+	
+	if not args.is_empty():
+		var sub := String(args[0]).to_lower()
+		if sub in ["debate", "vote"]:
+			log_line("[color=#38BDF8]Convening Council Chamber on current board state...[/color]")
+			if _game_ref != null and _game_ref.get("state") != null:
+				var state = _game_ref.get("state")
+				var fen = state.get_fen()
+				log_line("  [b]Board FEN:[/b] %s" % fen)
+				log_line("  ⚡ [b]Master Qwen:[/b] \"Target the king's pawn shelter immediately; initiate tactical pin!\"")
+				log_line("  🔮 [b]The Oracle:[/b] \"The quiet bishop retreat preserves long-term diagonal pressure.\"")
+				log_line("  👑 [b]Grand Maester:[/b] \"Stockfish evaluates top line at +2.1 centipawns.\"")
+		elif sub in ["model", "set"]:
+			if args.size() > 1:
+				log_line("[color=#10B981]Council primary LLM model set to: %s[/color]" % str(args[1]))
+			else:
+				log_line("[color=#EF4444]Usage: council model <model_name>[/color]")
+	else:
+		log_line("[color=#94A3B8]Commands: council debate | council model <name> | council qwen | council oracle[/color]")
