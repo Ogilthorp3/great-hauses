@@ -57,6 +57,7 @@ const HoloChessGamificationScript := preload("res://src/cinematics/holochess_gam
 const CoachEngineScript := preload("res://src/coach/coach_engine.gd")
 const CoachOverlayScript := preload("res://src/coach/coach_overlay.gd")
 const DevConsoleScript := preload("res://src/ui/dev_console.gd")
+const JediCouncilOpponentScript := preload("res://src/ai/jedi_council.gd")
 
 const TOURNAMENT_UNDO_LIMIT := 3     # take-backs per tournament game (single: unlimited)
 
@@ -81,7 +82,7 @@ var _holochess = null
 var _coach_overlay = null
 var _dev_console = null
 var _last_coach_analysis: Dictionary = {}
-var oracle: Ds4Opponent = null       # non-null only vs DS4-Oracle
+var oracle: Node = null       # non-null vs DS4-Oracle or Jedi Council
 var oracle_thinking := false
 var oracle_think_count := 0          # e2e evidence: thinking HUD fired
 var oracle_stumble_count := 0        # e2e evidence: fallback was surfaced
@@ -461,11 +462,15 @@ func _ready() -> void:
 	_dev_console.set_game_ref(self)
 	add_child(_dev_console)
 	_setup_spectator()
-	_lt("spectator")
-	if Session.configured and str(Session.opponent.get("kind", "")) == "ds4_oracle":
-		oracle = Ds4Opponent.new()
-		oracle.name = "Oracle"
-		oracle.mode = str(Session.opponent.get("oracle_mode", Ds4Opponent.MODE_PURE))
+	if Session.configured and (str(Session.opponent.get("kind", "")) == "ds4_oracle" or str(Session.opponent.get("kind", "")) == "jedi_council"):
+		if str(Session.opponent.get("kind", "")) == "jedi_council":
+			oracle = JediCouncilOpponentScript.new()
+			oracle.name = "JediCouncil"
+			oracle.mode = str(Session.opponent.get("council_mode", "jedi_council"))
+		else:
+			oracle = Ds4Opponent.new()
+			oracle.name = "Oracle"
+			oracle.mode = str(Session.opponent.get("oracle_mode", Ds4Opponent.MODE_PURE))
 		add_child(oracle)
 		oracle.thinking_started.connect(_on_oracle_thinking_started)
 		oracle.thinking_finished.connect(_on_oracle_thinking_finished)
