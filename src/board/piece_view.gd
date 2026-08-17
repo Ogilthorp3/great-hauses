@@ -563,19 +563,50 @@ func play_capture(victim: PieceView) -> void:
 		else randi() % KILL_VARIANTS
 	await _face(Vector3(to_victim.x, 0.0, to_victim.z))
 	victim.face_attacker(position)
+
+	var v_type: Type = victim.piece_type
 	match piece_type:
 		Type.KNIGHT:
-			await _kill_charge(victim)
+			if v_type in [Type.KING, Type.QUEEN]:
+				await _kill_charge_royal(victim)
+			elif v_type == Type.ROOK:
+				await _kill_charge_castle(victim)
+			elif v_type == Type.BISHOP:
+				await _kill_charge_spellbreaker(victim)
+			else:
+				await _kill_charge(victim)
 		Type.BISHOP:
-			await _kill_bolt(victim)
+			if v_type == Type.KING:
+				await _kill_apocalyptic_judgement(victim)
+			elif v_type == Type.ROOK:
+				await _kill_cataclysm_fracture(victim)
+			else:
+				await _kill_bolt(victim)
 		Type.ROOK:
-			await _kill_grind(victim)
+			if v_type in [Type.KING, Type.QUEEN]:
+				await _kill_iron_tomb(victim)
+			elif v_type == Type.KNIGHT:
+				await _kill_portcullis_slam(victim)
+			else:
+				await _kill_grind(victim)
 		Type.QUEEN:
-			await _kill_arrow(victim)
+			if v_type == Type.KING:
+				await _kill_kingslayer(victim)
+			elif v_type == Type.QUEEN:
+				await _kill_queen_dance(victim)
+			else:
+				await _kill_arrow(victim)
 		Type.KING:
-			await _kill_execution(victim)
+			if v_type in [Type.KING, Type.QUEEN]:
+				await _kill_clash_of_kings(victim)
+			else:
+				await _kill_execution(victim)
 		_:
-			await _kill_stab(victim)
+			if v_type == Type.KING:
+				await _kill_david_vs_goliath(victim)
+			else:
+				await _kill_stab(victim)
+
 	await play_victory_flourish()
 
 
@@ -1032,6 +1063,267 @@ func _kill_execution(victim: PieceView) -> void:
 		back.tween_property(self, "position", home, 0.26) \
 			.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 		await back.finished
+
+
+# ── Matchup-Specific Finishers (Game of Thrones & Mortal Kombat Style) ─────
+
+
+## KNIGHT vs KING/QUEEN — "Royal Regicide"
+func _kill_charge_royal(victim: PieceView) -> void:
+	var dir := _flat_dir_to(victim)
+	var home := position
+	_mount_yaw(0.0, 0.0, 0.18)
+	var gather := home - dir * (KNIGHT_CHARGE_GATHER * 1.25)
+	var rear := create_tween().set_parallel(true)
+	rear.tween_property(self, "position", gather, 0.32).set_trans(Tween.TRANS_SINE)
+	if _model != null:
+		rear.tween_property(_model, "rotation:x", -0.42, 0.32).set_trans(Tween.TRANS_QUAD)
+	await rear.finished
+	_dust_puff(global_position, 24, 0.5)
+	if _anim != null:
+		_anim.play(ANIM_THROW, 0.04)
+		_anim.speed_scale = 2.0
+	var impact := _mark_off(victim, MOUNTED_STAND_OFF * 0.95)
+	var charge := create_tween()
+	charge.tween_property(self, "position", impact, 0.28).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	await charge.finished
+	_strike_flash(victim.global_position, {"height": 0.9, "scale": 1.6, "life": 0.5})
+	_dust_puff(victim.global_position, 35, 0.8)
+	var gone := _fell(victim, DEATH_LAUNCH)
+	var carry := create_tween()
+	carry.tween_property(self, "position", impact + dir * 0.3, 0.18).set_trans(Tween.TRANS_QUAD)
+	await carry.finished
+	await _await_death(gone, victim)
+	_settle_attacker()
+	_mount_yaw(KNIGHT_MODEL_YAW, -KNIGHT_RIDER_COUNTER_YAW, 0.3)
+	var wheel := create_tween()
+	wheel.tween_property(self, "position", home, 0.35).set_trans(Tween.TRANS_SINE)
+	await wheel.finished
+
+
+## KNIGHT vs ROOK — "Castle Breaker"
+func _kill_charge_castle(victim: PieceView) -> void:
+	var dir := _flat_dir_to(victim)
+	var home := position
+	_mount_yaw(0.0, 0.0, 0.18)
+	var gather := home - dir * KNIGHT_CHARGE_GATHER
+	var rear := create_tween()
+	rear.tween_property(self, "position", gather, 0.25).set_trans(Tween.TRANS_SINE)
+	await rear.finished
+	var impact := _mark_off(victim, MOUNTED_STAND_OFF)
+	var charge := create_tween()
+	charge.tween_property(self, "position", impact, 0.3).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	await charge.finished
+	# Leap strike onto the battlement
+	var leap := create_tween().set_parallel(true)
+	leap.tween_property(self, "position:y", position.y + 0.35, 0.15).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	leap.tween_property(self, "position", impact + dir * 0.2, 0.15)
+	await leap.finished
+	_strike_flash(victim.global_position, {"height": 1.2, "scale": 1.8, "life": 0.6})
+	_dust_bank(victim.global_position, dir, 28)
+	var land := create_tween()
+	land.tween_property(self, "position:y", home.y, 0.14).set_trans(Tween.TRANS_BOUNCE)
+	await land.finished
+	await victim.die(DEATH_CRUSH)
+	_settle_attacker()
+	_mount_yaw(KNIGHT_MODEL_YAW, -KNIGHT_RIDER_COUNTER_YAW, 0.3)
+	var wheel := create_tween()
+	wheel.tween_property(self, "position", home, 0.32).set_trans(Tween.TRANS_SINE)
+	await wheel.finished
+
+
+## KNIGHT vs BISHOP — "Spellbreaker Joust"
+func _kill_charge_spellbreaker(victim: PieceView) -> void:
+	var dir := _flat_dir_to(victim)
+	var home := position
+	_mount_yaw(0.0, 0.0, 0.18)
+	var gather := home - dir * KNIGHT_CHARGE_GATHER
+	var rear := create_tween()
+	rear.tween_property(self, "position", gather, 0.24).set_trans(Tween.TRANS_SINE)
+	await rear.finished
+	var impact := _mark_off(victim, MOUNTED_STAND_OFF)
+	var charge := create_tween()
+	charge.tween_property(self, "position", impact, 0.26).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	await charge.finished
+	_strike_flash(global_position.lerp(victim.global_position, 0.5), {"height": 0.8, "scale": 1.5, "life": 0.4})
+	await victim.die(DEATH_LAUNCH)
+	_settle_attacker()
+	_mount_yaw(KNIGHT_MODEL_YAW, -KNIGHT_RIDER_COUNTER_YAW, 0.3)
+	var wheel := create_tween()
+	wheel.tween_property(self, "position", home, 0.32).set_trans(Tween.TRANS_SINE)
+	await wheel.finished
+
+
+## QUEEN vs KING — "The Kingslayer / Red Wedding"
+func _kill_kingslayer(victim: PieceView) -> void:
+	var dir := _flat_dir_to(victim)
+	var home := position
+	# Shadow vanish
+	var tw_fade := create_tween()
+	tw_fade.tween_property(self, "scale", Vector3(0.1, 1.4, 0.1), 0.12).set_trans(Tween.TRANS_QUAD)
+	await tw_fade.finished
+	# Reappear behind the king
+	var behind := victim.position - dir * 0.42
+	position = behind
+	await _face(victim.position - position)
+	var tw_appear := create_tween()
+	tw_appear.tween_property(self, "scale", Vector3.ONE, 0.14).set_trans(Tween.TRANS_BOUNCE)
+	await tw_appear.finished
+	if _anim != null:
+		_anim.play(ANIM_THROW, 0.04)
+		_anim.speed_scale = 2.4
+	await _beat(0.12)
+	_strike_flash(victim.global_position + Vector3.UP * 0.75, {"height": 0.5, "scale": 1.4, "life": 0.5, "tilt": 0.2})
+	await victim.die(DEATH_BLADE)
+	_settle_attacker()
+	var ret := create_tween()
+	ret.tween_property(self, "position", home, 0.26).set_trans(Tween.TRANS_SINE)
+	await ret.finished
+
+
+## QUEEN vs QUEEN — "Dance of the Queens"
+func _kill_queen_dance(victim: PieceView) -> void:
+	var dir := _flat_dir_to(victim)
+	var home := position
+	var mark := _mark_off(victim, STAND_OFF * 0.8)
+	var dash := create_tween().set_parallel(true)
+	dash.tween_property(self, "position", mark, 0.2).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	dash.tween_property(self, "rotation:y", rotation.y + TAU * 2.0, 0.35).set_trans(Tween.TRANS_CUBIC)
+	await dash.finished
+	_strike_flash(victim.global_position + Vector3.UP * 0.65, {"height": 0.6, "scale": 1.3, "life": 0.45})
+	await victim.die(DEATH_BLADE)
+	_settle_attacker()
+	var ret := create_tween()
+	ret.tween_property(self, "position", home, 0.25).set_trans(Tween.TRANS_SINE)
+	await ret.finished
+
+
+## BISHOP vs KING — "Apocalyptic Judgement"
+func _kill_apocalyptic_judgement(victim: PieceView) -> void:
+	var dir := _flat_dir_to(victim)
+	var home := position
+	var give := _ranged_give_ground(victim)
+	var stand := home - dir * give
+	var step := create_tween()
+	step.tween_property(self, "position", stand, 0.2).set_trans(Tween.TRANS_SINE)
+	_prepare_bolt(_flat_gap_to(victim) - give)
+	if _anim != null:
+		_anim.play(ANIM_THROW, 0.05)
+		_anim.speed_scale = 0.9
+	await step.finished
+	# Levitate the king into the judgment field
+	var lev := create_tween().set_parallel(true)
+	lev.tween_property(victim, "position:y", victim.position.y + 0.45, 0.3).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	lev.tween_property(victim, "rotation:y", victim.rotation.y + PI * 2.0, 0.5)
+	await lev.finished
+	var chest := victim.global_position + Vector3.UP * 0.6
+	_fire_bolt(chest, 0.55)
+	_strike_flash(victim.global_position, {"height": 1.5, "scale": 2.2, "life": 0.6})
+	await _beat_wall(0.25)
+	await victim.die(DEATH_BURN)
+	_stop_bolt()
+	_settle_attacker()
+	if give > 0.01:
+		var ret := create_tween()
+		ret.tween_property(self, "position", home, 0.26).set_trans(Tween.TRANS_SINE)
+		await ret.finished
+
+
+## BISHOP vs ROOK — "Cataclysm Fracture"
+func _kill_cataclysm_fracture(victim: PieceView) -> void:
+	var dir := _flat_dir_to(victim)
+	var home := position
+	if _anim != null:
+		_anim.play(ANIM_THROW, 0.05)
+		_anim.speed_scale = 1.4
+	await _beat(0.2)
+	_prepare_bolt(_flat_gap_to(victim))
+	_dust_bank(victim.global_position, dir, 32)
+	_strike_flash(victim.global_position, {"height": 1.6, "scale": 2.4, "life": 0.65})
+	_fire_bolt(victim.global_position + Vector3.UP * 0.4, 0.6)
+	await _beat_wall(0.2)
+	await victim.die(DEATH_BURN)
+	_stop_bolt()
+	_settle_attacker()
+
+
+## KING vs KING/QUEEN — "Clash of Kings"
+func _kill_clash_of_kings(victim: PieceView) -> void:
+	var dir := _flat_dir_to(victim)
+	var home := position
+	var mark := _mark_off(victim, STAND_OFF * 0.85)
+	var advance := create_tween()
+	advance.tween_property(self, "position", mark, 0.28).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	if _anim != null:
+		_anim.play(ANIM_THROW, 0.06)
+		_anim.speed_scale = 0.8
+	await advance.finished
+	# Heavy blade clash spark
+	_strike_flash(global_position.lerp(victim.global_position, 0.5) + Vector3.UP * 0.7, {"height": 0.8, "scale": 1.6, "life": 0.4})
+	await _beat(0.2)
+	if _anim != null:
+		_anim.speed_scale = 2.8 # Decapitation follow-through
+	await _beat(0.14)
+	_strike_flash(victim.global_position + Vector3.UP * 0.8, {"height": 0.9, "scale": 1.8, "life": 0.55})
+	_dust_puff(victim.global_position, 28, 0.7)
+	await victim.die(DEATH_BLADE)
+	_settle_attacker()
+	var ret := create_tween()
+	ret.tween_property(self, "position", home, 0.28).set_trans(Tween.TRANS_SINE)
+	await ret.finished
+
+
+## ROOK vs KING/QUEEN — "The Iron Tomb"
+func _kill_iron_tomb(victim: PieceView) -> void:
+	var dir := _flat_dir_to(victim)
+	var home := position
+	var stop := victim.position + dir * 0.08
+	var lift := create_tween()
+	lift.tween_property(self, "position:y", home.y + 0.25, 0.2).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	lift.tween_property(self, "position", stop, 0.28).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	await lift.finished
+	_dust_bank(victim.global_position, dir, 36)
+	_strike_flash(victim.global_position, {"height": 1.4, "scale": 2.0, "life": 0.55})
+	await victim.die(DEATH_CRUSH)
+	var settle := create_tween()
+	settle.tween_property(self, "position", stop, 0.15).set_trans(Tween.TRANS_BOUNCE)
+	await settle.finished
+
+
+## ROOK vs KNIGHT — "Portcullis Slam"
+func _kill_portcullis_slam(victim: PieceView) -> void:
+	var dir := _flat_dir_to(victim)
+	var home := position
+	var stop := victim.position
+	var grind := create_tween()
+	grind.tween_property(self, "position", stop, 0.35).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	await grind.finished
+	_dust_bank(victim.global_position, dir, 30)
+	_strike_flash(victim.global_position, {"height": 1.2, "scale": 1.7, "life": 0.5})
+	await victim.die(DEATH_CRUSH)
+
+
+## PAWN vs KING — "The Peasant's Vengeance (David vs Goliath)"
+func _kill_david_vs_goliath(victim: PieceView) -> void:
+	var dir := _flat_dir_to(victim)
+	var home := position
+	var mark := _mark_off(victim, STAND_OFF * 0.65)
+	# Low heroic slide under the greatsword
+	var slide := create_tween().set_parallel(true)
+	slide.tween_property(self, "position", mark, 0.22).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	slide.tween_property(self, "position:y", position.y - 0.08, 0.22)
+	if _anim != null:
+		_anim.play(ANIM_THROW, 0.04)
+		_anim.speed_scale = 2.4
+	await slide.finished
+	_strike_flash(victim.global_position + Vector3.UP * 0.45, {"height": 0.7, "scale": 1.5, "life": 0.5})
+	_dust_puff(global_position, 18, 0.5)
+	await victim.die(DEATH_BLADE)
+	_settle_attacker()
+	var rise := create_tween().set_parallel(true)
+	rise.tween_property(self, "position:y", home.y, 0.15).set_trans(Tween.TRANS_BOUNCE)
+	rise.tween_property(self, "position", home, 0.26).set_trans(Tween.TRANS_SINE)
+	await rise.finished
 
 
 # ── kill plumbing ─────────────────────────────────────────────────────────

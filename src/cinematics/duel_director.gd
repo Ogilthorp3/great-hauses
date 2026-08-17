@@ -168,24 +168,23 @@ func play_duel(attacker: Node3D, victim: Node3D, meta: Dictionary = {},
 	var cur_hold_wall: float = duel_slow_hold_wall
 	var cur_ramp_down: float = duel_ramp_down_wall
 
+	# GoT / Mortal Kombat dramatic anticipation tuning
 	if tier == 2:
-		cur_slow_scale = minf(duel_slow_scale, 0.15)   # Deep cinematic showstopper slow-mo
-		cur_hold_wall = maxf(duel_slow_hold_wall, 1.10)
-		cur_ramp_down = duel_ramp_down_wall * 0.7
+		cur_slow_scale = 0.12   # Extreme cinematic matrix slow-mo
+		cur_hold_wall = 1.25
+		cur_ramp_down = duel_ramp_down_wall * 0.65
 	elif tier == 1:
-		cur_slow_scale = minf(duel_slow_scale, 0.32)   # Tactical flourish slow-mo
-		cur_hold_wall = maxf(duel_slow_hold_wall, 0.65)
-		cur_ramp_down = duel_ramp_down_wall * 0.85
+		cur_slow_scale = 0.22
+		cur_hold_wall = 0.85
+		cur_ramp_down = duel_ramp_down_wall * 0.80
 	else:
-		cur_slow_scale = duel_slow_scale
+		cur_slow_scale = 0.18
 		cur_hold_wall = duel_slow_hold_wall
 		cur_ramp_down = duel_ramp_down_wall
 
-	_cam_enter_duel(attacker, victim, seq, tier)   # concurrent swoop
-	# FACE TO FACE: both combatants turn to meet BEFORE the strike begins,
-	# then a per-frame yaw hold keeps them locked through it — a stale
-	# _face_home tween left by the preceding walk can never again leave a
-	# duel fought back-to-back.
+	# Evaluate and execute best artistic camera angle
+	_cam_enter_artistic_duel(attacker, victim, seq, tier)
+	# FACE TO FACE: both combatants turn to meet BEFORE the strike begins
 	await _face_off_pair(seq, attacker, victim)
 	var strike_done := {"done": not strike.is_valid()}
 	if strike.is_valid():
@@ -828,52 +827,112 @@ const FRAME_SAFETY := 1.16
 const FIGHTER_TOP := [0.95, 1.24, 1.52, 1.18, 1.40, 1.58]
 
 
-## Swoop from the current viewport camera to a low side angle framing both
-## fighters. No-op when there is no active camera (headless unit tests).
-func _cam_enter_duel(attacker: Node3D, victim: Node3D, seq: int, tier: int = 0) -> void:
+## Swoop from current camera using the Artistic Camera Judge to select
+## the most dramatic cinematic angle (Heroic Dutch, OTS, Combat Rail, Impending Doom, Arcane).
+func _cam_enter_artistic_duel(attacker: Node3D, victim: Node3D, seq: int, tier: int = 0) -> void:
 	if not _cam_take_viewport():
 		return
 	var a := attacker.global_position if is_instance_valid(attacker) else Vector3.ZERO
 	var v := victim.global_position if is_instance_valid(victim) else a + Vector3.FORWARD
-	var frame: Array = DUEL_FRAMES.get(_fighter_type(attacker),
-		[2.0, 0.42, duel_fov, 0.8])
-	# A small per-duel jitter on top of the type's frame: the same rank killing
-	# twice in a row is filmed from two slightly different places.
-	var lift: float = float(frame[1]) + randf_range(-0.06, 0.12)
-	if tier == 2:
-		lift = 0.24 + randf_range(-0.03, 0.05) # Chessboard-level GoT battle camera!
-	elif tier == 1:
-		lift = 0.34 + randf_range(-0.04, 0.08)
+	var a_type := _fighter_type(attacker)
+	var v_type := _fighter_type(victim)
 
 	var axis := v - a
 	axis.y = 0.0
 	axis = axis.normalized() if axis.length() > 0.01 else Vector3.FORWARD
 	var side := axis.cross(Vector3.UP).normalized()
-	var fov: float = float(frame[2])
-	if tier == 2:
-		fov = clampf(fov - 4.0, 26.0, 48.0) # Tighter cinematic lens
+	var mid := (a + v) * 0.5 + Vector3.UP * 0.45
+	var top_h := maxf(_fighter_top(attacker), _fighter_top(victim))
 
-	var fit := _duel_fit(a, v, axis, float(frame[3]),
-		maxf(_fighter_top(attacker), _fighter_top(victim)), fov)
-	var focus: Vector3 = fit["focus"]
-	var back := clampf(maxf(float(fit["back"]), float(frame[0]) * randf_range(0.97, 1.06)),
-		1.8, BACK_MAX)
-	if tier == 2:
-		back = clampf(back * 0.88, 1.75, BACK_MAX) # Closer intimate combat angle
+	var candidates: Array[Dictionary] = []
 
-	# The point on the duel line the lens is SQUARE to (DUEL_FRAMES' 5th field,
-	# a FRACTION of the shot so it scales with it). The look-at stays `focus`
-	# either way — only the eye slides along the line.
-	var square_to := focus
-	if frame.size() > 4:
-		var p := a + axis * (clampf(float(frame[4]), 0.0, 1.0) * a.distance_to(v))
-		square_to = Vector3(p.x, focus.y, p.z)
-	var p1 := square_to + side * back + Vector3.UP * lift
-	var p2 := square_to - side * back + Vector3.UP * lift
-	var from := _cam_base.origin
-	var cam_pos := p1 if from.distance_to(p1) <= from.distance_to(p2) else p2
-	var target := Transform3D(Basis.looking_at(focus - cam_pos, Vector3.UP), cam_pos)
-	await _cam_glide(seq, target, fov, swoop_wall, 0.35)
+	# Candidate 1: HEROIC DUTCH LOW (Game of Thrones Battle Angle)
+	var p_dutch := a - axis * 0.8 + side * 1.6 + Vector3.UP * 0.28
+	candidates.append({
+		"name": "Heroic Dutch Low",
+		"pos": p_dutch,
+		"target": mid + Vector3.UP * 0.25,
+		"fov": 34.0 if tier == 2 else 38.0,
+		"weight": 85.0 if (a_type == 5 or v_type == 5 or a_type == 4) else 70.0,
+		"dutch_roll": deg_to_rad(11.0 if randf() < 0.5 else -11.0)
+	})
+
+	# Candidate 2: OVER-THE-SHOULDER INTIMATE (Execution anticipation)
+	var p_ots := a - axis * 1.1 + side * 0.45 + Vector3.UP * (top_h * 0.72)
+	candidates.append({
+		"name": "Over The Shoulder",
+		"pos": p_ots,
+		"target": v + Vector3.UP * (_fighter_top(victim) * 0.65),
+		"fov": 32.0 if tier == 2 else 36.0,
+		"weight": 95.0 if (v_type == 5 or v_type == 4) else 75.0,
+		"dutch_roll": deg_to_rad(4.0)
+	})
+
+	# Candidate 3: COMBAT PROFILE RAIL (Tracking battle line)
+	var p_rail := mid + side * 2.2 + Vector3.UP * 0.52
+	candidates.append({
+		"name": "Combat Profile Rail",
+		"pos": p_rail,
+		"target": mid,
+		"fov": 38.0 if tier == 2 else 42.0,
+		"weight": 90.0 if a_type == 2 else 65.0, # Knights love tracking rails!
+		"dutch_roll": 0.0
+	})
+
+	# Candidate 4: REVERSE VICTIM PERSPECTIVE (Mortal Kombat Looming Doom)
+	var p_rev := v + axis * 1.2 - side * 0.55 + Vector3.UP * 0.38
+	candidates.append({
+		"name": "Reverse Impending Doom",
+		"pos": p_rev,
+		"target": a + Vector3.UP * (top_h * 0.65),
+		"fov": 34.0,
+		"weight": 88.0 if tier == 2 else 60.0,
+		"dutch_roll": deg_to_rad(-6.0)
+	})
+
+	# Candidate 5: ELEVATED ARCANE SANCTUM (Bishops and Rooks)
+	var p_arcane := mid + side * 2.4 - axis * 0.9 + Vector3.UP * 1.55
+	candidates.append({
+		"name": "Elevated Arcane",
+		"pos": p_arcane,
+		"target": mid,
+		"fov": 44.0,
+		"weight": 95.0 if (a_type == 3 or a_type == 1) else 50.0,
+		"dutch_roll": 0.0
+	})
+
+	# Artistic Judge scoring pass
+	var best_candidate: Dictionary = candidates[0]
+	var best_score := -9999.0
+	var from_cam := _cam_base.origin
+
+	for c in candidates:
+		var score: float = float(c["weight"])
+		var c_pos: Vector3 = c["pos"]
+		var dist: float = from_cam.distance_to(c_pos)
+		score += clampf(20.0 - dist * 1.5, 0.0, 20.0)
+		if c_pos.y < 0.15:
+			score -= 50.0
+		score += randf_range(0.0, 15.0)
+		if score > best_score:
+			best_score = score
+			best_candidate = c
+
+	var chosen_pos: Vector3 = best_candidate["pos"]
+	var chosen_target: Vector3 = best_candidate["target"]
+	var chosen_fov: float = float(best_candidate["fov"])
+	var roll: float = float(best_candidate.get("dutch_roll", 0.0))
+
+	var basis := Basis.looking_at(chosen_target - chosen_pos, Vector3.UP)
+	if absf(roll) > 0.001:
+		basis = basis.rotated(basis.z, roll)
+
+	var target_tf := Transform3D(basis, chosen_pos)
+	await _cam_glide(seq, target_tf, chosen_fov, swoop_wall, 0.35)
+
+
+func _cam_enter_duel(attacker: Node3D, victim: Node3D, seq: int, tier: int = 0) -> void:
+	await _cam_enter_artistic_duel(attacker, victim, seq, tier)
 
 
 ## FIT THE FRAME TO THE FIGHT. The action of a duel is a box: `reach` of room
