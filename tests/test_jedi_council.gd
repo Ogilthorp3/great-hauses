@@ -38,7 +38,9 @@ func _test_council_initialization() -> void:
 	check("council: default mode is jedi_council", JediCouncilScript.MODE_JEDI, council.mode)
 	check("council: has Yoda seat", true, JediCouncilScript.COUNCIL_SEATS.has("yoda"))
 	check("council: has Windu seat", true, JediCouncilScript.COUNCIL_SEATS.has("windu"))
-	check("council: has Qwen seat", true, JediCouncilScript.COUNCIL_SEATS.has("qwen"))
+	check("council: has Qui-Gon seat", true, JediCouncilScript.COUNCIL_SEATS.has("quigon"))
+	check("council: has Cilghal seat", true, JediCouncilScript.COUNCIL_SEATS.has("cilghal"))
+	check("council: has Mundi seat", true, JediCouncilScript.COUNCIL_SEATS.has("mundi"))
 	council.queue_free()
 
 
@@ -103,7 +105,9 @@ func _test_forced_move_instant_play() -> void:
 func _test_council_personas() -> void:
 	check("seats: Yoda has council-max-thinking", "council-max-thinking", JediCouncilScript.COUNCIL_SEATS["yoda"]["model"])
 	check("seats: Windu has council-secure", "council-secure", JediCouncilScript.COUNCIL_SEATS["windu"]["model"])
-	check("seats: Qwen has qwen-3.8-instruct", "qwen-3.8-instruct", JediCouncilScript.COUNCIL_SEATS["qwen"]["model"])
+	check("seats: Qui-Gon has council-code", "council-code", JediCouncilScript.COUNCIL_SEATS["quigon"]["model"])
+	check("seats: Cilghal has qwen-3.8-instruct", "qwen-3.8-instruct", JediCouncilScript.COUNCIL_SEATS["cilghal"]["model"])
+	check("seats: Mundi has council-finance", "council-finance", JediCouncilScript.COUNCIL_SEATS["mundi"]["model"])
 
 
 func _test_position_complexity_scaling() -> void:

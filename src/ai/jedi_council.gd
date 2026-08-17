@@ -36,21 +36,38 @@ const DEFAULT_ENDPOINTS := [
 const COUNCIL_SEATS := {
 	"yoda": {
 		"name": "Master Yoda",
-		"model": "council-max-thinking",
+		"model": "council-max-thinking", # Fable (Sub)
+		"provider": "Fable (Sub)",
 		"prefix": "🧙 [Master Yoda]",
 		"lens": "grand strategy, initiative, and the second-order consequences three moves out"
 	},
 	"windu": {
 		"name": "Master Windu",
-		"model": "council-secure",
+		"model": "council-secure", # Gemini 3.7 Flash (Sub)
+		"provider": "Gemini 3.7 Flash (Sub)",
 		"prefix": "⚔️ [Master Windu]",
 		"lens": "tactical threats, king defense, counter-attacks, and severe risk elimination"
 	},
-	"qwen": {
-		"name": "Master Qwen 3.8",
-		"model": "qwen-3.8-instruct",
-		"prefix": "⚡ [Master Qwen]",
+	"quigon": {
+		"name": "Master Qui-Gon",
+		"model": "council-code", # Devstral / Glimmer soon (Local)
+		"provider": "Devstral / Glimmer (Local)",
+		"prefix": "⚡ [Master Qui-Gon]",
 		"lens": "dynamic piece coordination, combinations, tempo, and sharp attacks"
+	},
+	"cilghal": {
+		"name": "Master Cilghal",
+		"model": "qwen-3.8-instruct", # Qwen 3.8 (Local)
+		"provider": "Qwen 3.8 (Local)",
+		"prefix": "🏥 [Master Cilghal]",
+		"lens": "pawn structure health, piece harmony, and defensive diagnostics"
+	},
+	"mundi": {
+		"name": "Master Mundi",
+		"model": "council-finance", # Grok 4.6 (Sub)
+		"provider": "Grok 4.6 (Sub)",
+		"prefix": "💰 [Master Mundi]",
+		"lens": "material balance, piece exchange economics, and concrete value"
 	}
 }
 
@@ -145,18 +162,20 @@ func _deliberate_council(state, ascii_board: String, history: String, legal_str:
 	else:
 		oracle_reason.emit("The Jedi Council of Sanctum convenes in deep thought…")
 
-	# Parallel seat queries
+	# Parallel seat queries across the 5 Sanctum Minds
 	var votes := {}       # move_uci -> count
 	var reasons := {}     # move_uci -> {speaker, text}
 
 	var timeout_s: float = complexity["timeout_s"]
 	var max_tokens: int = complexity["max_tokens"]
 
-	var qwen_res: Dictionary = await _fetch_seat_opinion("qwen", state, ascii_board, history, legal_str, by_uci, timeout_s, max_tokens)
-	var windu_res: Dictionary = await _fetch_seat_opinion("windu", state, ascii_board, history, legal_str, by_uci, timeout_s, max_tokens)
 	var yoda_res: Dictionary = await _fetch_seat_opinion("yoda", state, ascii_board, history, legal_str, by_uci, timeout_s, max_tokens)
+	var windu_res: Dictionary = await _fetch_seat_opinion("windu", state, ascii_board, history, legal_str, by_uci, timeout_s, max_tokens)
+	var quigon_res: Dictionary = await _fetch_seat_opinion("quigon", state, ascii_board, history, legal_str, by_uci, timeout_s, max_tokens)
+	var cilghal_res: Dictionary = await _fetch_seat_opinion("cilghal", state, ascii_board, history, legal_str, by_uci, timeout_s, max_tokens)
+	var mundi_res: Dictionary = await _fetch_seat_opinion("mundi", state, ascii_board, history, legal_str, by_uci, timeout_s, max_tokens)
 
-	var results := [qwen_res, windu_res, yoda_res]
+	var results := [yoda_res, windu_res, quigon_res, cilghal_res, mundi_res]
 	for res in results:
 		if res is Dictionary and res.has("move_uci") and by_uci.has(res["move_uci"]):
 			var m_uci: String = res["move_uci"]
@@ -176,10 +195,10 @@ func _deliberate_council(state, ascii_board: String, history: String, legal_str:
 
 	var chosen_info: Dictionary = reasons.get(best_uci, {})
 	last_source = "pure_llm_council_consensus"
-	last_speaker = chosen_info.get("speaker", "Master Qwen")
+	last_speaker = chosen_info.get("speaker", "Master Yoda")
 	last_reason = chosen_info.get("reason", "Secures territorial and tactical superiority.")
 	
-	var prefix: String = COUNCIL_SEATS.get(chosen_info.get("seat_key", "qwen"), {}).get("prefix", "⚡ [Council]")
+	var prefix: String = COUNCIL_SEATS.get(chosen_info.get("seat_key", "yoda"), {}).get("prefix", "🧙 [Council]")
 	oracle_reason.emit("%s %s" % [prefix, last_reason])
 	council_debated.emit(last_speaker, best_uci, last_reason)
 
@@ -191,16 +210,16 @@ func _query_single_seat(seat_key: String, state, ascii_board: String, history: S
 	var res = await _fetch_seat_opinion(seat_key, state, ascii_board, history, legal_str, by_uci, complexity["timeout_s"], complexity["max_tokens"])
 	if res is Dictionary and res.has("move_uci") and by_uci.has(res["move_uci"]):
 		last_source = "pure_llm_" + seat_key
-		last_speaker = res.get("speaker", "Master Qwen")
+		last_speaker = res.get("speaker", "Master Yoda")
 		last_reason = res.get("reason", "Advances strategic vision.")
-		var prefix: String = COUNCIL_SEATS.get(seat_key, {}).get("prefix", "⚡")
+		var prefix: String = COUNCIL_SEATS.get(seat_key, {}).get("prefix", "🧙")
 		oracle_reason.emit("%s %s" % [prefix, last_reason])
 		return by_uci[res["move_uci"]]
 	return null
 
 
 func _fetch_seat_opinion(seat_key: String, state, ascii_board: String, history: String, legal_str: String, by_uci: Dictionary, timeout_s := 45.0, max_tokens := 300) -> Dictionary:
-	var seat: Dictionary = COUNCIL_SEATS.get(seat_key, COUNCIL_SEATS["qwen"])
+	var seat: Dictionary = COUNCIL_SEATS.get(seat_key, COUNCIL_SEATS["yoda"])
 	var color_name := "black" if state.turn else "white"
 
 	var sys_prompt := (
