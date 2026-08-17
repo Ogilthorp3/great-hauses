@@ -47,6 +47,7 @@ const MODES: Array[Dictionary] = [
 ]
 
 const ZeldaEasterEggsScript := preload("res://src/cinematics/zelda_easter_eggs.gd")
+const AdaptiveScaleScript := preload("res://src/ui/adaptive_scale.gd")
 
 var phase := Phase.HOUSE
 var selected_house := ""
@@ -530,7 +531,7 @@ func _build_title() -> void:
 	title.name = "Title"
 	title.text = "THE HALL OF BANNERS"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 20)
+	title.add_theme_font_size_override("font_size", AdaptiveScaleScript.font(22, self))
 	title.add_theme_color_override("font_color", TEXT_WARM)
 	header.add_child(title)
 
@@ -538,7 +539,7 @@ func _build_title() -> void:
 	sub.name = "Subtitle"
 	sub.text = "Nine banners. One throne."
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	sub.add_theme_font_size_override("font_size", 14)
+	sub.add_theme_font_size_override("font_size", AdaptiveScaleScript.font(15, self))
 	sub.add_theme_color_override("font_color", TEXT_DIM)
 	header.add_child(sub)
 
@@ -592,11 +593,11 @@ func _make_crest(house: Dictionary, index: int) -> Control:
 	var label := Label.new()
 	label.name = "Name"
 	label.text = str(house["name"]).trim_prefix("Haus ")
-	label.add_theme_font_size_override("font_size", 15)
+	label.add_theme_font_size_override("font_size", AdaptiveScaleScript.font(16, self))
 	label.add_theme_color_override("font_color", TEXT_WARM)
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label.position = Vector2(0, CREST_SIZE.x + 2)
-	label.size = Vector2(CREST_SIZE.x, 22)
+	label.size = Vector2(CREST_SIZE.x, 24)
 	crest.add_child(label)
 	return crest
 
@@ -651,19 +652,19 @@ func _build_preview() -> void:
 
 	_preview_name = Label.new()
 	_preview_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_preview_name.add_theme_font_size_override("font_size", 28)
+	_preview_name.add_theme_font_size_override("font_size", AdaptiveScaleScript.font(30, self))
 	_preview_name.add_theme_color_override("font_color", TEXT_WARM)
 	_preview.add_child(_preview_name)
 
 	_preview_seat = Label.new()
 	_preview_seat.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_preview_seat.add_theme_font_size_override("font_size", 16)
+	_preview_seat.add_theme_font_size_override("font_size", AdaptiveScaleScript.font(17, self))
 	_preview_seat.add_theme_color_override("font_color", TEXT_DIM)
 	_preview.add_child(_preview_seat)
 
 	_preview_motto = Label.new()
 	_preview_motto.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_preview_motto.add_theme_font_size_override("font_size", 19)
+	_preview_motto.add_theme_font_size_override("font_size", AdaptiveScaleScript.font(20, self))
 	_preview_motto.add_theme_color_override("font_color", GOLD)
 	_preview.add_child(_preview_motto)
 
@@ -672,14 +673,14 @@ func _build_preview() -> void:
 	_preview_swatches.add_theme_constant_override("separation", 8)
 	for i in 3:
 		var sw := ColorRect.new()
-		sw.custom_minimum_size = Vector2(32, 16)
+		sw.custom_minimum_size = Vector2(36, 18)
 		_preview_swatches.add_child(sw)
 	_preview.add_child(_preview_swatches)
 
 	_preview_pledge_btn = Button.new()
 	_preview_pledge_btn.text = "⚔️  PLEDGE ALLEGIANCE  ⚔️"
 	_preview_pledge_btn.focus_mode = Control.FOCUS_NONE
-	_preview_pledge_btn.add_theme_font_size_override("font_size", 18)
+	_preview_pledge_btn.add_theme_font_size_override("font_size", AdaptiveScaleScript.font(19, self))
 	_preview_pledge_btn.add_theme_color_override("font_color", GOLD)
 	_preview_pledge_btn.add_theme_color_override("font_hover_color", GOLD_HOVER)
 	
@@ -727,7 +728,7 @@ func _build_pledge_banner() -> void:
 	ptext.name = "PledgeText"
 	ptext.text = "HAUS WINTERFANG PLEDGES TO WAR!"
 	ptext.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	ptext.add_theme_font_size_override("font_size", 28)
+	ptext.add_theme_font_size_override("font_size", AdaptiveScaleScript.font(28, self))
 	ptext.add_theme_color_override("font_color", GOLD)
 	vbox.add_child(ptext)
 
@@ -735,7 +736,7 @@ func _build_pledge_banner() -> void:
 	pmotto.name = "PledgeMotto"
 	pmotto.text = "“The wolf remembers.”"
 	pmotto.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	pmotto.add_theme_font_size_override("font_size", 20)
+	pmotto.add_theme_font_size_override("font_size", AdaptiveScaleScript.font(20, self))
 	pmotto.add_theme_color_override("font_color", TEXT_WARM)
 	vbox.add_child(pmotto)
 

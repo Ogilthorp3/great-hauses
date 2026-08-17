@@ -19,6 +19,7 @@ var _history_index := -1
 var _game_ref = null
 var log_history: Array[String] = []
 
+const AdaptiveScaleScript := preload("res://src/ui/adaptive_scale.gd")
 const CONSOLE_HEIGHT := 380
 const BG_COLOR := Color(0.04, 0.05, 0.08, 0.94)
 const BORDER_GOLD := Color(0.92, 0.78, 0.32)
@@ -73,20 +74,20 @@ func _build_ui() -> void:
 
 	var title := Label.new()
 	title.text = "⚡ GREAT HAUSES CHESS — DEV CONSOLE (v0.3.0) ⚡"
-	title.add_theme_font_size_override("font_size", 13)
+	title.add_theme_font_size_override("font_size", AdaptiveScaleScript.font(14, self))
 	title.add_theme_color_override("font_color", BORDER_GOLD)
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(title)
 
 	var close_hint := Label.new()
 	close_hint.text = "Toggle: [~] / [F1] / [ESC]"
-	close_hint.add_theme_font_size_override("font_size", 11)
+	close_hint.add_theme_font_size_override("font_size", AdaptiveScaleScript.font(12, self))
 	close_hint.add_theme_color_override("font_color", Color(0.6, 0.65, 0.7))
 	header.add_child(close_hint)
 
 	# Quick Buttons Bar (Scrollable)
 	var scroll := ScrollContainer.new()
-	scroll.custom_minimum_size.y = 36
+	scroll.custom_minimum_size.y = AdaptiveScaleScript.font(38, self)
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	vbox.add_child(scroll)
@@ -123,9 +124,9 @@ func _build_ui() -> void:
 	_output_box.bbcode_enabled = true
 	_output_box.scroll_following = true
 	_output_box.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_output_box.add_theme_font_size_override("normal_font_size", 12)
-	_output_box.add_theme_font_size_override("bold_font_size", 12)
-	_output_box.add_theme_font_size_override("mono_font_size", 12)
+	_output_box.add_theme_font_size_override("normal_font_size", AdaptiveScaleScript.font(14, self))
+	_output_box.add_theme_font_size_override("bold_font_size", AdaptiveScaleScript.font(14, self))
+	_output_box.add_theme_font_size_override("mono_font_size", AdaptiveScaleScript.font(14, self))
 	vbox.add_child(_output_box)
 
 	# Command Input Line
@@ -134,7 +135,7 @@ func _build_ui() -> void:
 
 	var prompt_symbol := Label.new()
 	prompt_symbol.text = ">"
-	prompt_symbol.add_theme_font_size_override("font_size", 14)
+	prompt_symbol.add_theme_font_size_override("font_size", AdaptiveScaleScript.font(16, self))
 	prompt_symbol.add_theme_color_override("font_color", BORDER_GOLD)
 	input_hbox.add_child(prompt_symbol)
 
@@ -142,14 +143,14 @@ func _build_ui() -> void:
 	_input_line.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_input_line.placeholder_text = "Type 'help' for commands list..."
 	_input_line.text_submitted.connect(_on_input_submitted)
-	_input_line.add_theme_font_size_override("font_size", 13)
+	_input_line.add_theme_font_size_override("font_size", AdaptiveScaleScript.font(15, self))
 	input_hbox.add_child(_input_line)
 
 
 func _add_quick_btn(label: String, cmd: String) -> void:
 	var btn := Button.new()
 	btn.text = label
-	btn.add_theme_font_size_override("font_size", 11)
+	btn.add_theme_font_size_override("font_size", AdaptiveScaleScript.font(13, self))
 	btn.pressed.connect(func():
 		_input_line.text = cmd
 		_on_input_submitted(cmd)
