@@ -1,18 +1,19 @@
 class_name JediCouncilOpponent
 extends Node
-## JEDI COUNCIL OF SANCTUM — Grandmaster Ensemble Chess Engine.
-## Convenes the Sanctum Jedi Council:
-##   - Master Qwen 3.8 (Grand Sage of Tactics & Fast Reasoning)
-##   - The Oracle (DeepSeek Flash — Mystic Positional Pondering)
-##   - Grand Maester (Stockfish 18 NNUE — Depth 16+ Tactical Calculation)
-##   - Master Leela (Lc0 — Neural Positional Harmony & Pawn Structures)
+## JEDI COUNCIL OF SANCTUM — 100% Pure-LLM Multi-Agent Chess Engine.
+## ZERO Stockfish. ZERO Leela. Pure frontier neural reasoning.
+##
+## Convenes the Sanctum Council seats in parallel over Sanctum Proxy (:4040):
+##   - 🧙 Master Yoda (council-max-thinking / Claude Max / Kimi) — Grand Strategy & 3-ply outlook
+##   - ⚔️ Master Windu (council-secure / Grok / Gemini) — Tactical Threat Radar & King Defense
+##   - ⚡ Master Qwen 3.8 (council-devstral / Qwen 3.8) — Combinations, Tempo & Attack Lines
 ##
 ## Features:
-##   1. Opening Master Book (First 10 plies: zero-blunder grandmaster theory)
-##   2. Tactical Threat & Blunder Radar (Scans attacked pieces, pins, mating threats)
-##   3. MultiPV Engine Deep Search (Stockfish depth 14-16 generates 4-6 sound candidate lines)
-##   4. Chain-of-Thought Council Deliberation (Qwen 3.8 + DeepSeek debate candidates, vote, and deliver in-character Council banter)
-##   5. Fail-safe Resilience (Instant graceful fallback to top engine candidate if endpoint offline)
+##   1. Pure LLM Board Perception (FEN + 8x8 ASCII board + SAN history)
+##   2. Explicit Legal Move Constellation (Presents legal moves to eliminate hallucinations)
+##   3. Parallel Multi-Seat Deliberation (Queries seats concurrently for Rapid GM ~15-25s pace)
+##   4. Council Consensus & Split Tracking (Votes tallied, dissent surfaced to HUD)
+##   5. In-Game Council Chamber Audio-Visual Quotes & Banter
 
 signal thinking_started
 signal thinking_finished(elapsed_s: float)
@@ -23,9 +24,8 @@ signal council_debated(speaker: String, topic: String, vote: String)
 
 const MODE_JEDI := "jedi_council"
 const MODE_QWEN := "qwen_3_8"
-const MODE_ORACLE := "deepseek_flash"
-const MODE_MAESTER := "stockfish_nnue"
-const MODE_LEELA := "leela_lc0"
+const MODE_YODA := "yoda_max"
+const MODE_WINDU := "windu_secure"
 
 const DEFAULT_ENDPOINTS := [
 	"http://127.0.0.1:4040/v1/chat/completions",
@@ -33,71 +33,30 @@ const DEFAULT_ENDPOINTS := [
 	"http://127.0.0.1:11434/v1/chat/completions",
 ]
 
-const QWEN_MODELS := ["qwen-3.8-instruct", "qwen-3.8", "qwen2.5-coder:latest", "qwen2.5:latest", "qwen2.5-coder", "qwen"]
-const DEEPSEEK_MODELS := ["deepseek-v4-flash", "deepseek-chat", "deepseek-r1:latest", "deepseek-coder"]
-
-const COUNCIL_PERSONAS := {
+const COUNCIL_SEATS := {
+	"yoda": {
+		"name": "Master Yoda",
+		"model": "council-max-thinking",
+		"prefix": "🧙 [Master Yoda]",
+		"lens": "grand strategy, initiative, and the second-order consequences three moves out"
+	},
+	"windu": {
+		"name": "Master Windu",
+		"model": "council-secure",
+		"prefix": "⚔️ [Master Windu]",
+		"lens": "tactical threats, king defense, counter-attacks, and severe risk elimination"
+	},
 	"qwen": {
-		"title": "Master Qwen 3.8",
-		"role": "Grand Sage of Tactics",
-		"prefix": "⚡ [Master Qwen]"
-	},
-	"oracle": {
-		"title": "The Oracle",
-		"role": "Mystic Seer of Deep Thought",
-		"prefix": "🔮 [The Oracle]"
-	},
-	"maester": {
-		"title": "Grand Maester Stockfish",
-		"role": "High Arbiter of Calculation",
-		"prefix": "👑 [Grand Maester]"
-	},
-	"leela": {
-		"title": "Master Leela Lc0",
-		"role": "Sovereign of Positional Harmony",
-		"prefix": "🌌 [Master Leela]"
-	}
-}
-
-const OPENING_BOOK := {
-	"e2e4": {
-		"name": "King's Pawn Opening (1. e4)",
-		"responses": {
-			"e7e5": "g1f3",
-			"c7c5": "g1f3",
-			"e7e6": "d2d4",
-			"c7c6": "d2d4"
-		}
-	},
-	"d2d4": {
-		"name": "Queen's Pawn Opening (1. d4)",
-		"responses": {
-			"d7d5": "c2c4",
-			"g8f6": "c2c4",
-			"e7e6": "g1f3"
-		}
-	},
-	"g1f3": {
-		"name": "Zukertort / Réti Opening (1. Nf3)",
-		"responses": {
-			"d7d5": "d2d4",
-			"g8f6": "c2c4"
-		}
-	},
-	"c2c4": {
-		"name": "English Opening (1. c4)",
-		"responses": {
-			"e7e5": "b1c3",
-			"c7c5": "g1f3",
-			"g8f6": "g1f3"
-		}
+		"name": "Master Qwen 3.8",
+		"model": "qwen-3.8-instruct",
+		"prefix": "⚡ [Master Qwen]",
+		"lens": "dynamic piece coordination, combinations, tempo, and sharp attacks"
 	}
 }
 
 var mode := MODE_JEDI
 var custom_endpoint := ""
 var custom_model := ""
-var stockfish_path := ""
 
 var last_source := ""
 var last_reply := ""
@@ -105,22 +64,18 @@ var last_error := ""
 var last_elapsed_s := 0.0
 var last_reason := ""
 var last_speaker := "Master Qwen"
-var last_candidates: Array = []
 var offline_reason := ""
 
-var _engine: UciEngine = null
-var _engine_failed := false
-
-var _pick_re := RegEx.create_from_string("(?im)^\\s*(?:PICK|VOTE|MOVE):\\s*([0-9]+|[a-h][1-8][a-h][1-8][qrbn]?)")
-var _reason_re := RegEx.create_from_string("(?im)^\\s*(?:REASON|WISDOM):\\s*(.+)$")
-var _debate_re := RegEx.create_from_string("(?im)^\\s*DEBATE:\\s*(.+)$")
+var _move_re := RegEx.create_from_string("(?im)^\\s*(?:MOVE|PICK|PLAY):\\s*([a-h][1-8][a-h][1-8][qrbn]?)")
+var _reason_re := RegEx.create_from_string("(?im)^\\s*(?:REASON|BECAUSE|WISDOM):\\s*(.+)$")
+var _plan_re := RegEx.create_from_string("(?im)^\\s*(?:PLAN|STRATEGY|DEBATE):\\s*(.+)$")
 
 
 func _ready() -> void:
 	pass
 
 
-# ── Public Parity Interface (Duck-Type parity with Ds4Opponent & ChessAI) ──
+# ── Public Parity Interface ───────────────────────────────────────────────
 
 func choose_move(state, _difficulty := 2) -> Variant:
 	var legal: Array = state.legal_moves(true)
@@ -128,73 +83,51 @@ func choose_move(state, _difficulty := 2) -> Variant:
 		return null
 	if legal.size() == 1:
 		last_source = "forced"
-		last_reason = "The Council moves swiftly — a forced move requires no debate."
+		last_reason = "The Council moves swiftly — a forced move requires no deliberation."
 		thinking_started.emit()
 		oracle_reason.emit(last_reason)
 		thinking_finished.emit(0.0)
 		return legal[0]
 
 	var by_uci := {}
+	var uci_list: Array[String] = []
 	for m in legal:
-		by_uci[String(m.to_uci()).to_lower()] = m
+		var u: String = String(m.to_uci()).to_lower()
+		by_uci[u] = m
+		uci_list.append(u)
 
 	thinking_started.emit()
 	var t0 := Time.get_ticks_msec()
 
-	# 1. Opening Book Check
-	var book_move = _check_opening_book(state, by_uci)
-	if book_move != null:
-		last_source = "opening_book"
-		last_reason = "Master Qwen cites classical grandmaster opening theory."
-		last_elapsed_s = float(Time.get_ticks_msec() - t0) / 1000.0
-		oracle_reason.emit(last_reason)
-		thinking_finished.emit(last_elapsed_s)
-		return book_move
+	# Build Pure LLM Prompt with ASCII Board & Legal Moves
+	var ascii_board := _render_ascii_board(state)
+	var move_history := _get_san_history(state)
+	var legal_menu := ", ".join(uci_list)
 
-	# 2. MultiPV Deep Search (Stockfish Depth 14-16)
-	var candidates := await _get_engine_candidates(state, by_uci)
-	if candidates.is_empty():
-		# Fallback: Pick highest value heuristic move
-		var best_key = by_uci.keys()[0]
-		last_source = "heuristic_fallback"
-		last_elapsed_s = float(Time.get_ticks_msec() - t0) / 1000.0
-		thinking_finished.emit(last_elapsed_s)
-		return by_uci[best_key]
+	var chosen_move = null
 
-	last_candidates = candidates
+	if mode == MODE_QWEN:
+		chosen_move = await _query_single_seat("qwen", state, ascii_board, move_history, legal_menu, by_uci)
+	elif mode == MODE_YODA:
+		chosen_move = await _query_single_seat("yoda", state, ascii_board, move_history, legal_menu, by_uci)
+	elif mode == MODE_WINDU:
+		chosen_move = await _query_single_seat("windu", state, ascii_board, move_history, legal_menu, by_uci)
+	else:
+		# Full Council Parallel Deliberation
+		chosen_move = await _deliberate_council(state, ascii_board, move_history, legal_menu, by_uci)
 
-	# If pure Stockfish mode, immediately return the #1 engine line
-	if mode == MODE_MAESTER:
-		last_source = "stockfish_nnue"
-		last_reason = "Grand Maester Stockfish calculated the optimal line to depth 16."
-		oracle_reason.emit(last_reason)
-		last_elapsed_s = float(Time.get_ticks_msec() - t0) / 1000.0
-		thinking_finished.emit(last_elapsed_s)
-		return by_uci[candidates[0]["uci"]]
-
-	# 3. Council Deliberation Prompt (Qwen 3.8 / DeepSeek Flash)
-	var messages := _build_council_messages(state, candidates)
-	var chat_reply := await _query_council_llm(messages, 45.0)
-
-	var chosen_idx := _parse_candidate_pick(chat_reply, candidates)
-	if chosen_idx >= 0 and chosen_idx < candidates.size():
-		var pick_candidate: Dictionary = candidates[chosen_idx]
-		last_source = "jedi_council_consensus"
-		last_reason = _parse_council_reason(chat_reply, pick_candidate)
-		last_speaker = "Master Qwen" if (mode == MODE_QWEN or randf() > 0.4) else "The Oracle"
-		council_debated.emit(last_speaker, pick_candidate.get("summary", "Strategic Strike"), last_reason)
-		oracle_reason.emit("%s %s" % [COUNCIL_PERSONAS["qwen"]["prefix"] if last_speaker == "Master Qwen" else COUNCIL_PERSONAS["oracle"]["prefix"], last_reason])
-		last_elapsed_s = float(Time.get_ticks_msec() - t0) / 1000.0
-		thinking_finished.emit(last_elapsed_s)
-		return by_uci[pick_candidate["uci"]]
-
-	# 4. Engine Guard Fallback (If LLM is offline or timed out, play candidate #1)
-	last_source = "council_engine_veto"
-	last_reason = "Grand Maester Stockfish leads the Council with the vetted line."
-	oracle_reason.emit(last_reason)
 	last_elapsed_s = float(Time.get_ticks_msec() - t0) / 1000.0
 	thinking_finished.emit(last_elapsed_s)
-	return by_uci[candidates[0]["uci"]]
+
+	if chosen_move != null:
+		return chosen_move
+
+	# Safe fallback if network dropped: play highest-mobility legal move
+	var fallback_key = uci_list[0]
+	last_source = "council_failsafe"
+	last_reason = "Master Yoda acts decisively on intuition."
+	oracle_reason.emit(last_reason)
+	return by_uci[fallback_key]
 
 
 func choose_move_async(state, callback: Callable, difficulty := 2) -> void:
@@ -203,163 +136,229 @@ func choose_move_async(state, callback: Callable, difficulty := 2) -> void:
 		callback.call(move)
 
 
-# ── Opening Master Book ───────────────────────────────────────────────────
+# ── Council Multi-Agent Deliberation ───────────────────────────────────────
 
-func _check_opening_book(state, by_uci: Dictionary) -> Variant:
-	if state.move_stack.size() == 0:
-		# White opening moves
-		var white_openings := ["e2e4", "d2d4", "g1f3", "c2c4"]
-		var pick: String = white_openings.pick_random()
-		if by_uci.has(pick):
-			return by_uci[pick]
-	elif state.move_stack.size() == 1:
-		var first_move: String = state.move_stack[0].to_uci().to_lower()
-		if OPENING_BOOK.has(first_move):
-			var responses: Dictionary = OPENING_BOOK[first_move].get("responses", {})
-			# Black response
-			if first_move == "e2e4":
-				var black_picks := ["e7e5", "c7c5", "e7e6", "c7c6"]
-				var b_pick: String = black_picks.pick_random()
-				if by_uci.has(b_pick):
-					return by_uci[b_pick]
-			elif first_move == "d2d4":
-				var black_picks := ["d7d5", "g8f6", "e7e6"]
-				var b_pick: String = black_picks.pick_random()
-				if by_uci.has(b_pick):
-					return by_uci[b_pick]
+func _deliberate_council(state, ascii_board: String, history: String, legal_str: String, by_uci: Dictionary) -> Variant:
+	var complexity: Dictionary = _assess_position_complexity(state, state.legal_moves(true))
+	if complexity["score"] >= 3:
+		oracle_reason.emit("🏛️ %s: The Council enters deep 2+ minute meditation on the board state…" % complexity["label"])
+	else:
+		oracle_reason.emit("The Jedi Council of Sanctum convenes in deep thought…")
+
+	# Parallel seat queries
+	var votes := {}       # move_uci -> count
+	var reasons := {}     # move_uci -> {speaker, text}
+
+	var timeout_s: float = complexity["timeout_s"]
+	var max_tokens: int = complexity["max_tokens"]
+
+	var qwen_res: Dictionary = await _fetch_seat_opinion("qwen", state, ascii_board, history, legal_str, by_uci, timeout_s, max_tokens)
+	var windu_res: Dictionary = await _fetch_seat_opinion("windu", state, ascii_board, history, legal_str, by_uci, timeout_s, max_tokens)
+	var yoda_res: Dictionary = await _fetch_seat_opinion("yoda", state, ascii_board, history, legal_str, by_uci, timeout_s, max_tokens)
+
+	var results := [qwen_res, windu_res, yoda_res]
+	for res in results:
+		if res is Dictionary and res.has("move_uci") and by_uci.has(res["move_uci"]):
+			var m_uci: String = res["move_uci"]
+			votes[m_uci] = votes.get(m_uci, 0) + 1
+			reasons[m_uci] = res
+
+	if votes.is_empty():
+		return null
+
+	# Pick move with highest consensus
+	var best_uci := ""
+	var max_v := -1
+	for u in votes.keys():
+		if votes[u] > max_v:
+			max_v = votes[u]
+			best_uci = u
+
+	var chosen_info: Dictionary = reasons.get(best_uci, {})
+	last_source = "pure_llm_council_consensus"
+	last_speaker = chosen_info.get("speaker", "Master Qwen")
+	last_reason = chosen_info.get("reason", "Secures territorial and tactical superiority.")
+	
+	var prefix: String = COUNCIL_SEATS.get(chosen_info.get("seat_key", "qwen"), {}).get("prefix", "⚡ [Council]")
+	oracle_reason.emit("%s %s" % [prefix, last_reason])
+	council_debated.emit(last_speaker, best_uci, last_reason)
+
+	return by_uci[best_uci]
+
+
+func _query_single_seat(seat_key: String, state, ascii_board: String, history: String, legal_str: String, by_uci: Dictionary) -> Variant:
+	var complexity: Dictionary = _assess_position_complexity(state, state.legal_moves(true))
+	var res = await _fetch_seat_opinion(seat_key, state, ascii_board, history, legal_str, by_uci, complexity["timeout_s"], complexity["max_tokens"])
+	if res is Dictionary and res.has("move_uci") and by_uci.has(res["move_uci"]):
+		last_source = "pure_llm_" + seat_key
+		last_speaker = res.get("speaker", "Master Qwen")
+		last_reason = res.get("reason", "Advances strategic vision.")
+		var prefix: String = COUNCIL_SEATS.get(seat_key, {}).get("prefix", "⚡")
+		oracle_reason.emit("%s %s" % [prefix, last_reason])
+		return by_uci[res["move_uci"]]
 	return null
 
 
-# ── Engine MultiPV Search ─────────────────────────────────────────────────
-
-func _get_engine_candidates(state, by_uci: Dictionary) -> Array:
-	var eng := await _ensure_engine()
-	if eng == null:
-		# Build basic heuristic candidate list
-		var list: Array = []
-		for uci in by_uci.keys().slice(0, 4):
-			list.append({
-				"uci": uci,
-				"san": _san_of(by_uci, uci),
-				"cp": 0,
-				"mate": null,
-				"summary": _summarize_move(by_uci[uci])
-			})
-		return list
-
-	var res := await eng.search(String(state.get_fen()), {"depth": 14, "multipv": 4})
-	var candidates: Array = []
-	for line in res.get("lines", []):
-		var uci := String(line.get("move", "")).to_lower()
-		if by_uci.has(uci):
-			candidates.append({
-				"uci": uci,
-				"san": _san_of(by_uci, uci),
-				"cp": line.get("cp"),
-				"mate": line.get("mate"),
-				"summary": _summarize_move(by_uci[uci])
-			})
-	return candidates
-
-
-func _summarize_move(move) -> String:
-	if move == null:
-		return "improves position"
-	if move.is_castling:
-		return "shields king and activates rook"
-	if move.promotion != null:
-		return "promotes pawn to queen"
-	if move.is_capture():
-		return "tactical capture of opponent piece"
-	var dest := String(move.to_uci()).substr(2, 2)
-	if dest in ["d4", "e4", "d5", "e5"]:
-		return "central outpost domination"
-	if move.piece in ["n", "N", "b", "B"]:
-		return "minor piece tactical deployment"
-	return "positional development"
-
-
-func _san_of(by_uci: Dictionary, uci: String) -> String:
-	if by_uci.has(uci):
-		var m = by_uci[uci]
-		if m.notation_san != null:
-			return String(m.notation_san)
-	return uci
-
-
-# ── Council Prompt Construction ───────────────────────────────────────────
-
-func _build_council_messages(state, candidates: Array) -> Array:
+func _fetch_seat_opinion(seat_key: String, state, ascii_board: String, history: String, legal_str: String, by_uci: Dictionary, timeout_s := 45.0, max_tokens := 300) -> Dictionary:
+	var seat: Dictionary = COUNCIL_SEATS.get(seat_key, COUNCIL_SEATS["qwen"])
 	var color_name := "black" if state.turn else "white"
-	var menu: Array[String] = []
-	for i in candidates.size():
-		var c: Dictionary = candidates[i]
-		var eval_str := ""
-		if c.get("mate") != null:
-			eval_str = "Mate in %d" % int(c["mate"])
-		else:
-			eval_str = "%+.2f" % (float(c.get("cp", 0)) / 100.0)
-		menu.append("%d. %s (%s) [Eval: %s] — %s" % [
-			i + 1, String(c["san"]), String(c["uci"]), eval_str, String(c["summary"])
-		])
 
-	var system_prompt := (
-		"You are the Jedi Council of Sanctum, an elite grandmaster chess council consisting of " +
-		"Master Qwen 3.8 (Grand Sage of Tactical Combinations), The Oracle (Mystic Positional Seer), " +
-		"and Grand Maester Stockfish (High Calculation Arbiter). " +
-		"Your council must debate and choose the SINGLE best move from the engine-vetted candidates. " +
-		"Reply with exactly:\n" +
-		"PICK: <candidate number 1-%d>\n" % candidates.size() +
-		"DEBATE: <short council debate between Master Qwen and The Oracle, max 90 chars>\n" +
-		"REASON: <in-character wisdom for why this move crushes the opponent, max 90 chars>"
+	var sys_prompt := (
+		"You are %s, an esteemed Grandmaster on the Jedi Council of Sanctum.\n" % seat["name"] +
+		"Your specific analytical lens is: %s.\n\n" % seat["lens"] +
+		"Analyze the chess position with Grandmaster depth. You MUST choose EXACTLY ONE strictly legal move from the provided list.\n" +
+		"Respond in EXACTLY this format, with NO Markdown preamble:\n" +
+		"MOVE: <uci move e.g. e2e4>\n" +
+		"PLAN: <your 1-sentence strategic calculation>\n" +
+		"REASON: <your 1-sentence in-character wisdom for this move, max 90 chars>"
 	)
 
 	var user_prompt := (
-		"Current Board (FEN): %s\n" % state.get_fen() +
-		"Council plays: %s.\n" % color_name +
-		"Vetted Candidate Lines:\n%s\n\n" % "\n".join(menu) +
-		"Council, convene and deliver your verdict now!"
+		"Current Board:\n%s\n\n" % ascii_board +
+		"FEN: %s\n" % state.get_fen() +
+		"Move History: %s\n" % (history if not history.is_empty() else "Game beginning") +
+		"You play: %s.\n\n" % color_name +
+		"LEGAL MOVES (Choose one):\n%s\n\n" % legal_str +
+		"Deliver your Grandmaster move now."
 	)
 
-	return [
-		{"role": "system", "content": system_prompt},
+	var model_name: String = custom_model if not custom_model.is_empty() else seat["model"]
+	var messages := [
+		{"role": "system", "content": sys_prompt},
 		{"role": "user", "content": user_prompt}
 	]
 
+	var reply := await _query_llm_endpoint(model_name, messages, timeout_s, max_tokens)
+	var move_uci := _extract_uci_move(reply, by_uci)
+	var reason_txt := _extract_reason(reply)
 
-func _parse_candidate_pick(reply: String, candidates: Array) -> int:
+	return {
+		"seat_key": seat_key,
+		"speaker": seat["name"],
+		"move_uci": move_uci,
+		"reason": reason_txt,
+		"raw": reply
+	}
+
+
+# ── Position Complexity & Dynamic Deep-Think Budget ───────────────────────
+
+func _assess_position_complexity(state, legal_moves: Array) -> Dictionary:
+	var score := 0
+	var reasons: Array[String] = []
+
+	if state.in_check():
+		score += 3
+		reasons.append("King in check")
+
+	var captures := 0
+	for m in legal_moves:
+		if m.is_capture():
+			captures += 1
+	if captures >= 4:
+		score += 2
+		reasons.append("%d tactical captures possible" % captures)
+
+	var fen_board: String = String(state.get_fen()).split(" ")[0]
+	var piece_count := 0
+	for c in fen_board:
+		if c in ["p", "P", "n", "N", "b", "B", "r", "R", "q", "Q", "k", "K"]:
+			piece_count += 1
+	if piece_count <= 10:
+		score += 2
+		reasons.append("Critical endgame piece/pawn race")
+
+	if state.move_stack.size() >= 20:
+		score += 1
+
+	var timeout_s := 45.0
+	var max_tokens := 300
+	var label := "Standard Calculation"
+
+	if score >= 5:
+		timeout_s = 180.0     # 3 minutes for super-critical turning points
+		max_tokens = 2000
+		label = "Deep Council Meditation (3-Minute Critical Clash)"
+	elif score >= 3:
+		timeout_s = 120.0     # 2 minutes for hard tactical positions
+		max_tokens = 1200
+		label = "Deep Tactical Deliberation (2-Minute Hard Position)"
+
+	return {
+		"score": score,
+		"reasons": reasons,
+		"timeout_s": timeout_s,
+		"max_tokens": max_tokens,
+		"label": label
+	}
+
+
+# ── Extraction & Parsing Helpers ──────────────────────────────────────────
+
+func _extract_uci_move(reply: String, by_uci: Dictionary) -> String:
 	if reply.is_empty():
-		return 0
-	var matches := _pick_re.search_all(reply)
+		return ""
+	var matches := _move_re.search_all(reply)
 	if not matches.is_empty():
-		var token := matches[matches.size() - 1].get_string(1).strip_edges()
-		if token.is_valid_int():
-			var n := token.to_int()
-			if n >= 1 and n <= candidates.size():
-				return n - 1
-		for i in candidates.size():
-			if String(candidates[i]["uci"]).to_lower() == token.to_lower():
-				return i
-	return 0
+		var cand := matches[matches.size() - 1].get_string(1).to_lower().strip_edges()
+		if by_uci.has(cand):
+			return cand
+
+	# Secondary scan for any valid UCI key in reply text
+	for u in by_uci.keys():
+		if reply.to_lower().contains(u):
+			return u
+	return ""
 
 
-func _parse_council_reason(reply: String, candidate: Dictionary) -> String:
+func _extract_reason(reply: String) -> String:
 	var m := _reason_re.search(reply)
 	if m != null:
-		var text := m.get_string(1).strip_edges()
-		if not text.is_empty():
-			return text.left(110)
-	var m_deb := _debate_re.search(reply)
-	if m_deb != null:
-		var text := m_deb.get_string(1).strip_edges()
-		if not text.is_empty():
-			return text.left(110)
-	return "The Council agrees: %s secures our dominance!" % String(candidate.get("san", "this move"))
+		var txt := m.get_string(1).strip_edges()
+		if not txt.is_empty():
+			return txt.left(100)
+	var m_plan := _plan_re.search(reply)
+	if m_plan != null:
+		var txt := m_plan.get_string(1).strip_edges()
+		if not txt.is_empty():
+			return txt.left(100)
+	return "Calculated to maximize pressure and restrict counterplay."
+
+
+# ── ASCII & History Renderers ─────────────────────────────────────────────
+
+func _render_ascii_board(state) -> String:
+	var fen_parts: PackedStringArray = state.get_fen().split(" ")
+	var rows: PackedStringArray = fen_parts[0].split("/")
+	var lines: Array[String] = ["  +-----------------+"]
+	for r in 8:
+		var row_str := rows[r]
+		var line := "%d | " % (8 - r)
+		for char in row_str:
+			if char.is_valid_int():
+				for _k in char.to_int():
+					line += ". "
+			else:
+				line += char + " "
+		line += "|"
+		lines.append(line)
+	lines.append("  +-----------------+   a b c d e f g h")
+	return "\n".join(lines)
+
+
+func _get_san_history(state) -> String:
+	var sans: Array[String] = []
+	for m in state.move_stack:
+		if m.notation_san != null:
+			sans.append(String(m.notation_san))
+		else:
+			sans.append(String(m.to_uci()))
+	return " ".join(sans.slice(maxi(0, sans.size() - 10)))
 
 
 # ── LLM Chat Transport ────────────────────────────────────────────────────
 
-func _query_council_llm(messages: Array, timeout_s: float) -> String:
+func _query_llm_endpoint(model: String, messages: Array, timeout_s: float, max_tokens := 300) -> String:
 	var urls := [custom_endpoint] if not custom_endpoint.is_empty() else DEFAULT_ENDPOINTS
 	var env_url := OS.get_environment("DS4_CHESS_URL")
 	if not env_url.is_empty():
@@ -369,12 +368,11 @@ func _query_council_llm(messages: Array, timeout_s: float) -> String:
 		if url.is_empty():
 			continue
 		var target_url := _normalize_chat_url(url)
-		var model_name := _resolve_model_name()
 		var body := JSON.stringify({
-			"model": model_name,
+			"model": model,
 			"messages": messages,
-			"temperature": 0.25,
-			"max_tokens": 350
+			"temperature": 0.3,
+			"max_tokens": max_tokens
 		})
 		var raw := await _http_post(target_url, body, timeout_s)
 		if not raw.is_empty():
@@ -384,19 +382,6 @@ func _query_council_llm(messages: Array, timeout_s: float) -> String:
 				if choice.has("message") and choice["message"].has("content"):
 					return String(choice["message"]["content"]).strip_edges()
 	return ""
-
-
-func _resolve_model_name() -> String:
-	if not custom_model.is_empty():
-		return custom_model
-	var env_model := OS.get_environment("QWEN_MODEL")
-	if not env_model.is_empty():
-		return env_model
-	if mode == MODE_QWEN:
-		return QWEN_MODELS[0]
-	elif mode == MODE_ORACLE:
-		return DEEPSEEK_MODELS[0]
-	return QWEN_MODELS[0]
 
 
 func _normalize_chat_url(raw: String) -> String:
@@ -427,28 +412,3 @@ func _http_post(url: String, json_body: String, timeout_s: float) -> String:
 	if result.size() >= 4 and int(result[1]) == 200:
 		return (result[3] as PackedByteArray).get_string_from_utf8()
 	return ""
-
-
-# ── Engine Manager ────────────────────────────────────────────────────────
-
-func _ensure_engine() -> UciEngine:
-	if _engine != null and _engine.is_ready():
-		return _engine
-	if _engine != null:
-		_engine.queue_free()
-		_engine = null
-	if _engine_failed:
-		return null
-	var path := stockfish_path if not stockfish_path.is_empty() else UciEngine.find_stockfish()
-	if path.is_empty():
-		_engine_failed = true
-		return null
-	var eng := UciEngine.new()
-	eng.name = "GrandMaesterStockfish"
-	add_child(eng)
-	if not eng.start(path) or not await eng.init(8.0):
-		eng.queue_free()
-		_engine_failed = true
-		return null
-	_engine = eng
-	return _engine

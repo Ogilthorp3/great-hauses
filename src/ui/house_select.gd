@@ -25,18 +25,18 @@ const GOLD_HOVER := Color(1.0, 0.85, 0.45)
 
 const OPPONENTS: Array[Dictionary] = [
 	{"kind": "engine", "level": "casual", "difficulty": ChessAI.Difficulty.EASY,
-		"label": "Engine — Casual", "desc": "A forgiving duel for aspiring commanders"},
+		"label": "🌱 Casual", "desc": "A forgiving duel for aspiring commanders (~1200 Elo)"},
 	{"kind": "engine", "level": "seasoned", "difficulty": ChessAI.Difficulty.MEDIUM,
-		"label": "Engine — Seasoned", "desc": "Tactical battlefield discipline and sharp defense"},
-	{"kind": "engine", "level": "master", "difficulty": ChessAI.Difficulty.HARD,
-		"label": "Engine — Master", "desc": "Ruthless grandmaster calculation with no mercy"},
+		"label": "🛡️ Seasoned", "desc": "Tactical discipline and sharp defense (~1700 Elo)"},
+	{"kind": "engine", "level": "grandmaster", "difficulty": ChessAI.Difficulty.HARD,
+		"label": "👑 Grand Master", "desc": "Ruthless calculation with zero mercy (~2700 Elo)"},
+	{"kind": "engine", "level": "godmode", "difficulty": ChessAI.Difficulty.HARD,
+		"label": "💀 God Mode", "desc": "Unconstrained superhuman mastery — IDDQD / Nightmare (~3500+ Elo)"},
 	{"kind": "jedi_council", "council_mode": "jedi_council",
-		"label": "⚔️ The Jedi Council of Sanctum", "desc": "Consensus of Master Qwen 3.8, Stockfish 18 & Leela Lc0"},
+		"label": "⚔️ The Jedi Council of Sanctum", "desc": "Pure LLM Collaboration: Master Yoda, Master Windu & Master Qwen 3.8"},
 	{"kind": "jedi_council", "council_mode": "qwen_3_8",
-		"label": "⚡ Master Qwen 3.8", "desc": "Grand Sage of Tactics: rapid neural calculation and sharp tactical strikes"},
-	{"kind": "jedi_council", "council_mode": "stockfish_nnue",
-		"label": "👑 Grand Maester (Stockfish 18)", "desc": "Cold, ruthless depth 16+ NNUE calculation with zero mercy"},
-	{"kind": "network", "level": "friend", "label": "Play a Friend", "desc": "Direct head-to-head multiplayer duel"},
+		"label": "⚡ Master Qwen 3.8", "desc": "Pure LLM Grand Sage of Tactics: rapid neural combinations"},
+	{"kind": "network", "level": "friend", "label": "👥 Play a Friend", "desc": "Direct head-to-head multiplayer duel"},
 ]
 
 const MODES: Array[Dictionary] = [

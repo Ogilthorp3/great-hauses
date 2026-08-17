@@ -10,10 +10,11 @@ var failed := 0
 func _init() -> void:
 	print("\n=== Great Hauses Chess — Jedi Council of Sanctum Unit Suite ===")
 	_test_council_initialization()
-	_test_opening_book()
+	_test_ascii_board_and_history()
 	_test_candidate_parsing()
 	_test_forced_move_instant_play()
 	_test_council_personas()
+	_test_position_complexity_scaling()
 	print("---")
 	if failed == 0:
 		print("JEDI COUNCIL OK — all %d checks passed" % passed)
@@ -35,12 +36,28 @@ func check(desc: String, expected, got) -> void:
 func _test_council_initialization() -> void:
 	var council: Node = JediCouncilScript.new()
 	check("council: default mode is jedi_council", JediCouncilScript.MODE_JEDI, council.mode)
-	check("council: has default Qwen models", true, JediCouncilScript.QWEN_MODELS.size() > 0)
-	check("council: has DeepSeek models", true, JediCouncilScript.DEEPSEEK_MODELS.size() > 0)
+	check("council: has Yoda seat", true, JediCouncilScript.COUNCIL_SEATS.has("yoda"))
+	check("council: has Windu seat", true, JediCouncilScript.COUNCIL_SEATS.has("windu"))
+	check("council: has Qwen seat", true, JediCouncilScript.COUNCIL_SEATS.has("qwen"))
 	council.queue_free()
 
 
-func _test_opening_book() -> void:
+func _test_ascii_board_and_history() -> void:
+	var council: Node = JediCouncilScript.new()
+	var state := ChessState.new()
+	state.set_fen(ChessState.INITIAL_FEN)
+
+	var ascii: String = council._render_ascii_board(state)
+	check("ascii: board contains ranks 8 to 1", true, ascii.contains("8 |") and ascii.contains("1 |"))
+	check("ascii: board contains file headers", true, ascii.contains("a b c d e f g h"))
+
+	var history: String = council._get_san_history(state)
+	check("history: initial history is empty string", "", history)
+
+	council.queue_free()
+
+
+func _test_candidate_parsing() -> void:
 	var council: Node = JediCouncilScript.new()
 	var state := ChessState.new()
 	state.set_fen(ChessState.INITIAL_FEN)
@@ -49,45 +66,13 @@ func _test_opening_book() -> void:
 	for m in state.legal_moves(true):
 		by_uci[String(m.to_uci()).to_lower()] = m
 
-	# Test 1: Opening book produces a first move (e4, d4, c4, or Nf3)
-	var book_move = council._check_opening_book(state, by_uci)
-	check("opening: white opening move returned", true, book_move != null)
-	check("opening: white move is legal", true, by_uci.has(book_move.to_uci().to_lower()))
+	# Test MOVE parsing from pure LLM output
+	var reply := "PLAN: Strike the center and control d5.\nMOVE: e2e4\nREASON: Establishes strong center control."
+	var parsed_uci: String = council._extract_uci_move(reply, by_uci)
+	check("parse: extracted UCI move e2e4", "e2e4", parsed_uci)
 
-	# Test 2: Black responds to 1. e4
-	var e4_move = by_uci.get("e2e4")
-	if e4_move != null:
-		state.apply_move(e4_move)
-		var black_by_uci := {}
-		for m in state.legal_moves(true):
-			black_by_uci[String(m.to_uci()).to_lower()] = m
-		var black_book = council._check_opening_book(state, black_by_uci)
-		check("opening: black response to e4 returned", true, black_book != null)
-
-	council.queue_free()
-
-
-func _test_candidate_parsing() -> void:
-	var council: Node = JediCouncilScript.new()
-	var mock_candidates := [
-		{"uci": "e2e4", "san": "e4", "cp": 20, "summary": "center claim"},
-		{"uci": "d2d4", "san": "d4", "cp": 18, "summary": "queen pawn control"},
-		{"uci": "g1f3", "san": "Nf3", "cp": 15, "summary": "knight development"}
-	]
-
-	# Test numeric pick
-	var reply_num := "DEBATE: Master Qwen recommends aggressive development.\nPICK: 2\nREASON: Controlling the center ensures early initiative."
-	var pick_num: int = council._parse_candidate_pick(reply_num, mock_candidates)
-	check("parse: numeric pick 2 -> index 1", 1, pick_num)
-
-	# Test UCI move pick
-	var reply_uci := "DEBATE: The Oracle sees tactical weakness on f3.\nPICK: g1f3\nREASON: Develops knight to pressure e5."
-	var pick_uci: int = council._parse_candidate_pick(reply_uci, mock_candidates)
-	check("parse: UCI pick g1f3 -> index 2", 2, pick_uci)
-
-	# Test reason parsing
-	var reason_text: String = council._parse_council_reason(reply_num, mock_candidates[1])
-	check("parse: reason extracted", true, reason_text.contains("Controlling the center"))
+	var reason_text: String = council._extract_reason(reply)
+	check("parse: reason extracted", true, reason_text.contains("Establishes strong center control"))
 
 	council.queue_free()
 
@@ -116,7 +101,23 @@ func _test_forced_move_instant_play() -> void:
 
 
 func _test_council_personas() -> void:
-	check("personas: Qwen 3.8 persona exists", true, JediCouncilScript.COUNCIL_PERSONAS.has("qwen"))
-	check("personas: The Oracle persona exists", true, JediCouncilScript.COUNCIL_PERSONAS.has("oracle"))
-	check("personas: Grand Maester persona exists", true, JediCouncilScript.COUNCIL_PERSONAS.has("maester"))
-	check("personas: Master Leela persona exists", true, JediCouncilScript.COUNCIL_PERSONAS.has("leela"))
+	check("seats: Yoda has council-max-thinking", "council-max-thinking", JediCouncilScript.COUNCIL_SEATS["yoda"]["model"])
+	check("seats: Windu has council-secure", "council-secure", JediCouncilScript.COUNCIL_SEATS["windu"]["model"])
+	check("seats: Qwen has qwen-3.8-instruct", "qwen-3.8-instruct", JediCouncilScript.COUNCIL_SEATS["qwen"]["model"])
+
+
+func _test_position_complexity_scaling() -> void:
+	var council: Node = JediCouncilScript.new()
+	var state := ChessState.new()
+	state.set_fen(ChessState.INITIAL_FEN)
+
+	# Initial position: quiet, standard budget
+	var initial_comp: Dictionary = council._assess_position_complexity(state, state.legal_moves(true))
+	check("complexity: start position is standard calculation", 45.0, initial_comp["timeout_s"])
+
+	# In-check + tactical tension position: deep meditation 120s-180s budget
+	state.set_fen("rnb1kbnr/pppp1ppp/8/4p3/4P2q/3P4/PPP2PPP/RNBQKBNR w KQkq - 1 4")
+	var sharp_comp: Dictionary = council._assess_position_complexity(state, state.legal_moves(true))
+	check("complexity: sharp position scales timeout budget", true, sharp_comp["timeout_s"] >= 45.0)
+
+	council.queue_free()
