@@ -263,33 +263,36 @@ func test_switch_house(new_hid: String) -> void:
 
 
 func test_stage_duel(attacker_type: int = -1, victim_type: int = -1) -> void:
-	if duel_director == null or views.is_empty():
+	if duel_director == null:
 		return
+	var a_type := attacker_type if attacker_type >= 0 else 2 # default Knight
+	var v_type := victim_type if victim_type >= 0 else 5  # default King
+
+	# Spawn or locate combatants
 	var attacker: PieceView = null
 	var victim: PieceView = null
+
 	for sq in views:
 		var pv: PieceView = views[sq]
 		if pv == null:
 			continue
-		if attacker == null and pv.house == PieceView.House.FROST:
-			if attacker_type < 0 or pv.piece_type == attacker_type:
-				attacker = pv
-		elif victim == null and pv.house == PieceView.House.EMBER:
-			if victim_type < 0 or pv.piece_type == victim_type:
-				victim = pv
-	if attacker == null or victim == null:
-		for sq in views:
-			var pv: PieceView = views[sq]
-			if attacker == null:
-				attacker = pv
-			elif victim == null and pv != attacker:
-				victim = pv
-	if attacker != null and victim != null:
-		var d_meta := _duel_meta(false)
-		d_meta["tier"] = 2
-		await duel_director.play_duel(attacker, victim, d_meta, func():
-			await attacker.play_capture(victim)
-		)
+		if attacker == null and pv.house == PieceView.House.FROST and pv.piece_type == a_type:
+			attacker = pv
+		elif victim == null and pv.house == PieceView.House.EMBER and pv.piece_type == v_type:
+			victim = pv
+
+	if attacker == null:
+		attacker = _spawn(a_type, PieceView.House.FROST, Vector2i(4, 3))
+	if victim == null:
+		victim = _spawn(v_type, PieceView.House.EMBER, Vector2i(4, 4))
+
+	var d_meta := _duel_meta(false)
+	d_meta["tier"] = 2
+	await duel_director.play_duel(attacker, victim, d_meta, func():
+		await attacker.play_capture(victim)
+	)
+	await get_tree().create_timer(0.4).timeout
+	_spawn_from_state()
 
 
 func test_piece_animation(piece_type: int = -1) -> void:
