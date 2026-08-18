@@ -142,4 +142,7 @@ func _framing(intro: Node) -> String:
 		# The establishing beat rides deliberately near this floor: the
 		# feather starts as a speck in a wide sky too.
 		flag = "  <-- speck"
-	return "dist=%5.1f  frac=%.2fw/%.2fh%s" % [dist, wf, hf, flag]
+	# The posed WORLD width too — this is the number the dragon door has to
+	# be bigger than (ROSE_CLEAR_R * 2).
+	var span := maxf(box.size.x, box.size.z)
+	return "dist=%5.1f  span=%4.1fu  frac=%.2fw/%.2fh%s" % [dist, span, wf, hf, flag]

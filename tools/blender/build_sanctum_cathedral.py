@@ -70,8 +70,25 @@ EAVE_Y = 31.8
 RIDGE_Y = 38.5
 AISLE_WALL_TOP = 13.0
 
-ROSE_WEST = Vector((0.0, 20.8, WEST_Z))     # OPEN — the dragon door
-ROSE_WEST_R = 6.0
+## THE DRAGON DOOR (enlarged 2026-08-18). Bert: "the hole is not big enough
+## when he get in the cathedral, he either go in bullet mode to get in or we
+## make the hole bigger. I know what would be more cinematic."
+##
+## He is right twice over. The old wheel was r 6.0 — but its CLEAR span was
+## only r 3.0, because the tracery put a solid stone hub ring right in the
+## middle of the opening, and the wyrm measures ~10.6 u across in its glide.
+## It could only have fitted by folding into a dart, which is the opposite of
+## the shot.
+##
+## So this is now a GREAT WEST ROSE, the kind that fills a facade: outer
+## r 9.2 with a TRUE OPEN OCULUS of r 6.6 — no hub, the spokes stop at the
+## clear edge — giving a 13.2 u doorway for a 10.6 u animal. The facade grew
+## to carry it (see build_west_front: shorter portal band, higher parapet and
+## gable, and the blind niches that used to flank the rose are gone — there
+## is no wall left to put them on, which is exactly how the great roses read).
+ROSE_WEST = Vector((0.0, 23.5, WEST_Z))     # OPEN — the dragon door
+ROSE_WEST_R = 9.2
+ROSE_WEST_CLEAR = 6.6                        # the flyable radius
 ROSE_EAST = Vector((0.0, 20.0, CHEVET_Z))   # ember glass behind the perch
 ROSE_EAST_R = 4.8
 
@@ -359,10 +376,15 @@ def rose_window(stone, glass, center, radius, depth, open_center, spokes=12):
     seg = 44
     # outer ring
     annulus(stone, center, radius * 0.90, radius, depth, seg)
-    # hub ring: wide-open oculus for the dragon door, tight hub when glazed
-    hub_in = radius * (0.50 if open_center else 0.22)
-    hub_out = radius * (0.58 if open_center else 0.30)
-    annulus(stone, center, hub_in, hub_out, depth * 0.8, seg // 2)
+    # THE OCULUS. A glazed rose keeps its tight hub; the dragon door has NO
+    # hub at all — a ring of stone across the middle of a doorway is the
+    # thing that made the old one unflyable.
+    if open_center:
+        hub_in = hub_out = radius * (ROSE_WEST_CLEAR / ROSE_WEST_R)
+    else:
+        hub_in = radius * 0.22
+        hub_out = radius * 0.30
+        annulus(stone, center, hub_in, hub_out, depth * 0.8, seg // 2)
     # spokes: slim swept boxes from the hub to the ring
     for i in range(spokes):
         a = 2 * math.pi * (i + 0.5) / spokes
@@ -745,19 +767,19 @@ def build_west_front():
 
     # facade wall between the towers, pierced by three portals + open rose
     pan = Panel(light, (0.0, FLOOR_TOP, WEST_Z), (1, 0, 0), (0, 0, -1), 1.3)
-    band_top = 15.0 - FLOOR_TOP
+    band_top = 13.6 - FLOOR_TOP
     # centre portal (grand) + flanking portals — exact u-partition, no
     # coplanar overlaps: centre owns (-4.6, 4.6), sides own out to +-11.8
-    pan.arch_wall(0.0, 5.4, 0.0, 6.2 - FLOOR_TOP, 6.1, -4.6, 4.6, 0.0,
+    pan.arch_wall(0.0, 5.4, 0.0, 5.6 - FLOOR_TOP, 5.6, -4.6, 4.6, 0.0,
                   band_top)
-    pan.arch_wall(-7.4, 3.2, 0.0, 4.6 - FLOOR_TOP, 3.9, -11.8, -4.6, 0.0,
+    pan.arch_wall(-7.4, 3.2, 0.0, 4.2 - FLOOR_TOP, 3.5, -11.8, -4.6, 0.0,
                   band_top)
-    pan.arch_wall(7.4, 3.2, 0.0, 4.6 - FLOOR_TOP, 3.9, 4.6, 11.8, 0.0,
+    pan.arch_wall(7.4, 3.2, 0.0, 4.2 - FLOOR_TOP, 3.5, 4.6, 11.8, 0.0,
                   band_top)
     # wall above the portal band, around the open rose: four slabs
     rose_v = ROSE_WEST.y - FLOOR_TOP
     r_hole = ROSE_WEST_R + 0.15
-    upper_top = 31.4 - FLOOR_TOP
+    upper_top = 34.2 - FLOOR_TOP
     pan.slab(-11.8, band_top, -r_hole, upper_top)
     pan.slab(r_hole, band_top, 11.8, upper_top)
     if rose_v - r_hole > band_top + 0.02:
@@ -787,8 +809,8 @@ def build_west_front():
                 (ROSE_WEST.x, ROSE_WEST.y, ROSE_WEST.z), ROSE_WEST_R, 1.0,
                 open_center=True, spokes=12)
     # portal archivolts + gables + doors
-    for (uc, span, spring) in [(0.0, 5.4, 6.2), (-7.4, 3.2, 4.6), (7.4, 3.2, 4.6)]:
-        rise = span * (6.1 / 5.4) if span > 4 else 3.9
+    for (uc, span, spring) in [(0.0, 5.4, 5.6), (-7.4, 3.2, 4.2), (7.4, 3.2, 4.2)]:
+        rise = span * (5.6 / 5.4) if span > 4 else 3.5
         for k in range(3):
             grow = 0.32 * (k + 1)
             pts = [(uc + u, spring + v, WEST_Z - 0.65 - 0.30 * k)
@@ -814,17 +836,15 @@ def build_west_front():
             add_cone(dark, (su * (2.9 + 0.42 * k), FLOOR_TOP,
                             WEST_Z - 0.5 - 0.3 * k), 0.17, 0.17, 6.0, segments=8)
     # string course over the portal band + facade parapet + centre gable
-    add_box(mid, (0.0, 15.1, WEST_Z), (23.6, 0.55, 1.6))
-    add_box(mid, (0.0, 31.7, WEST_Z), (23.6, 0.8, 1.5))
+    add_box(mid, (0.0, 13.7, WEST_Z), (23.6, 0.55, 1.6))
+    add_box(mid, (0.0, 34.5, WEST_Z), (23.6, 0.8, 1.5))
     gpan = Panel(light, (0.0, 0.0, WEST_Z), (1, 0, 0), (0, 0, -1), 1.1)
-    gpan.face([(-8.6, 32.0), (8.6, 32.0), (0.0, 38.6)], front=True)
-    gpan.face([(-8.6, 32.0), (8.6, 32.0), (0.0, 38.6)], front=False)
-    add_cone(rust, (0.0, 38.5, WEST_Z), 0.15, 0.0, 1.3, segments=4)
-    # blind lancet niches flanking the rose (break the big upper wall)
-    for su in (-1, 1):
-        np_ = Panel(mid, (su * 9.2, 16.0, WEST_Z - 0.68), (1, 0, 0),
-                    (0, 0, -1), 0.25)
-        np_.arch_wall(0.0, 1.3, 0.4, 6.4, 2.1, -1.1, 1.1, 0.0, 9.6)
+    gpan.face([(-8.6, 34.8), (8.6, 34.8), (0.0, 41.5)], front=True)
+    gpan.face([(-8.6, 34.8), (8.6, 34.8), (0.0, 41.5)], front=False)
+    add_cone(rust, (0.0, 41.4, WEST_Z), 0.15, 0.0, 1.3, segments=4)
+    # (The blind lancet niches that used to flank the rose are gone: at
+    # r 9.2 the wheel leaves 2.4 u of wall either side, and a great rose is
+    # supposed to own its facade.)
 
     # ── twin towers ──
     for sx in (-1, 1):

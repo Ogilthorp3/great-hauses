@@ -26,6 +26,7 @@ func _main() -> void:
 	await _test_great_hall_cathedral()
 	_test_flight_path()
 	_test_flight_smoothness()
+	_test_dragon_door()
 	print("---")
 	if failed == 0:
 		print("CATHEDRAL OK — all %d checks passed" % passed)
@@ -228,3 +229,34 @@ func _test_flight_smoothness() -> void:
 	var slope := rad_to_deg(atan2(drop, maxf(run, 0.001)))
 	check("flight: the ouverture is a glideslope (%.1f deg over %.0f u, max %.0f)"
 		% [slope, run, OUVERTURE_SLOPE_MAX], true, slope <= OUVERTURE_SLOPE_MAX)
+
+
+## AND THE DOOR HAS TO FIT THE ANIMAL (Bert, 2026-08-18: "the hole is not big
+## enough when he get in the cathedral... I know what would be more
+## cinematic"). The wheel used to be r 6.0 with a CLEAR span of only r 3.0,
+## because its tracery carried a stone hub ring straight across the opening.
+## The wyrm is ~10.6 u across in its glide. So this asserts the two numbers
+## against each other, and that the flight actually goes through the middle.
+func _test_dragon_door() -> void:
+	var script: Script = load("res://src/cinematics/cathedral_cinematic_intro.gd")
+	var consts := script.get_script_constant_map()
+	var centre: Vector3 = consts["ROSE_CENTRE"]
+	var clear_r: float = consts["ROSE_CLEAR_R"]
+	var span: float = consts["WYRM_SPAN"]
+	check("door: the oculus is wider than the wyrm (%.1f u clear vs %.1f u span)"
+		% [clear_r * 2.0, span], true, clear_r * 2.0 >= span * 1.1)
+
+	# where does the flight actually cross the facade plane?
+	var ouv: Array = consts["PATH_NEEDLE"]
+	var crossing := Vector3.INF
+	for i in 2001:
+		var p := _catmull(ouv, float(i) / 2000.0)
+		if absf(p.z - centre.z) < 0.02:
+			crossing = p
+			break
+	check("door: the flight crosses the facade plane", true, crossing != Vector3.INF)
+	if crossing == Vector3.INF:
+		return
+	var off := Vector2(crossing.x - centre.x, crossing.y - centre.y).length()
+	check("door: the whole animal clears the stone (centre offset %.2f + half-span %.1f <= %.1f)"
+		% [off, span * 0.5, clear_r], true, off + span * 0.5 <= clear_r)

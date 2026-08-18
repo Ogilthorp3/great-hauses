@@ -150,10 +150,10 @@ const PATH_APPROACH := [
 ## the root, so the path has to be a good metre higher than the finial, not a
 ## hand's breadth.
 const PATH_NEEDLE := [
-	Vector3(0, 30.0, -66), Vector3(0, 28.2, -57), Vector3(0, 26.2, -48),
-	Vector3(0, 24.4, -39), Vector3(0, 23.2, -32), Vector3(0, 22.3, -26.0),
-	Vector3(-0.7, 22.6, -21.0), Vector3(-1.8, 22.6, -15.0),
-	Vector3(-2.6, 22.2, -10.0)]
+	Vector3(0, 30.0, -66), Vector3(0, 28.6, -57), Vector3(0, 27.0, -48),
+	Vector3(0, 25.6, -39), Vector3(0, 24.4, -32), Vector3(0, 23.5, -26.0),
+	Vector3(-0.7, 23.6, -21.0), Vector3(-1.8, 23.5, -15.0),
+	Vector3(-2.6, 23.0, -10.0)]
 ## THE NAVE RUN. One long descending curve rather than the hard left it used
 ## to open with: the old leg turned 74.9 deg in its first frames because it
 ## had to dodge the z -8 chandelier chain the instant it came through the
@@ -162,7 +162,7 @@ const PATH_NEEDLE := [
 ## the x offsets; a wing membrane may still sweep a 0.08 u iron rod, which at
 ## twenty metres is not a thing anyone can see.
 const PATH_NAVE := [
-	Vector3(-2.6, 22.2, -10.0), Vector3(-4.5, 21.2, -5.5),
+	Vector3(-2.6, 23.0, -10.0), Vector3(-4.5, 21.6, -5.5),
 	Vector3(-6.0, 16.5, -0.5), Vector3(-5.0, 12.0, 4.0),
 	Vector3(-2.5, 9.2, 7.0), Vector3(0.5, 9.8, 10.0)]
 ## THE FLARE. This one IS a sharp change of direction, and it should be: the
@@ -175,6 +175,17 @@ const PATH_PERCH := [
 	Vector3(0.5, 9.8, 10.0), Vector3(1.6, 13.0, 11.6), Vector3(1.2, 14.2, 12.9),
 	Vector3(0.4, 13.0, 13.4), Vector3(0.0, 12.2, 13.55)]
 const PERCH_POS := Vector3(0.0, 12.2, 13.55)
+
+## THE DRAGON DOOR, mirrored from tools/blender/build_sanctum_cathedral.py
+## (ROSE_WEST / ROSE_WEST_CLEAR). The old wheel measured r 6.0 but its CLEAR
+## span was r 3.0 — a stone hub ring sat in the middle of the opening — and
+## the wyrm is ~10.6 u across in its glide, so it could only ever have fitted
+## by folding into a dart. Bert's call was the cinematic one: enlarge the
+## hole, do not shrink the dragon. The suite checks the flight actually fits
+## through it, wingspan included.
+const ROSE_CENTRE := Vector3(0.0, 23.5, -26.0)
+const ROSE_CLEAR_R := 6.6
+const WYRM_SPAN := 10.6      ## measured posed width at DRAGON_SCALE
 const LEGS := [PATH_NIGHT, PATH_APPROACH, PATH_NEEDLE, PATH_NAVE, PATH_PERCH]
 
 ## ── HOW IT FLIES (Bert, 2026-08-18: "he looks like a robot") ───────────────
@@ -216,7 +227,7 @@ const CAM_APPROACH := [Vector3(-40, 12, -56), Vector3(-56, 20, -58),
 	Vector3(-18, 29, -88)]                                       # 33 -> 28 u
 const CAM_NEEDLE := [Vector3(-18, 29, -88), Vector3(-26, 26, -64),
 	Vector3(-20, 24, -46), Vector3(-13, 22.8, -38),
-	Vector3(-6, 22.4, -34), Vector3(0, 22.1, -31)]               # 28 -> 21 u
+	Vector3(-6, 23.2, -34), Vector3(0, 23.4, -31)]               # 28 -> 21 u
 ## …and the lens follows it through the same hole a beat later: this leg
 ## crosses the facade at x 0, y ~20.8 — dead centre of the open oculus, whose
 ## clear radius is 3.0.
@@ -230,7 +241,7 @@ const CAM_NEEDLE := [Vector3(-18, 29, -88), Vector3(-26, 26, -64),
 ## (Key 1 sits a metre off the axis so the organ's centre finial stops
 ## rising through the middle of the reveal — the lens still crosses the
 ## oculus well inside its 3.0 clear radius.)
-const CAM_NAVE := [Vector3(0, 22.1, -31), Vector3(1.0, 21.4, -24.0),
+const CAM_NAVE := [Vector3(0, 23.4, -31), Vector3(1.0, 22.4, -24.0),
 	Vector3(1.0, 16.5, -16.5), Vector3(1.6, 12.8, -12.0),
 	Vector3(2.2, 9.0, -8.0)]                                     # 15 -> 18 u
 const CAM_PERCH := [Vector3(2.2, 9.0, -8.0), Vector3(-2.0, 8.2, -7.0),
