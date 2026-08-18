@@ -14,7 +14,7 @@ from datetime import datetime
 from PIL import Image
 
 DEFAULT_DEVICE = "FF74469D-4113-57D5-AC5C-9E4D68B22A0D"
-BUNDLE_ID = "vc.triptyq.greathauses"
+BUNDLE_ID = "haus.sanctum.greathauses"
 ASCII_CHARS = " .:-=+*#%@"
 
 
