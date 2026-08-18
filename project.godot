@@ -33,11 +33,16 @@ window/dpi/allow_hidpi=true
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
 
-[display]
-
 ; iPad: this game is a board seen from a seat — it has no portrait layout, and
 ; the HUD is laid out for a wide frame. Sensor landscape so either way up
 ; works when the player picks the tablet off a table.
+;
+; THIS KEY LIVES IN THE EXISTING [display] SECTION ON PURPOSE. Godot's own
+; parser merges a second [display] block quite happily, so a duplicate looks
+; harmless in the editor and in game — but tools/build/assert_visionos_preset.py
+; reads project.godot with Python's configparser, which raises
+; DuplicateSectionError and takes the whole visionOS build down with it. The
+; engine's tolerance is not the contract; the strictest reader is.
 window/handheld/orientation="sensor_landscape"
 
 [audio]
