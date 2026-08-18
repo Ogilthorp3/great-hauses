@@ -59,7 +59,18 @@ const T_LAND := 23.2        # Land_Settle begins
 const T_TOUCH := 24.2       # claws on the gallery stone
 const T_ROAR := 24.6
 const T_IDLE := 26.4
-const DRAGON_SCALE := 1.65  # == DragonSpectator.dragon_scale: seamless swap
+## The wyrm's own size. Raised from 1.65 (Bert: "the Dragon should be bigger
+## than that") — at 2.2 its wingspan is ~12 u against a 26.8 u nave, so it
+## barely fits the church it is flying through, which is the whole point of
+## putting a dragon in a cathedral.
+##
+## The ceiling on this number is the ASHFALL, not the architecture: game.gd
+## hands the same scale to the DragonSpectator's vigil so the hand-off at the
+## seam cannot pop, and the ceremony swells from there to `ceremony_scale`
+## 2.25 and `champ_scale` 2.55. Going past those would make the wake SHRINK
+## the beast, and re-tuning the ceremony's measured bank radius and hover
+## heights is a separate campaign with its own suite.
+const DRAGON_SCALE := 2.2
 
 ## ── THE FEATHER RULE (Bert, 2026-08-18) ────────────────────────────────────
 ## The first cut rode the wyrm: at the tower pass the lens sat FOUR units off
@@ -76,10 +87,17 @@ const DRAGON_SCALE := 1.65  # == DragonSpectator.dragon_scale: seamless swap
 ##      camera on the beast's back again;
 ##   3. `--cine-capture` prints `dist` and `frac` (the wyrm's share of frame
 ##      width) at every beat, so "far enough" is a measured number, not a
-##      feeling. The band the shots are tuned to is 6-32 % of frame width.
-const STAND_OFF_SKY := 26.0     ## exterior: the cathedral must stay in shot
-const STAND_OFF_THREAD := 11.0  ## the needle: a trailing follow into the rose
-const STAND_OFF_NAVE := 14.0    ## interior: the vaults must stay in shot
+##      feeling. The band is 5-42 % of frame width: the exterior beats run
+##      9-19 % and the interior hero beats 27-36 %, which is where "followed
+##      from a distance" and "a dragon with presence" both hold at once.
+const STAND_OFF_SKY := 22.0     ## exterior: the cathedral must stay in shot
+const STAND_OFF_THREAD := 13.0  ## the needle: a trailing follow into the rose
+## Interior. This is a FLOOR THE AUTHORED KEYS ALREADY MEET, and it must
+## stay one: pushed to 18.5 it started actively re-posing the low pass, and
+## backing off along the aim there slid the lens behind the great hall's own
+## near wall — the shot became a black wall with a dragon behind it. The net
+## catches drift; it does not get to direct.
+const STAND_OFF_NAVE := 15.0
 
 ## The camera composes against the WORLD, not only against the wyrm: the aim
 ## sits a fraction off the beast toward the space it is crossing, so the
@@ -107,27 +125,62 @@ const PATH_NIGHT := [
 const PATH_APPROACH := [
 	Vector3(-16, 34.5, -46), Vector3(-26, 35.5, -38), Vector3(-25, 35.0, -28),
 	Vector3(-12, 38.0, -24), Vector3(0, 41, -27)]
+## The pull-up after the oculus clears the ORGAN's centre finial (tip y 20.5
+## at z -24.8, dead on the axis): at rig scale 2.2 the belly rides ~1.2 under
+## the root, so the path has to be a good metre higher than the finial, not a
+## hand's breadth.
 const PATH_NEEDLE := [
 	Vector3(0, 41, -27), Vector3(0, 33, -31.5), Vector3(0, 25.5, -29.5),
-	Vector3(0, 21.4, -27.3), Vector3(0, 20.8, -26.0), Vector3(0, 22.2, -24.4),
-	Vector3(0, 23.4, -20.0), Vector3(0, 22.4, -10.0)]
+	Vector3(0, 21.4, -27.3), Vector3(0, 20.8, -26.0), Vector3(0, 23.0, -24.4),
+	Vector3(0, 24.2, -20.0), Vector3(0, 22.8, -10.0)]
 const PATH_NAVE := [
-	Vector3(0, 22.4, -10.0), Vector3(-6.0, 19.5, -8.0), Vector3(-6.5, 15.0, -3.0),
+	Vector3(0, 22.8, -10.0), Vector3(-6.0, 19.5, -8.0), Vector3(-6.5, 15.0, -3.0),
 	Vector3(-5.0, 11.0, 1.0), Vector3(-1.5, 8.5, 4.5), Vector3(0.5, 7.6, 7.0)]
 const PATH_PERCH := [
 	Vector3(0.5, 7.6, 7.0), Vector3(1.5, 9.5, 9.8), Vector3(0.5, 13.4, 11.0),
 	Vector3(0.0, 12.9, 12.5), Vector3(0.0, 12.2, 13.55)]
 const PERCH_POS := Vector3(0.0, 12.2, 13.55)
+const LEGS := [PATH_NIGHT, PATH_APPROACH, PATH_NEEDLE, PATH_NAVE, PATH_PERCH]
+
+## ── HOW IT FLIES (Bert, 2026-08-18: "he looks like a robot") ───────────────
+## The first cut stepped the SPLINE PARAMETER with time, which is not motion:
+## a Catmull-Rom leg covers unequal distance per unit of u, so the wyrm
+## surged and stalled between control points for no reason an animal would
+## have. It also re-aimed itself with a fixed lerp toward an unbanked
+## `looking_at`, then post-multiplied a roll that the next frame's lerp
+## immediately fought — a mesh being carried on a stick.
+##
+## What flies here now:
+##   * ARC LENGTH. Each leg is measured once, and the shot's easing shapes
+##     DISTANCE against time — so `ease(t, 1.5)` on the stoop is a genuine
+##     acceleration and the landing leg genuinely decelerates into the flare.
+##   * REAL VELOCITY. Heading comes from the frame's own displacement,
+##     slerped, so the body always points where it is actually going.
+##   * AERODYNAMIC BANK. Roll is derived from the measured turn rate and
+##     damped, then baked into the basis as a rolled UP vector — one
+##     construction, nothing fighting it — plus a slow idle roll, because a
+##     soaring animal is never perfectly level.
+##   * WINGBEAT LIFT. The body rises and falls on the beat of the clip that
+##     is actually playing, so the wings look like they are doing the flying.
+##   * SECONDARY MOTION. DragonRig.FlightSway leads the head into turns,
+##     throws the tail wide, and runs a wave down it (see that class).
+const BANK_GAIN := 1.35      ## radians of roll per radian/sec of turn
+const BANK_MAX := 0.95       ## ~54 deg: a hard bank, still readable
+const BANK_DAMP := 2.6       ## how fast roll answers the turn
+const HEADING_DAMP := 5.5    ## how fast the nose answers the velocity
+const TURN_DAMP := 4.0       ## smoothing on the measured turn rate
+const IDLE_ROLL := 0.055     ## radians of never-quite-level soar
+const BEAT_LIFT := 0.16      ## body rise/fall per wingbeat, in rig scales
 
 ## Camera keys per shot — every one authored at a measured stand-off from the
 ## wyrm's position at the same instant (the ranges each leg holds are noted).
-const CAM_NIGHT := [Vector3(-58, 3.5, -76), Vector3(-54, 7.0, -72),
-	Vector3(-50, 10.0, -68)]                                     # 106 -> 46 u
-const CAM_APPROACH := [Vector3(-50, 10, -68), Vector3(-56, 20, -56),
-	Vector3(-52, 28, -40), Vector3(-44, 34, -26)]                # 48 -> 36 u
-const CAM_NEEDLE := [Vector3(-44, 34, -26), Vector3(-30, 30, -44),
-	Vector3(-10, 24, -48), Vector3(0, 21.4, -38),
-	Vector3(0, 20.9, -27.5)]                                     # 45 -> 14 u
+const CAM_NIGHT := [Vector3(-46, 6.0, -64), Vector3(-43, 9.0, -60),
+	Vector3(-40, 12.0, -56)]                                     # 96 -> 34 u
+const CAM_APPROACH := [Vector3(-40, 12, -56), Vector3(-48, 20, -46),
+	Vector3(-44, 27, -33), Vector3(-38, 32, -24)]                # 34 -> 26 u
+const CAM_NEEDLE := [Vector3(-38, 32, -24), Vector3(-28, 29, -42),
+	Vector3(-9, 24, -46), Vector3(0, 21.4, -38),
+	Vector3(0, 20.9, -28.5)]                                     # 34 -> 15 u
 ## …and the lens follows it through the same hole a beat later: this leg
 ## crosses the facade at x 0, y ~20.8 — dead centre of the open oculus, whose
 ## clear radius is 3.0.
@@ -138,7 +191,10 @@ const CAM_NEEDLE := [Vector3(-44, 34, -26), Vector3(-30, 30, -44),
 ## z -12 is load-bearing: that is the great hall's own wall plane, crest
 ## y 11.7, and a descent that crosses it any lower puts the camera INSIDE
 ## the masonry (the first cut of this move filmed a wall of stone blocks).
-const CAM_NAVE := [Vector3(0, 20.9, -27.5), Vector3(0, 20.4, -24.0),
+## (Key 1 sits a metre off the axis so the organ's centre finial stops
+## rising through the middle of the reveal — the lens still crosses the
+## oculus well inside its 3.0 clear radius.)
+const CAM_NAVE := [Vector3(0, 20.9, -28.5), Vector3(1.0, 20.4, -24.0),
 	Vector3(1.0, 16.5, -16.5), Vector3(1.6, 12.8, -12.0),
 	Vector3(2.2, 9.0, -8.0)]                                     # 15 -> 18 u
 const CAM_PERCH := [Vector3(2.2, 9.0, -8.0), Vector3(-2.0, 8.2, -7.0),
@@ -168,6 +224,9 @@ var _bottom_bar: ColorRect = null
 var _location_card: Control = null
 
 var _sting: AudioStreamPlayer = null
+var _sway: Node = null                # DragonRig.FlightSway (secondary motion)
+var _arc: Array = []                  # per leg: cumulative arc-length table
+
 var _is_running := false
 var _elapsed := 0.0
 var _skipped := false
@@ -175,6 +234,9 @@ var _inside := false
 var _roared := false
 var _landing := false
 var _bank := 0.0
+var _turn := 0.0                      # smoothed turn rate, rad/sec
+var _fwd := Vector3(0, 0, 1)          # smoothed heading (the wyrm's +Z nose)
+var _path_pos := Vector3.INF          # last position ON the path (bob excluded)
 var _look_smooth := Vector3.ZERO
 var _shake := 0.0
 
@@ -200,6 +262,7 @@ func start_cinematic(game_cam: Camera3D) -> void:
 	_cam.look_at(_look_smooth, Vector3.UP)
 	_cam.make_current()
 
+	_build_arc_tables()
 	_build_night_sky()
 	_build_cinematic_ui()
 	_spawn_dragon()
@@ -412,7 +475,10 @@ func _spawn_dragon() -> void:
 	_dragon_rig.scale = Vector3.ONE * DRAGON_SCALE
 	_dragon_root.add_child(_dragon_rig)
 	_dragon_root.global_position = PATH_NIGHT[1]
-	_dragon_rig.play_loop("Fast_Flying", 1.15)
+	_dragon_rig.play_loop("Fast_Flying", 1.0)
+	# The animal on top of the animation: head leads the turns, tail throws
+	# wide and waves down its length (DragonRig.FlightSway).
+	_sway = _dragon_rig.attach_flight_sway()
 	# The wyrm's glow, painted onto the cathedral shell only (layer 10) —
 	# the hall's meshes already carry their full 8-omni torch budget.
 	_glow = OmniLight3D.new()
@@ -427,6 +493,46 @@ func _spawn_dragon() -> void:
 
 
 # ── the timeline ───────────────────────────────────────────────────────────
+
+
+## Measure every leg once: 240 chords per leg, cumulative. This is what turns
+## "spline parameter" into "distance flown" (see HOW IT FLIES).
+func _build_arc_tables() -> void:
+	_arc.clear()
+	for leg: Array in LEGS:
+		var tbl := PackedFloat32Array()
+		tbl.resize(241)
+		tbl[0] = 0.0
+		var prev := _catmull(leg, 0.0)
+		for i in range(1, 241):
+			var p := _catmull(leg, float(i) / 240.0)
+			tbl[i] = tbl[i - 1] + prev.distance_to(p)
+			prev = p
+		_arc.append(tbl)
+
+
+## Spline parameter at `s01` of the leg's TOTAL LENGTH — the inverse of the
+## arc table, by binary search.
+func _u_at_arc(leg_idx: int, s01: float) -> float:
+	if leg_idx < 0 or leg_idx >= _arc.size():
+		return clampf(s01, 0.0, 1.0)
+	var tbl: PackedFloat32Array = _arc[leg_idx]
+	var last := tbl.size() - 1
+	var total := tbl[last]
+	if total <= 0.0001:
+		return clampf(s01, 0.0, 1.0)
+	var target := clampf(s01, 0.0, 1.0) * total
+	var lo := 0
+	var hi := last
+	while lo < hi - 1:
+		var mid := (lo + hi) / 2
+		if tbl[mid] < target:
+			lo = mid
+		else:
+			hi = mid
+	var span := tbl[hi] - tbl[lo]
+	var f := 0.0 if span <= 0.0001 else (target - tbl[lo]) / span
+	return (float(lo) + f) / float(last)
 
 
 func _catmull(pts: Array, t: float) -> Vector3:
@@ -444,31 +550,35 @@ func _catmull(pts: Array, t: float) -> Vector3:
 
 
 func _shot(t: float) -> Array:
-	## -> [dragon_pts, dragon_u, cam_pts, cam_u]
+	## -> [leg_index (-1 = perched), distance_fraction, cam_pts, cam_u]
+	## The dragon term is a fraction of the leg's LENGTH, not of its spline
+	## parameter — so these easings shape speed, which is what they read as.
 	if t < T_APPROACH:
 		var u := t / T_APPROACH
-		return [PATH_NIGHT, u, CAM_NIGHT, ease(u, 0.65)]
+		return [0, u, CAM_NIGHT, ease(u, 0.65)]
 	elif t < T_NEEDLE:
 		var u := (t - T_APPROACH) / (T_NEEDLE - T_APPROACH)
-		return [PATH_APPROACH, u, CAM_APPROACH, u]
+		return [1, u, CAM_APPROACH, u]
 	elif t < T_NAVE:
 		# The stoop accelerates (the wyrm falls); the lens does NOT chase it —
 		# it swings round to face the rose at its own pace and arrives after.
 		var u := (t - T_NEEDLE) / (T_NAVE - T_NEEDLE)
-		return [PATH_NEEDLE, ease(u, 1.5), CAM_NEEDLE, ease(u, 0.9)]
+		return [2, ease(u, 1.5), CAM_NEEDLE, ease(u, 0.9)]
 	elif t < T_PERCH:
 		var u := (t - T_NAVE) / (T_PERCH - T_NAVE)
-		return [PATH_NAVE, u, CAM_NAVE, ease(u, 0.8)]
+		return [3, ease(u, 0.92), CAM_NAVE, ease(u, 0.8)]
 	elif t < T_TOUCH:
+		# …and the last leg decelerates into the flare: a landing animal is
+		# still fast at the top of the climb and almost stopped at the stone.
 		var u := (t - T_PERCH) / (T_TOUCH - T_PERCH)
-		return [PATH_PERCH, ease(u, 0.55), CAM_PERCH, ease(u, 0.7)]
+		return [4, ease(u, 0.45), CAM_PERCH, ease(u, 0.7)]
 	elif t < T_IDLE:
 		# The roar: hold on the perch — the crane home waits for stillness.
 		var u := clampf((t - T_TOUCH) / (T_IDLE - T_TOUCH), 0.0, 1.0)
-		return [null, 1.0, CAM_HOLD, u]
+		return [-1, 1.0, CAM_HOLD, u]
 	else:
 		var u := clampf((t - T_IDLE) / (TOTAL - T_IDLE), 0.0, 1.0)
-		return [null, 1.0, CAM_HOME, ease(u, 0.45)]
+		return [-1, 1.0, CAM_HOME, ease(u, 0.45)]
 
 
 ## The stand-off this instant must hold. Exterior legs keep the cathedral in
@@ -492,38 +602,59 @@ func _process(delta: float) -> void:
 		return
 
 	var shot := _shot(t)
-	var dragon_pts: Variant = shot[0]
-	var du: float = shot[1]
+	var leg: int = shot[0]
+	var s01: float = shot[1]
 	var cam_pts: Array = shot[2]
 	var cu: float = shot[3]
 
 	# ── the wyrm ──
-	if dragon_pts != null:
-		var pos: Vector3 = _catmull(dragon_pts, du)
-		var ahead: Vector3 = _catmull(dragon_pts, du + 0.012)
-		var tangent := (ahead - pos)
-		if tangent.length() > 0.001:
-			tangent = tangent.normalized()
-			# +Z is the wyrm's nose: -Z looks back along the tangent.
-			var target := Basis.looking_at(-tangent, Vector3.UP)
-			_dragon_root.global_basis = _dragon_root.global_basis.slerp(target,
-				clampf(delta * 7.0, 0.0, 1.0))
-			# Banking from the horizontal turn rate.
-			var flat := Vector3(tangent.x, 0.0, tangent.z)
-			var flat_ahead_v := _catmull(dragon_pts, du + 0.05) - pos
-			var flat_ahead := Vector3(flat_ahead_v.x, 0.0, flat_ahead_v.z)
-			if flat.length() > 0.01 and flat_ahead.length() > 0.01:
-				var turn := flat.signed_angle_to(flat_ahead.normalized(), Vector3.UP)
-				_bank = lerpf(_bank, clampf(turn * 6.0, -0.85, 0.85),
-					clampf(delta * 4.0, 0.0, 1.0))
-			_dragon_root.rotate_object_local(Vector3(0, 0, 1), _bank)
-		_dragon_root.global_position = pos
-		_fly_anim(t, tangent if dragon_pts != null else Vector3.FORWARD)
+	if leg >= 0:
+		var pts: Array = LEGS[leg]
+		var pos := _catmull(pts, _u_at_arc(leg, s01))
+		if _path_pos == Vector3.INF:
+			_path_pos = pos
+		# HEADING from the frame's own displacement — the body points where
+		# it is actually going, at the speed the easing actually produced.
+		var step := pos - _path_pos
+		if step.length() > 0.0005:
+			_fwd = _fwd.slerp(step.normalized(),
+				clampf(delta * HEADING_DAMP, 0.0, 1.0)).normalized()
+		# TURN RATE, measured flat, then damped: the input to the bank and to
+		# the head-lead / tail-throw of the secondary motion.
+		var flat_step := Vector3(step.x, 0.0, step.z)
+		if flat_step.length() > 0.0005 and delta > 0.0001:
+			var flat_fwd := Vector3(_fwd.x, 0.0, _fwd.z)
+			if flat_fwd.length() > 0.001:
+				var raw := flat_fwd.normalized().signed_angle_to(
+					flat_step.normalized(), Vector3.UP) / delta
+				_turn = lerpf(_turn, clampf(raw, -3.0, 3.0),
+					clampf(delta * TURN_DAMP, 0.0, 1.0))
+		# THE BANK: rolled into the basis as the up vector, never post-applied.
+		var bank_target := clampf(-_turn * BANK_GAIN, -BANK_MAX, BANK_MAX)
+		_bank = lerpf(_bank, bank_target, clampf(delta * BANK_DAMP, 0.0, 1.0))
+		var roll := _bank + sin(t * 0.63) * IDLE_ROLL
+		var up := Vector3.UP.rotated(_fwd, roll)
+		if absf(_fwd.dot(up)) < 0.995:
+			_dragon_root.global_basis = Basis.looking_at(-_fwd, up)
+		_path_pos = pos
+		# THE WINGBEAT LIFTS THE BODY. The clip's own playhead drives it, so
+		# the rise lands on the downstroke instead of drifting against it.
+		_dragon_root.global_position = pos + Vector3.UP * _beat_lift()
+		_fly_anim(t)
+		if _sway != null:
+			_sway.turn = _turn
+			_sway.climb = clampf(_fwd.y * 2.2, -1.0, 1.0)
 	else:
 		_dragon_root.global_position = PERCH_POS
 		var face := Basis.looking_at(Vector3(0, 0, 1), Vector3.UP)  # nose -Z→board
 		_dragon_root.global_basis = _dragon_root.global_basis.slerp(face,
 			clampf(delta * 5.0, 0.0, 1.0))
+		if _sway != null:
+			# Settling on the stone: the sway eases out over the landing so
+			# the vigil pose is the clip's, not a half-applied turn.
+			_sway.turn = lerpf(_sway.turn, 0.0, clampf(delta * 2.5, 0.0, 1.0))
+			_sway.climb = lerpf(_sway.climb, 0.0, clampf(delta * 2.5, 0.0, 1.0))
+			_sway.weight = lerpf(_sway.weight, 0.0, clampf(delta * 1.2, 0.0, 1.0))
 		_perch_beats(t)
 
 	# ── the camera ──
@@ -590,8 +721,26 @@ func _process(delta: float) -> void:
 		_finish_cinematic()
 
 
-func _fly_anim(t: float, tangent: Vector3) -> void:
-	## Wingbeat language: climbs flap, descents tuck into the glide.
+## The body's rise and fall on the wingbeat, read off the playhead of
+## whatever flap clip is running (0 while gliding — a glider does not beat).
+func _beat_lift() -> float:
+	if _dragon_rig == null or _dragon_rig.anim == null:
+		return 0.0
+	var clip := _dragon_rig.anim.current_animation
+	if clip != "Fast_Flying":
+		return 0.0
+	var len := _dragon_rig.clip_length(clip)
+	if len <= 0.01:
+		return 0.0
+	var phase := fmod(_dragon_rig.anim.current_animation_position, len) / len
+	return sin(phase * TAU) * BEAT_LIFT * DRAGON_SCALE
+
+
+func _fly_anim(t: float) -> void:
+	## Wingbeat language: climbs flap, descents tuck into the glide — with a
+	## HYSTERESIS BAND on the climb rate, because a threshold compared against
+	## a live number chatters between two clips whenever the path is near
+	## level, and that chatter is half of what read as robotic.
 	if _dragon_rig == null or _dragon_rig.anim == null or _landing:
 		return
 	if t >= T_LAND:
@@ -603,22 +752,28 @@ func _fly_anim(t: float, tangent: Vector3) -> void:
 		return
 	if t >= T_PERCH:
 		if _dragon_rig.anim.current_animation != "Flying_Idle":
-			_dragon_rig.play_loop("Flying_Idle", 1.0, 0.45)   # the flare
+			_dragon_rig.play_loop("Flying_Idle", 0.9, 0.6)   # the flare
 		return
-	var climbing := tangent.y > 0.12
-	var diving := tangent.y < -0.30
+	var flapping := _dragon_rig.anim.current_animation == "Fast_Flying"
+	var climb := _fwd.y
 	if t >= T_NEEDLE and t < T_NAVE:
+		# The stoop: wings IN. A falcon does not flap on the way down, and at
+		# this scale the wings would not clear the oculus if it did.
 		if _dragon_rig.anim.current_animation != "Glide":
-			_dragon_rig.play_loop("Glide", 1.5, 0.3)   # the stoop: wings in
-	elif climbing:
-		if _dragon_rig.anim.current_animation != "Fast_Flying":
-			_dragon_rig.play_loop("Fast_Flying", 1.25, 0.35)
-	elif diving:
-		if _dragon_rig.anim.current_animation != "Glide":
-			_dragon_rig.play_loop("Glide", 1.1, 0.4)
+			_dragon_rig.play_loop("Glide", 1.35, 0.55)
+		return
+	# Effort, continuously: the flap quickens with the climb instead of
+	# snapping between two authored speeds.
+	if flapping:
+		if climb < -0.16:
+			_dragon_rig.play_loop("Glide", 1.0, 0.7)
+		else:
+			_dragon_rig.anim.speed_scale = clampf(0.85 + climb * 1.6, 0.7, 1.5)
 	else:
-		if _dragon_rig.anim.current_animation != "Fast_Flying":
-			_dragon_rig.play_loop("Fast_Flying", 0.95, 0.5)
+		if climb > -0.04:
+			_dragon_rig.play_loop("Fast_Flying", 1.0, 0.7)
+		else:
+			_dragon_rig.anim.speed_scale = clampf(0.9 + absf(climb) * 0.5, 0.9, 1.3)
 
 
 func _perch_beats(t: float) -> void:

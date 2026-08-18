@@ -86,10 +86,14 @@ func _snap(fname: String) -> void:
 ## and tail fin read a little wider than the number — it is a floor, and a
 ## consistent one.)
 ##
-## Band the shots are tuned to: 0.05 - 0.30 of frame width. Above that the
-## creature is eating the architecture; below it, it is a speck on the lens.
-## The threading beat is exempt by design — the wyrm is framed INSIDE the
-## rose wheel there, and filling that aperture is the shot.
+## Band the shots are tuned to: 0.05 - 0.42 of frame width. The ceiling moved
+## up from 0.30 when the wyrm itself grew (rig scale 1.65 -> 2.2, Bert:
+## "the Dragon should be bigger than that") — the interior hero beats now sit
+## at 0.27-0.36 on purpose, with the architecture still holding the frame
+## around them. Above the ceiling the creature is eating the church; below
+## the floor it is a speck on the lens. The threading of the oculus is the
+## one designed exception at ~0.49: the wyrm is framed INSIDE the rose wheel
+## there, and filling that aperture is the shot.
 func _framing(intro: Node) -> String:
 	var cam: Camera3D = intro.get("_cam")
 	var rig: Node3D = intro.get("_dragon_root")
@@ -132,7 +136,7 @@ func _framing(intro: Node) -> String:
 	var wf := (hi.x - lo.x) / vp.x
 	var hf := (hi.y - lo.y) / vp.y
 	var flag := ""
-	if wf > 0.30:
+	if wf > 0.42:
 		flag = "  <-- TOO CLOSE"
 	elif wf < 0.02:
 		# The establishing beat rides deliberately near this floor: the

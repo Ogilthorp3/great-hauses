@@ -76,9 +76,13 @@ ROSE_EAST = Vector((0.0, 20.0, CHEVET_Z))   # ember glass behind the perch
 ROSE_EAST_R = 4.8
 
 GALLERY_TOP = 12.2         # the Wyrm's Gallery ledge top
-GALLERY_FRONT_Z = 12.85
-GALLERY_BACK_Z = 14.55
-GALLERY_HALF_W = 4.8       # spectator HitReact wings reach +-4.6 at 1.65
+GALLERY_FRONT_Z = 12.6
+GALLERY_BACK_Z = 14.9
+## The wyrm outgrew its perch (2026-08-18): at rig scale 2.2 the HitReact
+## wings reach +-6.1 and the coiled body is longer, so the ledge widened from
+## 9.6 to 13.2 and deepened 1.7 -> 2.3. It still sits inside the apse arch's
+## 15 u span, which is what bounds it.
+GALLERY_HALF_W = 6.6
 
 TOWER_X = 15.8             # twin west towers, centres
 TOWER_Z = -27.6
@@ -904,7 +908,7 @@ def build_east_end():
     slab_y = GALLERY_TOP - 0.5
     add_box(mid, (0.0, slab_y + 0.25, (GALLERY_FRONT_Z + GALLERY_BACK_Z) / 2),
             (GALLERY_HALF_W * 2, 0.5, GALLERY_BACK_Z - GALLERY_FRONT_Z))
-    for cx in (-3.7, -1.25, 1.25, 3.7):
+    for cx in (-5.3, -1.8, 1.8, 5.3):
         add_box(dark, (cx, slab_y - 0.5, GALLERY_FRONT_Z + 0.45),
                 (0.6, 1.0, 0.9))
         add_box(dark, (cx, slab_y - 1.15, GALLERY_FRONT_Z + 0.7),
@@ -923,7 +927,7 @@ def build_east_end():
     iron = bucket("cathedral_iron")
     candle = bucket("cathedral_candle")
     for sx in (-1, 1):
-        cx = sx * 3.1
+        cx = sx * 4.9
         add_cone(iron, (cx, GALLERY_TOP, GALLERY_FRONT_Z + 0.6), 0.09, 0.07,
                  1.15, segments=6)
         add_cone(iron, (cx, GALLERY_TOP + 1.15, GALLERY_FRONT_Z + 0.6), 0.22,

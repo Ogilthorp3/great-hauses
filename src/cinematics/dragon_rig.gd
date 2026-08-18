@@ -491,6 +491,119 @@ static func slumber_default() -> Array:
 		lat, SLUMBER_HEAD_LAT * d, SLUMBER_JAW * d)
 
 
+# -- THE FLIGHT SWAY ------------------------------------------------------
+# The authored flight clips move the WINGS. They do not move the animal: the
+# neck holds one pose through a banking turn and the tail trails dead
+# straight behind, so a wyrm driven along a spline reads as a model being
+# carried on a stick — Bert's word for the first cut was "a robot".
+#
+# What a flying serpent actually does, and what this modifier adds on top of
+# whatever clip is playing (it runs in the skeleton's modification stack,
+# AFTER the AnimationPlayer has written its pose, and POST-multiplies each
+# bone's local rotation, exactly like Slumber):
+#
+#   THE HEAD LEADS.  An animal looks where it is going before it gets there.
+#     The lateral bend is spread along the neck and grows toward the skull,
+#     so the head swings into a turn ahead of the body and the whole neck
+#     draws the arc instead of hinging at one joint.
+#   THE TAIL LAGS, AND WAVES.  The tail is thrown to the OUTSIDE of a turn
+#     (it has mass and it is behind the turn), and a sine travels down its
+#     eight joints so it is never a straight rod — the wave is phase-shifted
+#     per joint, which is what makes a serpent read as a serpent.
+#   THE NECK BREATHES WITH THE CLIMB.  Nose up on a climb, tucked on a dive.
+#
+# Angles are small on purpose (single digits per joint): the effect is the
+# SUM along a chain of six or eight, and anything larger fights the clip.
+# Signs are in the same convention Slumber measured on this rig — each bone
+# runs along its own local Y, so local X is the PITCH and local Z is the
+# LATERAL bend.
+class FlightSway:
+	extends SkeletonModifier3D
+
+	## Driven by the flier each frame; all three are already smoothed there.
+	var turn := 0.0        ## signed turn rate, radians/sec (+ = to its left)
+	var climb := 0.0       ## -1 (diving) .. +1 (climbing)
+	var weight := 1.0      ## 0 disables the whole modifier
+
+	var lead_per_neck := 7.0    ## degrees of lateral lead at the LAST neck bone
+	var lag_per_tail := 5.0     ## degrees of lateral lag at the last tail bone
+	var wave_deg := 3.2         ## travelling wave amplitude per tail joint
+	var wave_rate := 2.1        ## rad/sec the wave travels
+	var wave_lag := 0.55        ## radians of phase per joint down the chain
+	var climb_deg := 6.0        ## neck pitch at |climb| = 1
+
+	var _neck: Array[int] = []
+	var _tail: Array[int] = []
+	var _head := -1
+	var _t := 0.0
+	var calls := 0              ## the stack ran this many times (probe)
+
+	func build(sk: Skeleton3D) -> void:
+		_neck.clear()
+		_tail.clear()
+		if sk == null:
+			return
+		for n in NECK_BONES:
+			var i := sk.find_bone(n)
+			if i != -1:
+				_neck.append(i)
+		for n in TAIL_BONES:
+			var i := sk.find_bone(n)
+			if i != -1:
+				_tail.append(i)
+		_head = sk.find_bone(HEAD_BONE)
+
+	func chain_counts() -> Vector2i:
+		return Vector2i(_neck.size(), _tail.size())
+
+	func _process_modification_with_delta(delta: float) -> void:
+		calls += 1
+		var sk := get_skeleton()
+		if sk == null or weight <= 0.001:
+			return
+		_t += delta
+		var d := PI / 180.0
+		# THE NECK: lateral lead ramping toward the skull, plus climb pitch.
+		var n := _neck.size()
+		for k in n:
+			var i: int = _neck[k]
+			# quadratic ramp: the base barely moves, the crown carries it
+			var ramp := float(k + 1) / float(n)
+			var lat := -turn * lead_per_neck * d * ramp * ramp * weight
+			var pitch := climb * climb_deg * d * ramp * 0.5 * weight
+			sk.set_bone_pose_rotation(i, sk.get_bone_pose_rotation(i)
+				* Quaternion.from_euler(Vector3(pitch, 0.0, lat)))
+		if _head != -1:
+			sk.set_bone_pose_rotation(_head, sk.get_bone_pose_rotation(_head)
+				* Quaternion.from_euler(Vector3(climb * climb_deg * d * 0.4 * weight,
+					0.0, -turn * lead_per_neck * d * 0.6 * weight)))
+		# THE TAIL: lag to the outside + a wave travelling down the chain.
+		var m := _tail.size()
+		for k in m:
+			var i: int = _tail[k]
+			var ramp := float(k + 1) / float(m)
+			var lag := turn * lag_per_tail * d * ramp * weight
+			var wave := sin(_t * wave_rate - float(k) * wave_lag) \
+				* wave_deg * d * (0.35 + 0.65 * ramp) * weight
+			sk.set_bone_pose_rotation(i, sk.get_bone_pose_rotation(i)
+				* Quaternion.from_euler(Vector3(0.0, 0.0, lag + wave)))
+
+
+## Attach (once) the flight-sway modifier to this rig's skeleton — the
+## secondary motion that makes a flying wyrm read as an animal rather than a
+## mesh on a spline. Returns null on a rig with no skeleton (duck-safe), and
+## is independent of Slumber: the two are never driven at once (a coiled
+## sleeper is not flying), but nothing here breaks if both are attached.
+func attach_flight_sway() -> FlightSway:
+	if skeleton == null:
+		return null
+	var s := FlightSway.new()
+	s.name = "FlightSway"
+	skeleton.add_child(s)
+	s.build(skeleton)
+	return s
+
+
 ## Attach (once) the slumber modifier to this rig's skeleton. Returns null on
 ## a rig with no skeleton — every caller must stay duck-safe.
 func attach_slumber(table: Array, breath_amp: float, breath_rate: float) -> Slumber:

@@ -632,6 +632,10 @@ func _setup_spectator() -> void:
 			spectator.vigil = true
 			spectator.rest_position = hall.wyrm_gallery_rest()
 			spectator.rest_yaw = PI   # face the board
+			# The same size the fly-in lands, so the hand-off cannot pop.
+			# Still under the ceremony's own swell (2.25 / 2.55), so a
+			# checkmate wake still reads as the beast GROWING.
+			spectator.dragon_scale = CathedralCinematicIntroScript.DRAGON_SCALE
 		elif hall.has_method("dragon_rest"):
 			spectator.rest_position = hall.dragon_rest()
 		# The ceremony caption may never land on the throne or on the champion
