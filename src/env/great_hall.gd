@@ -246,6 +246,7 @@ var _fps_seconds := 0
 func _ready() -> void:
 	_build_cathedral()
 	_build_floor()
+	_build_walls()
 	_build_wainscot()
 	_build_pillars()
 	_build_tables()
