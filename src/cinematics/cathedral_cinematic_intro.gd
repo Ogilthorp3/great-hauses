@@ -2,21 +2,26 @@ class_name CathedralCinematicIntro
 extends Node3D
 ## CathedralCinematicIntro — the arrival of the witness.
 ##
-## After the VS splash the player follows the wyrm through six shots:
+## After the VS splash the camera FOLLOWS the wyrm — from a distance, the way
+## the feather is followed at the top of Forrest Gump — through six shots:
 ##   1  THE NIGHT     moonlit cathedral on its crag; the dragon crosses high,
 ##                    a silhouette against the moon; the location card rises.
-##   2  THE APPROACH  chase cam around the north tower, up between the spires.
-##   3  THE NEEDLE    falcon-stoop into the OPEN west rose — the dragon door —
-##                    threading the oculus; the camera follows it through and
-##                    the night swaps to torchlight in the wall's thickness.
-##   4  THE NAVE      the run: down the vaults, slaloming the chandeliers,
-##                    one low pass over the board while the camera drops to
-##                    the stones and watches it thunder overhead.
+##   2  THE APPROACH  the wyrm circles the twin towers while the lens holds
+##                    off to the west: the whole west front stays in shot.
+##   3  THE NEEDLE    falcon-stoop into the OPEN west rose — the dragon door.
+##                    We watch it shrink into the lit oculus from behind, then
+##                    the lens threads the same hole a beat later and the night
+##                    gives way to torchlight in the thickness of the wall.
+##   4  THE NAVE      the run, seen down the length of the church: the wyrm
+##                    descends away from us past the chandeliers, out to the
+##                    aisle and back, a low pass over the board.
 ##   5  THE PERCH     pull-up, flare, and a Land_Settle onto the Wyrm's
-##                    Gallery over the apse arch, the ember rose behind it.
-##   6  THE VIGIL     the ROAR — coals kindle — then Perch_Idle, and one
-##                    continuous crane down past the throne into the exact
-##                    gameplay framing. The letterbox retracts; the fight is on.
+##                    Gallery over the apse arch, the ember rose behind it —
+##                    filmed wide from the hall floor, throne in frame.
+##   6  THE VIGIL     the ROAR — coals kindle, a distant crack in a big room —
+##                    then Perch_Idle, and one continuous crane down past the
+##                    throne into the exact gameplay framing. The letterbox
+##                    retracts; the fight is on.
 ##
 ## Craft contracts this file keeps:
 ##  * The serpent-wyrm's native forward is +Z (DragonRig header) — flight
@@ -45,49 +50,101 @@ signal intro_completed
 const DragonRigScript := preload("res://src/cinematics/dragon_rig.gd")
 const AdaptiveScaleScript := preload("res://src/ui/adaptive_scale.gd")
 
-const TOTAL := 25.5
-const T_APPROACH := 4.2
-const T_NEEDLE := 9.0
-const T_THREAD := 11.15     # the frame the wyrm crosses the facade plane
-const T_NAVE := 12.0
-const T_PERCH := 17.5
-const T_LAND := 20.2        # Land_Settle begins
-const T_TOUCH := 21.2       # claws on the gallery stone
-const T_ROAR := 21.6
-const T_IDLE := 23.2
+const TOTAL := 29.0
+const T_APPROACH := 5.5     # the night establishing ends
+const T_NEEDLE := 11.5      # the circling of the towers ends
+const T_NAVE := 15.5        # the stoop + the threading of the rose ends
+const T_PERCH := 22.0       # the nave run ends
+const T_LAND := 23.2        # Land_Settle begins
+const T_TOUCH := 24.2       # claws on the gallery stone
+const T_ROAR := 24.6
+const T_IDLE := 26.4
 const DRAGON_SCALE := 1.65  # == DragonSpectator.dragon_scale: seamless swap
 
+## ── THE FEATHER RULE (Bert, 2026-08-18) ────────────────────────────────────
+## The first cut rode the wyrm: at the tower pass the lens sat FOUR units off
+## a beast with a ten-unit wingspan, so the creature filled the frame edge to
+## edge and neither the flight nor the cathedral could be read. The reference
+## is the feather that opens Forrest Gump — the camera follows from a
+## distance, drifting on the same air, and the world stays in shot.
+##
+## Three mechanisms hold that, in order of authority:
+##   1. every camera key is authored at a measured stand-off from the wyrm's
+##      position at the same instant (the tables below carry the numbers);
+##   2. STAND_OFF is then ENFORCED per frame — the lens backs off along its
+##      own axis until the range is met, so no spline drift can ever put the
+##      camera on the beast's back again;
+##   3. `--cine-capture` prints `dist` and `frac` (the wyrm's share of frame
+##      width) at every beat, so "far enough" is a measured number, not a
+##      feeling. The band the shots are tuned to is 6-32 % of frame width.
+const STAND_OFF_SKY := 26.0     ## exterior: the cathedral must stay in shot
+const STAND_OFF_THREAD := 11.0  ## the needle: a trailing follow into the rose
+const STAND_OFF_NAVE := 14.0    ## interior: the vaults must stay in shot
+
+## The camera composes against the WORLD, not only against the wyrm: the aim
+## sits a fraction off the beast toward the space it is crossing, so the
+## architecture holds the frame and the dragon rides off-centre. A feather is
+## never the only thing in the shot.
+const ANCHOR_SKY := Vector3(0.0, 26.0, -26.0)   # the west front
+const ANCHOR_NAVE := Vector3(0.0, 8.0, 2.0)     # the nave floor / the board
+const COMPOSE_PULL := 0.18
+## Gentle: a drifting observer, not a gun turret. (The first cut ran this at
+## 12.0 — locked-on tracking, which is what made the flight read as chaos.)
+const LOOK_RATE := 4.5
+const FLIGHT_FOV := 58.0        ## wide glass keeps the world around the wyrm
+
 ## Flight keys per shot (Catmull-Rom, world space).
+##
+## Two obstacles the interior legs are routed around, both measured off the
+## generator: the ORGAN's centre finial tips out at y 20.5 on the axis at
+## z -24.8 (so the wyrm threads the rose at 20.8 and pulls up hard over it),
+## and the CHANDELIER chains hang at x 0 from y 15.8 to the vault (so the
+## descent down the nave is flown off-axis, out at x -6, and only returns to
+## the centre line once it is under them).
 const PATH_NIGHT := [
 	Vector3(38, 50, -82), Vector3(34, 48, -78), Vector3(14, 42, -64),
 	Vector3(-6, 37, -52), Vector3(-16, 34.5, -46), Vector3(-22, 34.5, -40)]
 const PATH_APPROACH := [
-	Vector3(-16, 34.5, -46), Vector3(-24, 34.8, -36), Vector3(-23, 34.0, -29),
-	Vector3(-13, 37.0, -27), Vector3(0, 40.5, -28)]
+	Vector3(-16, 34.5, -46), Vector3(-26, 35.5, -38), Vector3(-25, 35.0, -28),
+	Vector3(-12, 38.0, -24), Vector3(0, 41, -27)]
 const PATH_NEEDLE := [
-	Vector3(0, 40.5, -28), Vector3(0, 31, -31), Vector3(0, 24.2, -30),
-	Vector3(0, 21.7, -26.8), Vector3(0, 21.6, -23.5)]
+	Vector3(0, 41, -27), Vector3(0, 33, -31.5), Vector3(0, 25.5, -29.5),
+	Vector3(0, 21.4, -27.3), Vector3(0, 20.8, -26.0), Vector3(0, 22.2, -24.4),
+	Vector3(0, 23.4, -20.0), Vector3(0, 22.4, -10.0)]
 const PATH_NAVE := [
-	Vector3(0, 21.6, -23.5), Vector3(-2.0, 17.5, -14), Vector3(-3.4, 13.2, -8.5),
-	Vector3(2.8, 10.5, -2.0), Vector3(0.4, 7.2, 3.5), Vector3(-1.2, 6.0, 6.5)]
+	Vector3(0, 22.4, -10.0), Vector3(-6.0, 19.5, -8.0), Vector3(-6.5, 15.0, -3.0),
+	Vector3(-5.0, 11.0, 1.0), Vector3(-1.5, 8.5, 4.5), Vector3(0.5, 7.6, 7.0)]
 const PATH_PERCH := [
-	Vector3(-1.2, 6.0, 6.5), Vector3(0.6, 9.0, 9.5), Vector3(0.0, 13.6, 10.6),
-	Vector3(0.0, 12.9, 12.4), Vector3(0.0, 12.2, 13.55)]
+	Vector3(0.5, 7.6, 7.0), Vector3(1.5, 9.5, 9.8), Vector3(0.5, 13.4, 11.0),
+	Vector3(0.0, 12.9, 12.5), Vector3(0.0, 12.2, 13.55)]
 const PERCH_POS := Vector3(0.0, 12.2, 13.55)
 
-## Camera keys per shot.
+## Camera keys per shot — every one authored at a measured stand-off from the
+## wyrm's position at the same instant (the ranges each leg holds are noted).
 const CAM_NIGHT := [Vector3(-58, 3.5, -76), Vector3(-54, 7.0, -72),
-	Vector3(-50, 10.0, -68)]
-const CAM_APPROACH := [Vector3(-30, 29, -52), Vector3(-33, 33, -36),
-	Vector3(-20, 39, -22), Vector3(-7, 43, -27)]
-const CAM_NEEDLE := [Vector3(0, 45, -34), Vector3(-0.8, 27, -33.5),
-	Vector3(-1.7, 20.4, -30.0), Vector3(-2.2, 18.9, -21.5)]
-const CAM_NAVE := [Vector3(-2.2, 18.9, -21.5), Vector3(0, 17.5, -13),
-	Vector3(4.8, 9.5, -5.0), Vector3(-4.5, 3.4, 8.6)]
-const CAM_PERCH := [Vector3(-4.5, 3.4, 8.6), Vector3(-6.6, 5.2, 10.4),
-	Vector3(-6.8, 9.4, 8.2), Vector3(-4.0, 13.0, 8.8)]
-const CAM_HOLD := [Vector3(-4.0, 13.0, 8.8), Vector3(-3.6, 13.0, 8.4)]
-const CAM_HOME := [Vector3(-3.6, 13.0, 8.4), Vector3(-2.4, 12.6, 3.2)]
+	Vector3(-50, 10.0, -68)]                                     # 106 -> 46 u
+const CAM_APPROACH := [Vector3(-50, 10, -68), Vector3(-56, 20, -56),
+	Vector3(-52, 28, -40), Vector3(-44, 34, -26)]                # 48 -> 36 u
+const CAM_NEEDLE := [Vector3(-44, 34, -26), Vector3(-30, 30, -44),
+	Vector3(-10, 24, -48), Vector3(0, 21.4, -38),
+	Vector3(0, 20.9, -27.5)]                                     # 45 -> 14 u
+## …and the lens follows it through the same hole a beat later: this leg
+## crosses the facade at x 0, y ~20.8 — dead centre of the open oculus, whose
+## clear radius is 3.0.
+## …and once through, the lens SINKS: down the vault, over the hall's open
+## wall crest and into the room, so the low pass reads as the wyrm thundering
+## overhead against the lit vault instead of a dark shape on a dark wall.
+## …and once through, the lens SINKS into the room with it. The key at
+## z -12 is load-bearing: that is the great hall's own wall plane, crest
+## y 11.7, and a descent that crosses it any lower puts the camera INSIDE
+## the masonry (the first cut of this move filmed a wall of stone blocks).
+const CAM_NAVE := [Vector3(0, 20.9, -27.5), Vector3(0, 20.4, -24.0),
+	Vector3(1.0, 16.5, -16.5), Vector3(1.6, 12.8, -12.0),
+	Vector3(2.2, 9.0, -8.0)]                                     # 15 -> 18 u
+const CAM_PERCH := [Vector3(2.2, 9.0, -8.0), Vector3(-2.0, 8.2, -7.0),
+	Vector3(-6.5, 7.8, -4.5), Vector3(-8.5, 7.6, -2.0)]          # 15 -> 18 u
+const CAM_HOLD := [Vector3(-8.5, 7.6, -2.0), Vector3(-8.0, 7.9, -2.8)]
+const CAM_HOME := [Vector3(-8.0, 7.9, -2.8), Vector3(-5.0, 8.6, -5.2)]
 
 var _cam: Camera3D = null                # OUR camera
 var _game_cam: Camera3D = null           # the rig's camera (untouched)
@@ -136,7 +193,7 @@ func start_cinematic(game_cam: Camera3D) -> void:
 
 	_cam = Camera3D.new()
 	_cam.name = "CinematicCam"
-	_cam.fov = 55.0
+	_cam.fov = FLIGHT_FOV
 	add_child(_cam)
 	_cam.global_position = CAM_NIGHT[0]
 	_look_smooth = Vector3(0, 24, -26)
@@ -395,8 +452,10 @@ func _shot(t: float) -> Array:
 		var u := (t - T_APPROACH) / (T_NEEDLE - T_APPROACH)
 		return [PATH_APPROACH, u, CAM_APPROACH, u]
 	elif t < T_NAVE:
+		# The stoop accelerates (the wyrm falls); the lens does NOT chase it —
+		# it swings round to face the rose at its own pace and arrives after.
 		var u := (t - T_NEEDLE) / (T_NAVE - T_NEEDLE)
-		return [PATH_NEEDLE, ease(u, 1.6), CAM_NEEDLE, ease(u, 1.5)]
+		return [PATH_NEEDLE, ease(u, 1.5), CAM_NEEDLE, ease(u, 0.9)]
 	elif t < T_PERCH:
 		var u := (t - T_NAVE) / (T_PERCH - T_NAVE)
 		return [PATH_NAVE, u, CAM_NAVE, ease(u, 0.8)]
@@ -410,6 +469,17 @@ func _shot(t: float) -> Array:
 	else:
 		var u := clampf((t - T_IDLE) / (TOTAL - T_IDLE), 0.0, 1.0)
 		return [null, 1.0, CAM_HOME, ease(u, 0.45)]
+
+
+## The stand-off this instant must hold. Exterior legs keep the cathedral in
+## shot; the needle is allowed closest because the wyrm is flying AWAY into
+## the oculus there (a trailing follow, not a pass).
+func _min_standoff(t: float) -> float:
+	if t < T_NEEDLE:
+		return STAND_OFF_SKY
+	if t < T_NAVE:
+		return STAND_OFF_THREAD
+	return STAND_OFF_NAVE
 
 
 func _process(delta: float) -> void:
@@ -456,29 +526,34 @@ func _process(delta: float) -> void:
 			clampf(delta * 5.0, 0.0, 1.0))
 		_perch_beats(t)
 
-	# The needle: swap night for torchlight as the wyrm crosses the facade.
-	if not _inside and _dragon_root.global_position.z > -25.4:
-		_enter_interior()
-
 	# ── the camera ──
+	var dragon_pos := _dragon_root.global_position
 	var cam_pos: Vector3 = _catmull(cam_pts, cu)
 	var look_target: Vector3
-	if t < T_APPROACH:
-		look_target = _dragon_root.global_position.lerp(Vector3(0, 24, -26), 0.35)
-	elif t >= T_IDLE:
+	if t >= T_IDLE:
 		# The crane home: blend the aim from the wyrm to the board framing.
 		var hu := clampf((t - T_IDLE) / (TOTAL - T_IDLE), 0.0, 1.0)
 		var home_look := _home_xform.origin - _home_xform.basis.z * 8.0
-		look_target = _dragon_root.global_position.lerp(home_look, ease(hu, 0.6))
+		look_target = dragon_pos.lerp(home_look, ease(hu, 0.6))
 		cam_pos = cam_pos.lerp(_home_xform.origin, ease(hu, 0.55))
 	else:
-		look_target = _dragon_root.global_position \
-			+ _dragon_root.global_basis.z * 1.2 + Vector3.UP * 0.4
-	# Aim tracking: languid on the establishing shots, locked-on through the
-	# nave run and the perch (the first captures aimed at walls while the
-	# wyrm exited frame-top — the lag was this constant).
-	var look_rate := 6.5 if t < T_NAVE else 12.0
-	_look_smooth = _look_smooth.lerp(look_target, clampf(delta * look_rate, 0.0, 1.0))
+		# Composed against the world (see THE FEATHER RULE): the aim sits a
+		# fraction off the wyrm toward the space it is crossing, so the
+		# cathedral holds the frame and the beast rides off-centre.
+		look_target = dragon_pos.lerp(
+			ANCHOR_NAVE if _inside else ANCHOR_SKY, COMPOSE_PULL)
+	_look_smooth = _look_smooth.lerp(look_target, clampf(delta * LOOK_RATE, 0.0, 1.0))
+
+	# THE STAND-OFF, ENFORCED. The lens backs off along its own axis until the
+	# range is met — spline drift can never put the camera on the beast's back
+	# again (the tower pass of the first cut sat 4 u off a 10 u wingspan).
+	var aim := _look_smooth - cam_pos
+	if aim.length() > 0.01 and t < T_IDLE:
+		var d := cam_pos.distance_to(dragon_pos)
+		var min_d := _min_standoff(t)
+		if d < min_d:
+			cam_pos -= aim.normalized() * (min_d - d)
+
 	if _shake > 0.003:
 		var s := _shake
 		cam_pos += Vector3(sin(t * 71.0), sin(t * 89.0 + 1.7), sin(t * 63.0 + 3.1)) * s
@@ -486,13 +561,16 @@ func _process(delta: float) -> void:
 	_cam.global_position = cam_pos
 	if _cam.global_position.distance_to(_look_smooth) > 0.05:
 		_cam.look_at(_look_smooth, Vector3.UP)
-	# FOV: wide in flight, tightening onto the perch, home fov at the seam.
-	var target_fov := 55.0
-	if t >= T_IDLE:
-		target_fov = _game_cam.fov
-	elif t > T_PERCH:
-		target_fov = 46.0
+	# Wide glass the whole flight — it is what keeps the world around the
+	# wyrm — easing to the gameplay lens only on the crane home.
+	var target_fov := _game_cam.fov if t >= T_IDLE else FLIGHT_FOV
 	_cam.fov = lerpf(_cam.fov, target_fov, clampf(delta * 2.5, 0.0, 1.0))
+
+	# The night gives way to torchlight when the LENS crosses the facade, not
+	# when the wyrm does — the camera trails it through the rose by a beat,
+	# and swapping on the beast blacked out the sky while we were still in it.
+	if not _inside and _cam.global_position.z > -25.6:
+		_enter_interior()
 
 	# ── UI beats ──
 	if _location_card != null:
