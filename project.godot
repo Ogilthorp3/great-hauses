@@ -40,6 +40,17 @@ window/stretch/aspect="expand"
 ; works when the player picks the tablet off a table.
 window/handheld/orientation="sensor_landscape"
 
+[audio]
+
+; iOS SILENCES "Ambient" AUDIO WITH THE MUTE SWITCH. Godot's default session
+; category is 0 = Ambient, which is correct for an app that should duck to
+; the user's music and respect the ring/silent switch — and wrong for a game
+; whose score, duel stings and dragon roar ARE the experience. Albert played
+; the first TestFlight build and heard nothing at all.
+; 3 = Playback: audio plays regardless of the mute switch, which is what
+; every game on the store does.
+general/ios/session_category=3
+
 [input_devices]
 
 ; Explicit rather than relying on the engine default: a tap MUST arrive as a

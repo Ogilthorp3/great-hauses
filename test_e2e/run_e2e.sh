@@ -392,6 +392,7 @@ for step in "${STEPS[@]}"; do
       run_suite banter-suite res://tests/test_banter.gd || SUITE_RC=1
       run_suite dragon-suite res://tests/test_dragon.gd || SUITE_RC=1
       run_suite duel-facing-suite res://tests/test_duel_facing.gd || SUITE_RC=1
+      run_suite touch-suite res://tests/test_touch_input.gd || SUITE_RC=1
       run_suite kill-styles-suite res://tests/test_kill_styles.gd || SUITE_RC=1
       run_suite costumes-suite res://tests/test_costumes.gd || SUITE_RC=1
       run_suite net-suite res://tests/test_net.gd || SUITE_RC=1

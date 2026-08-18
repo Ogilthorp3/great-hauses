@@ -16,7 +16,7 @@ var failures := 0
 var checks_run := 0
 
 ## Silent-abort floor (same guard as test_cinematics.gd).
-const MIN_EXPECTED_CHECKS := 42
+const MIN_EXPECTED_CHECKS := 52
 
 
 class Duck:
@@ -51,6 +51,8 @@ func _main() -> void:
 	_test_frame_contains_the_fight()
 	await _test_checkmate_facing()
 	await _test_skip_still_rests()
+	_test_third_man_geometry()
+	await _test_third_man_never_blocks()
 	check("final: time_scale is 1.0", true, is_equal_approx(Engine.time_scale, 1.0))
 	check("final: no test silently aborted (checks >= %d)" % MIN_EXPECTED_CHECKS,
 			true, checks_run >= MIN_EXPECTED_CHECKS)
@@ -365,3 +367,104 @@ func _test_skip_still_rests() -> void:
 	d.free()
 	a.free()
 	v.free()
+
+
+## THE THIRD MAN (Bert, 2026-08-18: "with a kill, another piece is blocking
+## the view"). The judge weighed six angles and vetoed only the victim hiding
+## behind his own killer; every other piece on the board was invisible to it.
+## These are the geometry's own truth table, then the property that matters.
+func _test_third_man_geometry() -> void:
+	var cam := Vector3(0.0, 1.2, -3.0)
+	var eye := Vector3(0.0, 0.6, 0.0)
+	# dead centre on the line, at chest height
+	check("third man: piece on the line blocks", true,
+		DD._segment_hits_column(cam, eye, Vector3(0.0, 0.0, -1.5), DD.PIECE_R, 1.2))
+	# a metre to the side is a metre of daylight
+	check("third man: piece beside the line is clear", false,
+		DD._segment_hits_column(cam, eye, Vector3(1.0, 0.0, -1.5), DD.PIECE_R, 1.2))
+	# behind the lens, and beyond the victim: neither is in the picture
+	check("third man: piece behind the lens is clear", false,
+		DD._segment_hits_column(cam, eye, Vector3(0.0, 0.0, -4.0), DD.PIECE_R, 1.2))
+	check("third man: piece past the victim is clear", false,
+		DD._segment_hits_column(cam, eye, Vector3(0.0, 0.0, 1.5), DD.PIECE_R, 1.2))
+	# HEIGHT MATTERS: the same pawn, once looked over and once looked past.
+	var high := Vector3(0.0, 3.0, -3.0)
+	check("third man: lens looks OVER a pawn", false,
+		DD._segment_hits_column(high, eye, Vector3(0.0, 0.0, -1.5), DD.PIECE_R, 0.95))
+	check("third man: low lens is blocked by that same pawn", true,
+		DD._segment_hits_column(Vector3(0.0, 0.8, -3.0), eye,
+			Vector3(0.0, 0.0, -1.5), DD.PIECE_R, 0.95))
+
+
+## The property, on the real judge, in two acts: film the duel once with an
+## empty board and note the angle it picks, then STAND A KING IN THAT EXACT
+## SHOT and film it again. The second angle must be clear — and the test first
+## proves the king really did block the first one, so it cannot pass by
+## accident on a board where nothing was ever in the way.
+func _test_third_man_never_blocks() -> void:
+	var d := DD.new()
+	get_root().add_child(d)
+	# The judge only films if there is a camera to take over from — and the
+	# gameplay camera is also what decides which SIDE of the axis the duel is
+	# shot from, so the test needs a real one, not a stub.
+	var play_cam := Camera3D.new()
+	get_root().add_child(play_cam)
+	play_cam.global_transform = Transform3D(
+		Basis.looking_at(Vector3(0.0, -4.0, 6.0).normalized(), Vector3.UP),
+		Vector3(0.0, 4.0, -6.0))
+	play_cam.current = true
+	var a := Duck.new(2, 0, 0.0)
+	var v := Duck.new(4, 1, PI)
+	var root := get_root()
+	root.add_child(a)
+	root.add_child(v)
+	a.position = Vector3(-0.8, 0.0, 0.0)
+	v.position = Vector3(0.8, 0.0, 0.0)
+
+	# ACT ONE — empty board.
+	var clean: Vector3 = await _film_one(d, a, v, [])
+	check("third man: empty board films a shot", true, clean != Vector3.INF)
+	check("third man: empty board shot is clear", 0, d.last_shot_blocked)
+
+	# ACT TWO — a king planted halfway down that very sightline.
+	var king := Duck.new(5, 1, 0.0)
+	root.add_child(king)
+	king.position = Vector3(clean.x * 0.5, 0.0, clean.z * 0.5)
+	# The gate is only worth having if the obstruction is real: prove the
+	# first angle is now blocked before asking the judge to avoid it.
+	var eye_a := a.position + Vector3.UP * (DD._fighter_top(a) * 0.5)
+	var eye_v := v.position + Vector3.UP * (DD._fighter_top(v) * 0.5)
+	check("third man: the king DOES block the empty-board angle", true,
+		DD._blocked_lines(clean, eye_a, eye_v, [king]) > 0)
+
+	var moved: Vector3 = await _film_one(d, a, v, [king])
+	check("third man: the judge recorded a shot", true, moved != Vector3.INF)
+	check("third man: the chosen shot is CLEAR", 0, d.last_shot_blocked)
+	check("third man: it picked a different angle", true, moved != clean)
+
+	king.free()
+	play_cam.free()
+	d.free()
+	a.free()
+	v.free()
+
+
+## Run one duel to the point where the judge has chosen, and hand back the
+## camera position it settled on.
+func _film_one(d, a, v, blockers: Array) -> Vector3:
+	d.set_blockers(blockers)
+	d.last_shot = Vector3.INF
+	d.last_shot_blocked = -1
+	var done := {"v": false}
+	var strike := func() -> void:
+		await _wait_wall(0.2)
+	var runner := func() -> void:
+		await d.play_duel(a, v, {}, strike)
+		done["v"] = true
+	runner.call()
+	await _wait_until(func() -> bool: return d.last_shot_blocked >= 0, 2.0)
+	var shot: Vector3 = d.last_shot
+	d.skip()
+	await _wait_until(func() -> bool: return done["v"], 3.0)
+	Engine.time_scale = 1.0
+	return shot

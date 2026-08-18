@@ -784,7 +784,7 @@ func _process(delta: float) -> void:
 			# generous: a wingtip counts, and the wyrm is inside two of the
 			# nave coronas at once as it comes down the church
 			var reach: float = WYRM_SPAN * 0.5 + CORONA_NAVE_R + 2.0
-			var hit: int = _coronas.strike_all_within(pos, _fwd, reach, 0.9)
+			var hit: int = _coronas.strike_all_within(pos, _fwd, reach, 0.9, delta)
 			if hit > 0:
 				_shake = maxf(_shake, 0.05)
 		# THE WINGBEAT LIFTS THE BODY. The clip's own playhead drives it, so

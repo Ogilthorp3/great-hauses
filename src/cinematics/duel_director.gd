@@ -99,6 +99,17 @@ var _props: Array = []                 # spawned flourish nodes, cleaned on rest
 var _cam: Camera3D
 var _prev_cam: Camera3D = null
 var _cam_base := Transform3D.IDENTITY  # cinematic pose before handheld noise
+## Every other piece on the board, so a shot can be tested for a third man
+## standing in it. Set by Game before each duel; empty means "no board", which
+## is what the unit tests and the staging path see, and the occlusion test
+## then costs nothing.
+var _blockers: Array = []
+## What the judge actually chose, and whether anyone was standing in it.
+## Written every duel so the gate can assert the PROPERTY — "the shot the
+## director picked is clear" — instead of re-deriving the pick and asserting
+## its own arithmetic back to itself.
+var last_shot := Vector3.INF
+var last_shot_blocked := -1
 var _cam_on := false
 var _orbiting := false
 var _shake := 0.0
@@ -156,6 +167,13 @@ func skip() -> void:
 ## The capture duel cinematic. `strike` is the actual duel choreography
 ## (e.g. `func(): await mover.play_capture(victim)`); it runs UNDER the
 ## slow-mo curve. With no strike, a timed hold plays instead (test mode).
+## Hand the director the pieces that are NOT fighting, so it can refuse a
+## camera angle one of them is standing in. Cheap to call every duel — it
+## keeps no state between them, and a stale list would aim at ghosts.
+func set_blockers(pieces: Array) -> void:
+	_blockers = pieces
+
+
 func play_duel(attacker: Node3D, victim: Node3D, meta: Dictionary = {},
 		strike: Callable = Callable()) -> void:
 	if _active or not is_inside_tree():
@@ -921,6 +939,15 @@ func _cam_enter_artistic_duel(attacker: Node3D, victim: Node3D, seq: int, tier: 
 			+ Vector3.UP * (height + 1.35),
 		"weight": 95.0 if (a_type == 3 or a_type == 1) else 50.0, "dutch": 0.0})
 
+	# The chest of each fighter — what the shot is actually of, and what a
+	# third piece has to be clear of.
+	var eye_a := a + Vector3.UP * (_fighter_top(attacker) * 0.5)
+	var eye_v := v + Vector3.UP * (_fighter_top(victim) * 0.5)
+	var blockers: Array = []
+	for b in _blockers:
+		if b != null and is_instance_valid(b) and b != attacker and b != victim:
+			blockers.append(b)
+
 	var best: Dictionary = candidates[0]
 	var best_score := -INF
 	var from_cam := _cam_base.origin
@@ -944,12 +971,31 @@ func _cam_enter_artistic_duel(attacker: Node3D, victim: Node3D, seq: int, tier: 
 		var to_v := (v + Vector3.UP * (_fighter_top(victim) * 0.5) - pos).normalized()
 		if to_a.angle_to(to_v) < deg_to_rad(7.0):
 			score -= 500.0
+		# …and the third man: any OTHER piece standing in either sightline.
+		score -= BLOCKED_PENALTY * float(_blocked_lines(pos, eye_a, eye_v, blockers))
 		score += rng.randf_range(0.0, 15.0)
 		if score > best_score:
 			best_score = score
 			best = c
 
 	var chosen: Vector3 = best["pos"]
+	# IF THE WINNER IS STILL BLOCKED, WALK THE LENS AROUND. Six named angles
+	# are six opinions, not a guarantee — on a crowded board every one of them
+	# can have somebody in it. Swing the chosen direction about the focus at
+	# the fit distance, nearest offsets first so the shot stays as close to the
+	# director's choice as a clear view allows, and alternate sides so the
+	# camera does not always drift the same way.
+	if not blockers.is_empty() and _blocked_lines(chosen, eye_a, eye_v, blockers) > 0:
+		var off := chosen - focus
+		var flat := Vector3(off.x, 0.0, off.z)
+		for step in [1, -1, 2, -2, 3, -3, 4, -4, 5, -5]:
+			var cand := focus + flat.rotated(Vector3.UP, deg_to_rad(15.0 * step))
+			cand.y = maxf(chosen.y, 0.30)
+			if _blocked_lines(cand, eye_a, eye_v, blockers) == 0:
+				chosen = cand
+				break
+	last_shot = chosen
+	last_shot_blocked = _blocked_lines(chosen, eye_a, eye_v, blockers)
 	var basis := Basis.looking_at(focus - chosen, Vector3.UP)
 	var roll := float(best.get("dutch", 0.0))
 	if absf(roll) > 0.001:
@@ -993,6 +1039,73 @@ func _duel_fit(a: Vector3, v: Vector3, axis: Vector3, reach: float,
 
 
 ## How tall this fighter stands, regalia included (FIGHTER_TOP).
+## THE THIRD MAN (Bert, 2026-08-18: "with a kill, another piece is blocking
+## the view"). The candidate loop already refused to let the VICTIM hide
+## behind his own KILLER, but nothing looked at the other thirty pieces on the
+## board, so a bishop two squares nearer the lens could stand square in front
+## of the execution and the shot was still scored as good.
+##
+## There are no physics colliders anywhere in this project — the board picks
+## squares by intersecting a ray with a plane — so this is analytic: every
+## piece is a vertical cylinder of PIECE_R about its square, as tall as its
+## rank, and a sightline is blocked if the segment from the lens to a
+## fighter's chest passes through one. Same shape the board itself uses to
+## pick a piece (board_view.pick_square_ray, radius 0.32), widened slightly
+## because a silhouette that merely CLIPS the action still ruins the frame.
+const PIECE_R := 0.40
+## Per blocked sightline. Larger than any candidate's weight plus its jitter,
+## so a clear angle beats a blocked one every time — but not a hard veto: if
+## every angle is blocked we still want the least-bad, not the first.
+const BLOCKED_PENALTY := 260.0
+
+
+## Does the segment `p0`->`p1` pass through the vertical cylinder of radius
+## `r` standing at `c` and rising `top` above it?
+static func _segment_hits_column(p0: Vector3, p1: Vector3, c: Vector3,
+		r: float, top: float) -> bool:
+	# Solve in the XZ plane for the interval of the segment inside the circle,
+	# then ask whether the segment is within the column's HEIGHT anywhere in
+	# that interval — a lens on the flagstones looking up past a pawn is not
+	# blocked by that pawn, and a closest-point-only test would say it is.
+	var d := Vector2(p1.x - p0.x, p1.z - p0.z)
+	var f := Vector2(p0.x - c.x, p0.z - c.z)
+	var dd := d.dot(d)
+	if dd < 0.000001:
+		return false
+	var disc := f.dot(d) * f.dot(d) - dd * (f.dot(f) - r * r)
+	if disc < 0.0:
+		return false                     # never enters the circle
+	var sq := sqrt(disc)
+	var t0 := (-f.dot(d) - sq) / dd
+	var t1 := (-f.dot(d) + sq) / dd
+	t0 = clampf(t0, 0.0, 1.0)
+	t1 = clampf(t1, 0.0, 1.0)
+	if is_equal_approx(t0, t1):
+		return false                     # grazes at an endpoint only
+	var y0 := p0.y + (p1.y - p0.y) * t0
+	var y1 := p0.y + (p1.y - p0.y) * t1
+	return maxf(y0, y1) > c.y - 0.02 and minf(y0, y1) < c.y + top
+
+
+## How many of the two sightlines (lens->attacker, lens->victim) a third piece
+## stands in. 0 is a clean shot.
+static func _blocked_lines(pos: Vector3, eye_a: Vector3, eye_v: Vector3,
+		blockers: Array) -> int:
+	var n := 0
+	for b in blockers:
+		var node := b as Node3D
+		if node == null or not is_instance_valid(node):
+			continue
+		var c := node.global_position
+		var top := _fighter_top(node)
+		if _segment_hits_column(pos, eye_a, c, PIECE_R, top):
+			n += 1
+			continue                     # one line, counted once
+		if _segment_hits_column(pos, eye_v, c, PIECE_R, top):
+			n += 1
+	return n
+
+
 static func _fighter_top(n: Node3D) -> float:
 	var t := _fighter_type(n)
 	if t >= 0 and t < FIGHTER_TOP.size():

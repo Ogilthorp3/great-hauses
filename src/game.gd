@@ -1291,6 +1291,9 @@ func _animate_move(move, mover_is_ember: bool, moment_info: Dictionary = {}) -> 
 			# now running under the director's time curve, moments governor, and battle cam.
 			var d_meta := _duel_meta(mover_is_ember)
 			d_meta.merge(moment_info)
+			# The board as it stands at the instant of the kill: everyone who
+			# is not fighting is a potential silhouette in front of the lens.
+			duel_director.set_blockers(views.values())
 			# Read BEFORE the duel: play_duel frees the victim, and a freed
 			# object's piece_type is a use-after-free (e2e duel gate red).
 			var victim_type_str := str(victim.piece_type)

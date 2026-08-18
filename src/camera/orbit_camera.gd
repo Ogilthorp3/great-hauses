@@ -14,9 +14,17 @@ extends Node3D
 @export var max_pitch := 0.45    ## Look up into soaring vaults and rose window
 @export var orbit_sensitivity := 0.008
 @export var zoom_step := 1.12
-## A pan gesture reports in points-per-frame, which is far coarser than a
-## mouse's pixel deltas; without a gain a two-finger drag barely moves.
-const TOUCH_ORBIT_GAIN := 7.0
+## A two-finger drag moves in screen POINTS like the mouse does, so it wants
+## roughly the mouse's sensitivity — a little lower, because a thumb is
+## coarser than a cursor and an over-eager camera on a tablet feels broken.
+const TOUCH_ORBIT_GAIN := 0.85
+## Below this the pinch is finger jitter, not intent.
+const PINCH_DEADZONE := 2.0
+
+var _touches: Dictionary = {}          ## finger index -> last known position
+var _prev_centroid := Vector2.ZERO
+var _prev_spread := 0.0
+var _two_finger_ready := false
 @export var lerp_speed := 12.0
 
 var _target_yaw := 0.0
@@ -50,17 +58,58 @@ func _unhandled_input(event: InputEvent) -> void:
 	# ── TOUCH ──────────────────────────────────────────────────────────────
 	# A finger has no right button and no wheel, so on an iPad the camera was
 	# simply immovable: right-drag orbits and the wheel zooms, and a
-	# touchscreen offers neither. Godot raises real gesture events on Apple
-	# devices, so two fingers do what the right button did and a pinch does
-	# what the wheel did. A ONE-finger drag is deliberately left alone — it
-	# is how the board is played (touch is emulated as a left click), and
-	# stealing it would make the game unplayable to fix the camera.
-	elif event is InputEventPanGesture:
-		_orbit_by(-event.delta * TOUCH_ORBIT_GAIN)
-	elif event is InputEventMagnifyGesture:
-		# factor > 1 is fingers spreading, which should bring the board CLOSER
-		target_distance = clampf(target_distance / maxf(event.factor, 0.01),
+	# touchscreen offers neither.
+	#
+	# THE FIRST FIX DID NOT WORK ON THE DEVICE, and Albert found that in one
+	# game: it listened for InputEventPanGesture / InputEventMagnifyGesture,
+	# which are TRACKPAD events. Godot 4.7 has no
+	# `input_devices/pointing/ios/enable_pan_and_scale_gestures` setting at
+	# all — the probe says the property does not exist — so on iOS those
+	# events are never generated and the handler was dead code that read like
+	# a feature.
+	#
+	# Raw touches are the honest primitive: track every finger, and when
+	# EXACTLY TWO are down, their centroid moving is an orbit and the
+	# distance between them changing is a zoom. That works on any touch
+	# device and depends on no engine setting. A ONE-finger drag is still
+	# deliberately untouched — it is how the board is played, and stealing it
+	# to move the camera would make the game unplayable to fix the camera.
+	elif event is InputEventScreenTouch:
+		if event.pressed:
+			_touches[event.index] = event.position
+		else:
+			_touches.erase(event.index)
+		_two_finger_ready = false      # re-baseline on the next drag
+	elif event is InputEventScreenDrag:
+		_touches[event.index] = event.position
+		_two_finger_update()
+
+
+## Two fingers: the pair's CENTRE moving is an orbit, the gap between them
+## changing is a zoom. Both come off the same event, which is why a pinch
+## that also slides orbits at the same time — as it should.
+func _two_finger_update() -> void:
+	if _touches.size() != 2:
+		_two_finger_ready = false
+		return
+	var pts: Array = _touches.values()
+	var a: Vector2 = pts[0]
+	var b: Vector2 = pts[1]
+	var centroid := (a + b) * 0.5
+	var spread := a.distance_to(b)
+	if not _two_finger_ready:
+		# first frame of this pair: take a baseline, do not jump the camera
+		_prev_centroid = centroid
+		_prev_spread = spread
+		_two_finger_ready = true
+		return
+	_orbit_by((centroid - _prev_centroid) * TOUCH_ORBIT_GAIN)
+	if _prev_spread > PINCH_DEADZONE and absf(spread - _prev_spread) > PINCH_DEADZONE:
+		# fingers spreading (ratio > 1) brings the board CLOSER
+		target_distance = clampf(target_distance * (_prev_spread / spread),
 			min_distance, max_distance)
+	_prev_centroid = centroid
+	_prev_spread = spread
 
 
 ## Shared by mouse drag and two-finger pan so the two can never drift apart.

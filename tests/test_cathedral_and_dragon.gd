@@ -28,6 +28,7 @@ func _main() -> void:
 	_test_flight_smoothness()
 	_test_dragon_door()
 	_test_coronas()
+	await _test_coronas_actually_swing()
 	print("---")
 	if failed == 0:
 		print("CATHEDRAL OK — all %d checks passed" % passed)
@@ -309,3 +310,54 @@ func _test_coronas() -> void:
 				float(c["CORONA_AISLE_Y"]), z))
 	_corona_clear(aisle, c["CORONA_AISLE_R"], c["CORONA_AISLE_CHAIN_TOP"],
 		legs, "the aisle eight")
+
+
+## THE CHANDELIERS MUST MOVE WHILE THEY ARE BEING HIT (Bert, 2026-08-18: "the
+## chandeliers didn't move like it should").
+##
+## The first sway evaluated a closed-form `amp * exp(-k t) * sin(w t)` and
+## reset `t = 0` on every `strike()`. The cinematic strikes EVERY FRAME the
+## wyrm is within reach — so t was zero on every one of those frames, sin(0)
+## is zero, and the fixture hung dead still for exactly as long as the dragon
+## was passing through it, then swung a second later with the camera already
+## elsewhere. The one moment it had to sell was the one moment it could not.
+##
+## So the gate is not "a strike eventually produces motion" — the broken
+## version passed that. It is "it is MOVING WHILE being struck every frame".
+func _test_coronas_actually_swing() -> void:
+	var SwayS: Script = load("res://src/env/corona_sway.gd")
+	var scene: PackedScene = load("res://assets/environment/sanctum_cathedral.glb")
+	if scene == null:
+		check("coronas: cathedral loads", true, false)
+		return
+	var root := Node3D.new()
+	get_root().add_child(root)
+	var inst := scene.instantiate()
+	root.add_child(inst)
+	await process_frame
+	var sway = SwayS.new()
+	root.add_child(sway)
+	var n: int = sway.adopt(inst)
+	check("coronas: fixtures adopted from the GLB", true, n >= 3)
+	if n < 1:
+		root.queue_free()
+		return
+	sway.set_process(false)          # fixed clock: headless frames are ~0.4 ms
+	var dt := 1.0 / 60.0
+	var f = sway._fixtures[0]
+	var pivot: Vector3 = sway.pivot(0)
+	var peak_during := 0.0
+	for i in int(0.45 / dt):         # a fly-by, struck on every single frame
+		sway.strike_all_within(pivot, Vector3.FORWARD, 6.0, 0.9, dt)
+		sway._process(dt)
+		peak_during = maxf(peak_during, absf(rad_to_deg(f.ang)))
+	check("coronas: swinging WHILE struck every frame (%.1f deg > 3)" % peak_during,
+		true, peak_during > 3.0)
+	# …and it rings on afterwards, because a hundred kilos of iron does not
+	# stop in two seconds.
+	var late := 0.0
+	for i in int(8.0 / dt):
+		sway._process(dt)
+		late = maxf(late, absf(rad_to_deg(f.ang)))
+	check("coronas: still ringing 8 s later (%.1f deg > 2)" % late, true, late > 2.0)
+	root.queue_free()

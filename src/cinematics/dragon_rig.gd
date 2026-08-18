@@ -639,10 +639,10 @@ class FlightSway:
 	func _process_modification_with_delta(delta: float) -> void:
 		calls += 1
 		var sk := get_skeleton()
-		if sk == null or weight <= 0.001:
+		if sk == null:
 			return
 		_t += delta
-		var d := PI / 180.0
+		var d := PI / 180.0 * (1.0 if weight > 0.001 else 0.0)
 		# THE NECK: lateral lead ramping toward the skull, plus climb pitch.
 		var n := _neck.size()
 		for k in n:
@@ -667,6 +667,153 @@ class FlightSway:
 				* wave_deg * d * (0.35 + 0.65 * ramp) * weight
 			sk.set_bone_pose_rotation(i, sk.get_bone_pose_rotation(i)
 				* Quaternion.from_euler(Vector3(0.0, 0.0, lag + wave)))
+
+
+# -- THE PERCH SWAY --------------------------------------------------------
+# Albert, after the first TestFlight game: "the dragon should be more
+# realistic, his feets should move." He is right, and the asset says so in
+# numbers: in `Perch_Idle` every leg bone — Thigh, Shin, Foot, both sides —
+# carries exactly TWO rotation keys, which is a constant pose, while `Torso`
+# carries 97. The clip breathes through the chest and welds the legs. A
+# perched animal that never moves its feet is a statue of an animal.
+#
+# What a big raptor actually does on a ledge, and what this adds on top of
+# whatever clip is playing:
+#   IT SHIFTS ITS WEIGHT. Slowly, and never evenly — one leg loads while the
+#     other unloads, the hips rolling a degree or two with it.
+#   IT GRIPS. The toes work: a slow flex and release, the two feet out of
+#     phase, because nothing alive does both sides at once.
+#   IT RE-SETTLES. Every few seconds one foot makes a quick correction, the
+#     little regrip that says the thing has WEIGHT and is balancing it.
+# Angles are single digits. The read is the rhythm, not the throw.
+class PerchSway:
+	extends SkeletonModifier3D
+
+	var weight := 1.0
+	## THE NUMBERS, and why they are these numbers. `slumber_table` folds this
+	## same leg with thigh +45 / shin -38 / foot +25 degrees on LOCAL X, so X
+	## is the swing axis and POSITIVE THIGH FOLDS THE LEG UP. Everything below
+	## borrows those proven signs and scales them down.
+	##
+	## The first attempt used ±3 degrees with ALTERNATING signs down the chain
+	## — thigh back, shin forward, foot back. That is a compensating chain: it
+	## is what a leg does to keep its foot PLANTED while the hips sink, and it
+	## measured 0.34 % of leg length at the toe. Honest physics, and still
+	## exactly the frozen foot Albert complained about. A foot only reads as
+	## alive when it LEAVES THE STONE, so the weight shift stays subtle and the
+	## visible beat is the re-grip: one talon lifts, curls, and sets back down.
+	var rate := 0.19            ## the slow weight shift, cycles/sec
+	var grip_rate := 0.33       ## talons working on the perch
+	var regrip_every := 5.0     ## seconds between corrections (sides alternate)
+	var lift_sec := 0.85        ## how long one re-grip takes
+	var phase := 0.0
+
+	const FOLD_SHIFT := 5.0     ## degrees the UNLOADED leg folds
+	const GRIP_CURL := 9.0      ## degrees of toe in the idle grip cycle
+	const LIFT_THIGH := 16.0    ## the re-grip, in slumber's fold direction
+	const LIFT_SHIN := -21.0
+	const LIFT_FOOT := 12.0
+	const LIFT_TOE := 17.0      ## talons curl as they leave the stone
+	const HIP_ROLL := 1.7       ## degrees the hips answer the shift
+
+	var _thigh := [-1, -1]
+	var _shin := [-1, -1]
+	var _foot := [-1, -1]
+	var _toe := [-1, -1]
+	var _hips := -1
+	var _t := 0.0
+	var _next_regrip := 2.0
+	var _regrip_t := 99.0
+	var _regrip_side := 0
+	var calls := 0
+
+	## Same instrument, same reason as Slumber's: the stack's result is handed
+	## to the skin and then the animation pose is RESTORED, so a foot that
+	## moved and a foot that did not read identically from outside. Name bones
+	## here and their post-sway skeleton-space origins land in `sampled`,
+	## written from inside the pass. That is the only honest measurement of
+	## whether Albert's complaint is fixed.
+	var sample_bones: Array = []
+	var sampled: Dictionary = {}
+
+	func build(sk: Skeleton3D) -> void:
+		if sk == null:
+			return
+		for i in 2:
+			var side := ".L" if i == 0 else ".R"
+			_thigh[i] = sk.find_bone("Thigh" + side)
+			_shin[i] = sk.find_bone("Shin" + side)
+			_foot[i] = sk.find_bone("Foot" + side)
+			_toe[i] = sk.find_bone("Toe" + side)
+		_hips = sk.find_bone("Torso")
+
+	func feet_found() -> int:
+		var n := 0
+		for i in 2:
+			if _foot[i] != -1:
+				n += 1
+			if _toe[i] != -1:
+				n += 1
+		return n
+
+	func _bend(sk: Skeleton3D, idx: int, deg: float) -> void:
+		if idx == -1 or is_zero_approx(deg):
+			return
+		sk.set_bone_pose_rotation(idx, sk.get_bone_pose_rotation(idx)
+			* Quaternion.from_euler(Vector3(deg_to_rad(deg) * weight, 0.0, 0.0)))
+
+	func _process_modification_with_delta(delta: float) -> void:
+		calls += 1
+		var sk := get_skeleton()
+		if sk == null:
+			return
+		_t += delta
+		if weight > 0.001:
+			var shift := sin(_t * rate * TAU + phase)
+			for i in 2:
+				var s: float = shift if i == 0 else -shift
+				# 1 = carrying the weight, 0 = resting: the resting leg folds
+				var load: float = 0.5 + 0.5 * s
+				var fold := (1.0 - load) * FOLD_SHIFT
+				var toe := (0.5 + 0.5 * sin(_t * grip_rate * TAU
+					+ float(i) * 2.3 + phase)) * GRIP_CURL
+				# THE RE-GRIP — a half-sine in and out, so the talon lifts,
+				# curls, and sets down without a corner at either end.
+				if _regrip_t < lift_sec and i == _regrip_side:
+					var u := sin(_regrip_t / lift_sec * PI)
+					_bend(sk, _thigh[i], fold + u * LIFT_THIGH)
+					_bend(sk, _shin[i], -fold * 1.2 + u * LIFT_SHIN)
+					_bend(sk, _foot[i], fold * 0.6 + u * LIFT_FOOT)
+					_bend(sk, _toe[i], toe + u * LIFT_TOE)
+				else:
+					_bend(sk, _thigh[i], fold)
+					_bend(sk, _shin[i], -fold * 1.2)
+					_bend(sk, _foot[i], fold * 0.6)
+					_bend(sk, _toe[i], toe)
+			_bend(sk, _hips, shift * HIP_ROLL)
+			_regrip_t += delta
+			_next_regrip -= delta
+			if _next_regrip <= 0.0:
+				_next_regrip = regrip_every
+				_regrip_t = 0.0
+				_regrip_side = 1 - _regrip_side
+		for bn in sample_bones:
+			var bi := sk.find_bone(bn)
+			if bi != -1:
+				sampled[bn] = Slumber._chain(sk, bi).origin
+
+
+## Attach (once) the perch-sway modifier — the weight shift, the grip and the
+## occasional re-settle that keep a perched wyrm from reading as taxidermy.
+## Returns null on a rig with no skeleton (duck-safe).
+func attach_perch_sway() -> PerchSway:
+	if skeleton == null:
+		return null
+	var s := PerchSway.new()
+	s.name = "PerchSway"
+	skeleton.add_child(s)
+	s.build(skeleton)
+	return s
 
 
 ## Attach (once) the flight-sway modifier to this rig's skeleton — the

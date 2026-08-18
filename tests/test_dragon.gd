@@ -26,7 +26,7 @@ var checks_run := 0
 ## A hard-erroring test function aborts silently at the error and its await
 ## resumes as if it finished — the floor turns silent aborts into a loud
 ## failure (same guard as test_cinematics.gd).
-const MIN_EXPECTED_CHECKS := 225
+const MIN_EXPECTED_CHECKS := 230
 
 ## THE SERPENT-WYRM CONTRACT (dragon-v2, installed 2026-08-09). Asserted
 ## against the names GODOT ends up with, never the ones the GLB was authored
@@ -97,6 +97,7 @@ func _main() -> void:
 	await _test_championship_tier()
 	await _test_match_defaults_budget()
 	await _test_phase_and_jet_probes()
+	await _test_the_feet_move()
 	check("final: time_scale is 1.0", true, is_equal_approx(Engine.time_scale, 1.0))
 	check("final: no Light3D added by any module path", lights_before, _light_count())
 	check("final: no test silently aborted (checks >= %d)" % MIN_EXPECTED_CHECKS,
@@ -1023,3 +1024,58 @@ func _test_phase_and_jet_probes() -> void:
 	check("probe: the jet is out at the end", false, s.is_jet_burning())
 	s.free()
 	await process_frame
+
+
+## THE FEET MOVE (Albert, after his first TestFlight game: "the dragon should
+## be more realistic, his feets should move"). He was right and the asset says
+## so in numbers — `Perch_Idle` carries exactly TWO rotation keys on every leg
+## bone against ninety-seven on the Torso, which is a constant pose: the wyrm
+## breathed through its chest with its legs welded to the stone.
+##
+## Measured the only way a modifier CAN be measured: from inside its own pass,
+## because Godot hands the stack's result to the skin and then restores the
+## animation pose (see DragonRig.Slumber). A fixed 1/60 clock, because headless
+## frames are ~0.4 ms and any figure taken per FRAME would be a lie.
+func _test_the_feet_move() -> void:
+	var root := Node3D.new()
+	get_root().add_child(root)
+	var rig = Rig.spawn(root, "FeetProbe", Vector3.ZERO, 0.0, 1.0)
+	await process_frame
+	await process_frame
+	check("feet: rig has a skeleton", true, rig.skeleton != null)
+	var sway = rig.attach_perch_sway()
+	check("feet: perch sway attaches", true, sway != null)
+	if sway == null:
+		root.queue_free()
+		return
+	check("feet: found both feet and both toes", 4, sway.feet_found())
+	sway.active = false                  # this test owns the clock
+	if rig.anim != null:
+		rig.anim.play("Perch_Idle")
+	var names := ["Toe.L", "Toe.R", "Foot.L"]
+	sway.sample_bones = names
+	var lo := {}
+	var hi := {}
+	for n in names:
+		lo[n] = Vector3(1e9, 1e9, 1e9)
+		hi[n] = Vector3(-1e9, -1e9, -1e9)
+	var dt := 1.0 / 60.0
+	for i in int(24.0 / dt):             # 24 s: four re-grips, both sides twice
+		if rig.anim != null:
+			rig.anim.advance(dt)
+		sway._process_modification_with_delta(dt)
+		for n in names:
+			if not sway.sampled.has(n):
+				continue
+			lo[n] = (lo[n] as Vector3).min(sway.sampled[n])
+			hi[n] = (hi[n] as Vector3).max(sway.sampled[n])
+	# Thigh->toe measures 1.061 on this rig; the floor is 5 % of that, which is
+	# an order of magnitude above the 0.07 % the welded clip managed and well
+	# under the ~17 % this pose actually produces. It is a REGRESSION net, not
+	# a restatement of today's number.
+	const LEG := 1.0614
+	for n in names:
+		var moved: float = ((hi[n] as Vector3) - (lo[n] as Vector3)).length() / LEG
+		check("feet: %s travels >5%% of leg length (got %.1f%%)" % [n, moved * 100.0],
+			true, moved > 0.05)
+	root.queue_free()

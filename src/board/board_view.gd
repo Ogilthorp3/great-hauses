@@ -102,6 +102,40 @@ func pick_square(screen_pos: Vector2) -> Variant:
 	return pick_square_ray(origin, dir)
 
 
+## TAP-ON-RELEASE, AND ONLY FOR ONE FINGER (2026-08-18). Two fingers orbit the
+## camera; the board must not also read that as play. A tap therefore commits
+## when the finger LIFTS, and is cancelled the instant a second finger joins or
+## the first one travels — which is exactly how every other touch app behaves,
+## and the only way a gesture can be classified before it is acted on.
+const TAP_SLOP_PX := 18.0        ## finger travel that still counts as a tap
+const TOUCH_ECHO_MS := 900       ## ignore emulated mouse this long after a touch
+var _tap_finger := -1            ## the finger that may still become a tap
+var _tap_from := Vector2.ZERO
+var _touch_count := 0
+var _last_touch_ms := 0
+
+
+func _handle_touch(event: InputEventScreenTouch) -> void:
+	_last_touch_ms = Time.get_ticks_msec()
+	if event.pressed:
+		_touch_count += 1
+		if _touch_count > 1:
+			_tap_finger = -1        # a gesture, not a tap: hands off the board
+		elif _tap_finger == -1:
+			_tap_finger = event.index
+			_tap_from = event.position
+		return
+	_touch_count = maxi(_touch_count - 1, 0)
+	if event.index != _tap_finger:
+		return
+	_tap_finger = -1
+	if event.position.distance_to(_tap_from) > TAP_SLOP_PX:
+		return
+	var sq: Variant = pick_square(event.position)
+	if sq != null:
+		square_clicked.emit(sq)
+
+
 var occupied_squares: Array[Vector2i] = []
 
 
@@ -194,7 +228,22 @@ func _unhandled_input(event: InputEvent) -> void:
 				if _hover_sq != null:
 					_hover_sq = null
 					square_hovered.emit(null)
+	elif event is InputEventScreenTouch:
+		_handle_touch(event)
+	elif event is InputEventScreenDrag:
+		# a finger that travels is aiming the camera or scrubbing, not tapping
+		if event.index == _tap_finger \
+				and event.position.distance_to(_tap_from) > TAP_SLOP_PX:
+			_tap_finger = -1
 	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+		# A TOUCH DEVICE ALSO SENDS THIS ONE. `emulate_mouse_from_touch` turns
+		# the FIRST finger into a left click, and this branch fires on PRESS —
+		# so the moment a second finger arrived to orbit the camera, the board
+		# had already acted on the first. On a crowded board that is an
+		# accidental move, which is a far worse bug than an immobile camera.
+		# Touches are handled properly above, so ignore the echo.
+		if Time.get_ticks_msec() - _last_touch_ms < TOUCH_ECHO_MS:
+			return
 		var sq: Variant = pick_square(event.position)
 		if sq != null:
 			square_clicked.emit(sq)

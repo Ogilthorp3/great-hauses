@@ -283,6 +283,7 @@ var _gaze_target: Node3D = null
 ## as authored). `_slumber_id` cancels an in-flight ramp the way `_gaze_id`
 ## cancels a glance — a stir that lands mid-settle must not fight it.
 var _slumber = null                    # DragonRig.Slumber
+var _perch: Node = null                # DragonRig.PerchSway (vigil only)
 var _slumber_id := 0
 var _ember := 0.0                      # current throat-coal energy
 
@@ -335,6 +336,12 @@ func _ready() -> void:
 	# code path for both postures.)
 	_slumber = rig.attach_slumber(DragonRigScript.slumber_default(), 0.05, 0.55)
 	_set_slumber(0.0 if vigil else 1.0)
+	# A VIGIL IS STILL A LIVING ANIMAL. Perch_Idle welds the legs (two keys
+	# per leg bone against the torso's ninety-seven), so a watching wyrm sat
+	# with its feet nailed down. The coiled sleeper does not want this — its
+	# legs are couched under it by the slumber pose — so it is vigil-only.
+	if vigil:
+		_perch = rig.attach_perch_sway()
 	rig.play_loop("Perch_Idle", vigil_idle_speed if vigil else rest_idle_speed)
 	if rig.anim != null:   # desync from the championship dragon's flap
 		rig.anim.seek(randf() * rig.clip_length("Perch_Idle"))
