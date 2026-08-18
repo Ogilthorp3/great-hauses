@@ -28,6 +28,7 @@ Music="*res://src/audio/music_manager.gd"
 
 window/size/viewport_width=1920
 window/size/viewport_height=1080
+window/size/mode="fullscreen"
 window/dpi/allow_hidpi=true
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"

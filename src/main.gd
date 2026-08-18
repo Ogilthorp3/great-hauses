@@ -99,10 +99,23 @@ func _ready() -> void:
 	if is_e2e_or_test:
 		_setup_house_select()
 	else:
+		if DisplayServer.get_name() != "headless":
+			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
 		var intro = OpeningCinematicScript.new()
 		intro.name = "OpeningCinematic"
 		add_child(intro)
 		intro.cinematic_completed.connect(_setup_house_select)
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_F11 or (event.alt_pressed and event.keycode == KEY_ENTER):
+			var cur := DisplayServer.window_get_mode()
+			if cur == DisplayServer.WINDOW_MODE_FULLSCREEN or cur == DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN:
+				DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+			else:
+				DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
+			get_viewport().set_input_as_handled()
 
 
 func _setup_house_select() -> void:
