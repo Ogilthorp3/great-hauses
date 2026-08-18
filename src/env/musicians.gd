@@ -32,14 +32,22 @@ const BRASS := Color(0.70, 0.55, 0.22)
 
 ## Where the wyrm used to sleep: the open court in the east aisle. Each entry
 ## is [offset from the stand, yaw, character, instrument, clip].
+## [offset, yaw, character, instrument]. Ranger and Rogue read as travelling
+## players; the Barbarian was bare-chested and read as a raider with a bucket.
 const CONSORT := [
-	[Vector3(0.0, 0.0, -0.95), -1.75, "Rogue_Hooded", "lute", "Idle"],
-	[Vector3(0.5, 0.0, 0.25), -1.35, "Mage", "shawm", "Idle"],
-	[Vector3(-0.25, 0.0, 1.15), -1.95, "Barbarian", "drum", "Idle"],
+	[Vector3(0.0, 0.0, -0.80), -1.75, "Ranger", "lute"],
+	[Vector3(0.42, 0.0, 0.18), -1.35, "Rogue_Hooded", "shawm"],
+	[Vector3(-0.22, 0.0, 0.95), -1.95, "Mage", "drum"],
 ]
 
+## Which hand each instrument lives in. A lute and a drum are HELD in the
+## left and worked with the right (that right arm is what the modifier
+## animates); a shawm is held up to the mouth in the right.
+const INSTRUMENT_BONE := {"lute": "handslot.l", "drum": "handslot.l",
+	"shawm": "handslot.r"}
+
 @export var stand := Vector3(8.3, -0.3, 0.0)   ## GreatHall.dragon_rest(), freed
-@export var figure_scale := 0.62               ## a shade under a chess piece
+@export var figure_scale := 0.42               ## players, not giants: well under a piece
 
 var _players: Array[Dictionary] = []
 var _t := 0.0
@@ -96,7 +104,7 @@ func _build_player(i: int, spec: Array) -> void:
 			var lib: AnimationLibrary = pa.call("shared_anims")
 			if lib != null and not player.has_animation_library("kk"):
 				player.add_animation_library("kk", lib)
-		var clip := _first_clip(player, ["kk/Idle", "kk/Idle_B", "kk/Cheer"])
+		var clip := _first_clip(player, ["kk/Idle_A", "kk/Idle_B", "kk/Idle"])
 		if clip != "":
 			var a := player.get_animation(clip)
 			if a != null:
@@ -105,12 +113,14 @@ func _build_player(i: int, spec: Array) -> void:
 			player.play(clip)
 			player.seek(randf() * 2.0, true)
 
-	var inst := _instrument(str(spec[3]))
+	var kind := str(spec[3])
+	var inst := _instrument(kind)
 	if inst != null and skel != null:
-		var bone := skel.find_bone("handslot.r")
+		var bone_name: String = INSTRUMENT_BONE.get(kind, "handslot.r")
+		var bone := skel.find_bone(bone_name)
 		if bone != -1:
 			var att := BoneAttachment3D.new()
-			att.bone_name = "handslot.r"
+			att.bone_name = bone_name
 			skel.add_child(att)
 			att.add_child(inst)
 			# The pack's hand bones carry the rig's own scale; a prop parented
@@ -122,10 +132,94 @@ func _build_player(i: int, spec: Array) -> void:
 	elif inst != null:
 		root.add_child(inst)
 
+	# AND THEY PLAY. The pack ships Idle_A but nothing that looks like music,
+	# so the arms are driven here — same discipline as DragonRig.FlightSway:
+	# a SkeletonModifier3D that runs after the AnimationPlayer and rides on
+	# top of whatever clip is playing.
+	var motion: PlayMotion = null
+	if skel != null:
+		motion = PlayMotion.new()
+		motion.name = "PlayMotion"
+		motion.kind = kind
+		motion.tempo = 2.15                       # one common pulse…
+		motion.phase = float(i) * 0.7             # …struck at their own moment
+		skel.add_child(motion)
+		motion.build(skel)
 	_players.append({
 		"root": root, "phase": float(i) * 2.1,
 		"rate": 1.6 + 0.23 * float(i),      # each keeps their own time
+		"motion": motion,
 	})
+
+
+## THE PLAYING ARM. Post-multiplies the clip's pose, so an idling body keeps
+## its weight-shift and breathing while the working limb does the music.
+## Angles are small: the read comes from the RHYTHM being visible at fifteen
+## metres, not from the throw of the joint.
+class PlayMotion:
+	extends SkeletonModifier3D
+
+	var kind := "lute"
+	var tempo := 2.1          ## beats per second
+	var phase := 0.0
+	var weight := 1.0
+
+	var _upper_r := -1
+	var _lower_r := -1
+	var _upper_l := -1
+	var _head := -1
+	var _chest := -1
+	var _t := 0.0
+
+	func build(sk: Skeleton3D) -> void:
+		if sk == null:
+			return
+		_upper_r = sk.find_bone("upperarm.r")
+		_lower_r = sk.find_bone("lowerarm.r")
+		_upper_l = sk.find_bone("upperarm.l")
+		_head = sk.find_bone("head")
+		_chest = sk.find_bone("chest")
+
+	func _bend(sk: Skeleton3D, idx: int, e: Vector3) -> void:
+		if idx == -1:
+			return
+		sk.set_bone_pose_rotation(idx, sk.get_bone_pose_rotation(idx)
+			* Quaternion.from_euler(e * weight))
+
+	func _process_modification_with_delta(delta: float) -> void:
+		var sk := get_skeleton()
+		if sk == null or weight <= 0.001:
+			return
+		_t += delta
+		var d := PI / 180.0
+		var beat := _t * tempo * TAU + phase
+		match kind:
+			"lute":
+				# a strum: the forearm sweeps across the body, fast down and
+				# slower back, which is what a stroke actually is
+				var strum := sin(beat)
+				var sharp: float = signf(strum) * pow(absf(strum), 0.6)
+				_bend(sk, _lower_r, Vector3(0.0, 0.0, sharp * 26.0 * d))
+				_bend(sk, _upper_r, Vector3(sharp * 7.0 * d, 0.0, 0.0))
+				_bend(sk, _upper_l, Vector3(0.0, 0.0, 4.0 * d))
+			"drum":
+				# a beat: the whole arm lifts and drops, and the drop is the
+				# fast half — hang time on the lift is the entire read
+				var lift := 0.5 - 0.5 * cos(beat)
+				var hit: float = pow(lift, 0.45)
+				_bend(sk, _upper_r, Vector3(-hit * 34.0 * d, 0.0, 0.0))
+				_bend(sk, _lower_r, Vector3(-hit * 20.0 * d, 0.0, 0.0))
+			_:
+				# a shawm: both hands stay up, the player rocks and the
+				# fingers do what fingers do — sell it with breath, not arms
+				_bend(sk, _upper_r, Vector3(-52.0 * d, 0.0, 0.0))
+				_bend(sk, _lower_r, Vector3(-38.0 * d, 0.0, 0.0))
+				_bend(sk, _upper_l, Vector3(-44.0 * d, 0.0, 0.0))
+				_bend(sk, _chest, Vector3(sin(beat * 0.5) * 2.5 * d, 0.0, 0.0))
+		# everyone nods to the same pulse — that is what makes them a consort
+		_bend(sk, _head, Vector3(sin(beat) * 3.4 * d, sin(beat * 0.5) * 2.0 * d, 0.0))
+		if kind != "shawm":
+			_bend(sk, _chest, Vector3(0.0, 0.0, sin(beat * 0.5) * 2.2 * d))
 
 
 static func _first_clip(player: AnimationPlayer, wanted: Array) -> String:

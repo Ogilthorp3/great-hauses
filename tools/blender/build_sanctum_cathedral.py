@@ -152,6 +152,20 @@ MAT_SPECS = {
     "cathedral_iron":        ((0.085, 0.085, 0.095, 1.0), 0.42, 0.85, None, 0, False),
     "cathedral_glass_sapphire": ((0.08, 0.17, 0.55, 1.0), 0.15, 0.0, (0.16, 0.36, 1.0), 1.7, False),
     "cathedral_glass_amber":    ((0.55, 0.30, 0.08, 1.0), 0.15, 0.0, (1.0, 0.55, 0.12), 1.9, False),
+    ## THE SEVEN. A window each, in the aisle bays where the arcade frames
+    ## them: Father gold, Mother blue, Warrior red, Smith bronze, Maiden
+    ## rose, Crone silver-grey, Stranger violet-black. Emission is kept
+    ## MODEST and the hue held off-white on purpose — the ember rose taught
+    ## this lesson: push a coloured pane past ~2 and every channel clips, and
+    ## seven differently-coloured saints all arrive as the same white square.
+    "cathedral_seven_father":   ((0.62, 0.46, 0.10, 1.0), 0.14, 0.0, (1.0, 0.74, 0.16), 1.5, False),
+    "cathedral_seven_mother":   ((0.12, 0.28, 0.60, 1.0), 0.14, 0.0, (0.24, 0.50, 1.0), 1.5, False),
+    "cathedral_seven_warrior":  ((0.58, 0.10, 0.09, 1.0), 0.14, 0.0, (1.0, 0.20, 0.14), 1.5, False),
+    "cathedral_seven_smith":    ((0.46, 0.26, 0.10, 1.0), 0.14, 0.0, (1.0, 0.52, 0.18), 1.4, False),
+    "cathedral_seven_maiden":   ((0.62, 0.34, 0.42, 1.0), 0.14, 0.0, (1.0, 0.56, 0.66), 1.5, False),
+    "cathedral_seven_crone":    ((0.44, 0.46, 0.48, 1.0), 0.14, 0.0, (0.80, 0.86, 0.92), 1.6, False),
+    "cathedral_seven_stranger": ((0.18, 0.10, 0.24, 1.0), 0.14, 0.0, (0.34, 0.16, 0.48), 1.1, False),
+    "cathedral_lead":           ((0.05, 0.05, 0.06, 1.0), 0.60, 0.30, None, 0, False),
     "cathedral_glass_ember":    ((0.42, 0.09, 0.03, 1.0), 0.15, 0.0, (1.0, 0.20, 0.05), 1.15, False),
     "cathedral_candle":         ((0.96, 0.92, 0.80, 1.0), 0.5, 0.0, (1.0, 0.86, 0.55), 1.2, False),
     "cathedral_flame":          ((1.0, 0.86, 0.45, 1.0), 0.4, 0.0, (1.0, 0.66, 0.24), 9.0, False),
@@ -690,6 +704,115 @@ def build_vault():
                     (0.0, VAULT_APEX - 0.05, EAST_ARCH_Z)], 0.26, 0.30)
 
 
+## THE FAITH OF THE SEVEN (Bert, 2026-08-18: "the cathedral windows should
+## have some vitraux with the religion reference of the seven from GoT").
+##
+## Seven aspects, seven windows, one per aisle bay, and each is read by its
+## EMBLEM rather than by a face: at this poly budget a figure is a smudge and
+## a silhouette is unmistakable. Father the scales, Mother the chalice,
+## Warrior the sword, Smith the hammer, Maiden the star, Crone the lantern,
+## Stranger the void — a disc of nothing, which is the only honest way to
+## draw him.
+##
+## Each window is a coloured pane, a seven-pointed star traced in lead behind
+## the emblem (the sigil of the Faith itself), and the emblem in lead over
+## the top. The lead is what makes glass read as glass instead of as a lit
+## rectangle.
+SEVEN = [
+    ("father", "scales"), ("mother", "chalice"), ("warrior", "sword"),
+    ("smith", "hammer"), ("maiden", "star"), ("crone", "lantern"),
+    ("stranger", "void"),
+]
+
+
+def seven_window(origin, lateral, normal, sill, top, half_w, aspect, emblem):
+    """One vitrail: pane + seven-pointed star + emblem, on the wall plane
+    given by `origin`/`lateral`/`normal` (godot space, as Panel uses)."""
+    glass = bucket("cathedral_seven_" + aspect)
+    lead = bucket("cathedral_lead")
+    o = Vector(origin)
+    lat = Vector(lateral).normalized()
+    up = Vector((0.0, 1.0, 0.0))
+    n = Vector(normal).normalized()
+
+    def P(u, v, w=0.0):
+        q = o + lat * u + up * v + n * w
+        return (q.x, q.y, q.z)
+
+    mid = (sill + top) * 0.5
+    # the pane, arched at the head
+    curve = [(u, top - half_w + vv) for (u, vv) in arch_pts(half_w * 2.0, half_w, 7)]
+    outline = [(-half_w, sill)] + curve + [(half_w, sill)]
+    glass_fan(glass, [P(u, v, 0.0) for (u, v) in outline])
+
+    # the seven-pointed star of the Faith, traced in lead over the glass
+    star_r = half_w * 0.62
+    cy = mid + half_w * 0.25
+    pts = []
+    for k in range(8):
+        a = math.pi / 2.0 + 2.0 * math.pi * ((k * 3) % 7) / 7.0
+        pts.append(P(star_r * math.cos(a), cy + star_r * math.sin(a), 0.06))
+    sweep_box(lead, pts, 0.030, 0.030)
+
+    # …and the emblem, also in lead, hanging below the star
+    ey = mid - half_w * 0.45
+    if emblem == "sword":
+        sweep_box(lead, [P(0.0, ey - half_w * 0.55, 0.07),
+                         P(0.0, ey + half_w * 0.75, 0.07)], 0.05, 0.05)
+        sweep_box(lead, [P(-half_w * 0.34, ey + half_w * 0.42, 0.07),
+                         P(half_w * 0.34, ey + half_w * 0.42, 0.07)], 0.045, 0.045)
+    elif emblem == "hammer":
+        sweep_box(lead, [P(0.0, ey - half_w * 0.55, 0.07),
+                         P(0.0, ey + half_w * 0.45, 0.07)], 0.05, 0.05)
+        sweep_box(lead, [P(-half_w * 0.32, ey + half_w * 0.52, 0.07),
+                         P(half_w * 0.32, ey + half_w * 0.52, 0.07)], 0.10, 0.09)
+    elif emblem == "scales":
+        sweep_box(lead, [P(0.0, ey, 0.07), P(0.0, ey + half_w * 0.72, 0.07)],
+                  0.045, 0.045)
+        sweep_box(lead, [P(-half_w * 0.46, ey + half_w * 0.62, 0.07),
+                         P(half_w * 0.46, ey + half_w * 0.62, 0.07)], 0.04, 0.04)
+        for sxx in (-1, 1):
+            sweep_box(lead, [P(sxx * half_w * 0.46, ey + half_w * 0.62, 0.07),
+                             P(sxx * half_w * 0.46, ey + half_w * 0.30, 0.07)],
+                      0.03, 0.03)
+            sweep_box(lead, [P(sxx * half_w * 0.62, ey + half_w * 0.30, 0.07),
+                             P(sxx * half_w * 0.30, ey + half_w * 0.30, 0.07)],
+                      0.035, 0.035)
+    elif emblem == "chalice":
+        sweep_box(lead, [P(-half_w * 0.30, ey + half_w * 0.55, 0.07),
+                         P(half_w * 0.30, ey + half_w * 0.55, 0.07)], 0.04, 0.04)
+        for sxx in (-1, 1):
+            sweep_box(lead, [P(sxx * half_w * 0.30, ey + half_w * 0.55, 0.07),
+                             P(sxx * half_w * 0.10, ey + half_w * 0.05, 0.07)],
+                      0.035, 0.035)
+        sweep_box(lead, [P(0.0, ey + half_w * 0.05, 0.07),
+                         P(0.0, ey - half_w * 0.35, 0.07)], 0.04, 0.04)
+        sweep_box(lead, [P(-half_w * 0.26, ey - half_w * 0.38, 0.07),
+                         P(half_w * 0.26, ey - half_w * 0.38, 0.07)], 0.045, 0.04)
+    elif emblem == "star":
+        for k in range(6):
+            a = 2.0 * math.pi * k / 6.0
+            sweep_box(lead, [P(0.0, ey + half_w * 0.10, 0.07),
+                             P(half_w * 0.46 * math.cos(a),
+                               ey + half_w * 0.10 + half_w * 0.46 * math.sin(a),
+                               0.07)], 0.03, 0.03)
+    elif emblem == "lantern":
+        for vv in (-0.30, 0.42):
+            sweep_box(lead, [P(-half_w * 0.28, ey + half_w * vv, 0.07),
+                             P(half_w * 0.28, ey + half_w * vv, 0.07)], 0.045, 0.04)
+        for sxx in (-1, 1):
+            sweep_box(lead, [P(sxx * half_w * 0.28, ey - half_w * 0.30, 0.07),
+                             P(sxx * half_w * 0.28, ey + half_w * 0.42, 0.07)],
+                      0.035, 0.035)
+        sweep_box(lead, [P(0.0, ey + half_w * 0.42, 0.07),
+                         P(0.0, ey + half_w * 0.70, 0.07)], 0.03, 0.03)
+    else:   # the Stranger: a ring around nothing
+        ring = [P(half_w * 0.42 * math.cos(2 * math.pi * k / 16),
+                  ey + half_w * 0.10 + half_w * 0.42 * math.sin(2 * math.pi * k / 16),
+                  0.07) for k in range(17)]
+        sweep_box(lead, ring, 0.035, 0.035)
+
+
 def build_aisles():
     light = bucket("cathedral_stone_light")
     mid = bucket("cathedral_stone_mid")
@@ -709,9 +832,15 @@ def build_aisles():
             pan.arch_wall(0.0, span, 4.2 - FLOOR_TOP, 9.6 - FLOOR_TOP,
                           span * 1.25, -w / 2, w / 2, 0.0,
                           AISLE_WALL_TOP - FLOOR_TOP)
-            arch_pane(amb, (sx * (AISLE_X - 0.05), FLOOR_TOP, zc), (0, 0, 1),
-                      0.0, span, 4.2 - FLOOR_TOP, 9.6 - FLOOR_TOP,
-                      span * 1.25)
+            # THE SEVEN live here — one aspect per aisle bay, walking east
+            # along the south aisle and back along the north, so a player
+            # orbiting the hall meets all seven.
+            idx = (b if sx < 0 else len(BAY_EDGES) - 2 - b) % len(SEVEN)
+            aspect, emblem = SEVEN[idx]
+            seven_window((sx * (AISLE_X - 0.08), FLOOR_TOP, zc), (0, 0, 1),
+                         (n_out[0], 0.0, n_out[2]),
+                         4.2 - FLOOR_TOP, 11.2 - FLOOR_TOP, span * 0.5,
+                         aspect, emblem)
         # lean-to roof from the aisle wall up to the clerestory sill
         for (xa, ya, xb, yb) in [(sx * (AISLE_X + 0.7), AISLE_WALL_TOP + 0.4,
                                   sx * (NAVE_X + 0.2), CLER_SILL - 0.3)]:

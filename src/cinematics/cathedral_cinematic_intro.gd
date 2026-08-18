@@ -280,7 +280,11 @@ var _snow: GPUParticles3D = null
 var _world_env: WorldEnvironment = null
 var _hall_env: Environment = null
 var _night_env: Environment = null
+var _thread_env: Environment = null    # the cross-fade's own copy
 var _hall_sun: DirectionalLight3D = null
+var _sun_energy := 1.1                 # the hall Sun's own settings, restored
+var _sun_shadow := 0.8
+var _cross := -1.0                     # 0..1 while the threshold is crossing
 
 var _ui_layer: CanvasLayer = null
 var _top_bar: ColorRect = null
@@ -367,8 +371,13 @@ func _build_night_sky() -> void:
 		_night_env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 		_night_env.ambient_light_color = Color(0.30, 0.38, 0.58)
 		_night_env.ambient_light_energy = 0.28
-		_night_env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
-		_night_env.tonemap_exposure = 1.0
+		# THE SAME CURVE THE HALL USES. A transfer curve may not change in
+		# the middle of one continuous camera move — that is the part of a
+		# grade change the eye cannot be talked out of seeing. The night is
+		# graded with scalars (ambient, glow) against the hall's own
+		# tonemapper instead.
+		_night_env.tonemap_mode = _hall_env.tonemap_mode
+		_night_env.tonemap_exposure = _hall_env.tonemap_exposure
 		_night_env.glow_enabled = true
 		_night_env.glow_intensity = 0.45
 		_night_env.glow_bloom = 0.08
@@ -380,6 +389,8 @@ func _build_night_sky() -> void:
 	# budget. The moon replaces the Sun for the exterior, never joins it.
 	_hall_sun = get_parent().get_node_or_null("Sun")
 	if _hall_sun != null:
+		_sun_energy = _hall_sun.light_energy
+		_sun_shadow = _hall_sun.shadow_opacity
 		_hall_sun.visible = false
 	_moon_light = DirectionalLight3D.new()
 	_moon_light.name = "Moonlight"
@@ -451,22 +462,76 @@ func _build_night_sky() -> void:
 	_snow.emitting = true
 
 
+## Crossing the threshold used to SNAP six things on one frame — the
+## environment pointer (and with it glow, fog, ambient and the tonemapper),
+## the moon off, the hall Sun on at full strength with its shadow, the sky
+## off, the glow on. Bert: "when the dragon comes inside, the lighting change
+## weirdly." It did, and an art audit found the same beat from six separate
+## angles: the frame before this fires is the best in the reel.
+##
+## Now the threshold ARMS a cross-fade instead. `_thread_env` is a copy of the
+## night grade (so the swap frame itself is identical), and `_cross_fade()`
+## walks its scalars — ambient, glow, fog, exposure, background — toward the
+## hall's values while the two directionals trade energy. The shared
+## `_hall_env` is never mutated: at the end the pointer is assigned, once,
+## when every value already matches.
+const CROSS_SEC := 1.1
+
+
 func _enter_interior() -> void:
 	if _inside:
 		return
 	_inside = true
-	if _world_env != null and _hall_env != null:
-		_world_env.environment = _hall_env
-	if _moon_light != null:
-		_moon_light.visible = false
+	if _world_env != null and _hall_env != null and _night_env != null:
+		_thread_env = _night_env.duplicate()
+		_world_env.environment = _thread_env
+	_cross = 0.0
 	if _hall_sun != null:
+		_hall_sun.light_energy = 0.0      # comes UP over the fade
+		_hall_sun.shadow_opacity = 0.0    # …and so does the dragon's shadow
 		_hall_sun.visible = true
-	if _sky_rig != null:
-		_sky_rig.visible = false
 	if _snow != null:
 		_snow.emitting = false
 	if _glow != null:
 		_glow.visible = true
+		_glow.light_energy = 0.0
+
+
+## One step of the threshold cross-fade. Everything here is a SCALAR lerp:
+## nothing toggles, because a toggle is what the eye reads as "weird".
+func _cross_fade(delta: float) -> void:
+	if _cross < 0.0 or _thread_env == null or _hall_env == null:
+		return
+	_cross = clampf(_cross + delta / CROSS_SEC, 0.0, 1.0)
+	var u := ease(_cross, 0.6)
+	_thread_env.background_color = _night_env.background_color.lerp(
+		_hall_env.background_color, u)
+	_thread_env.ambient_light_color = _night_env.ambient_light_color.lerp(
+		_hall_env.ambient_light_color, u)
+	_thread_env.ambient_light_energy = lerpf(_night_env.ambient_light_energy,
+		_hall_env.ambient_light_energy, u)
+	_thread_env.tonemap_exposure = lerpf(_night_env.tonemap_exposure,
+		_hall_env.tonemap_exposure, u)
+	# glow and fog fade OUT to the hall's "off" rather than being switched off
+	_thread_env.glow_intensity = lerpf(_night_env.glow_intensity, 0.0, u)
+	_thread_env.fog_density = lerpf(_night_env.fog_density, 0.0, u)
+	if _moon_light != null:
+		_moon_light.light_energy = lerpf(1.9, 0.0, u)
+		if u >= 1.0:
+			_moon_light.visible = false
+	if _hall_sun != null:
+		_hall_sun.light_energy = lerpf(0.0, _sun_energy, u)
+		_hall_sun.shadow_opacity = lerpf(0.0, _sun_shadow, u)
+	if _glow != null:
+		_glow.light_energy = lerpf(0.0, 1.15, u)
+	if _sky_rig != null and u >= 1.0:
+		# only once the wall is unambiguously between us and it
+		_sky_rig.visible = false
+	if u >= 1.0:
+		# every value already matches: the pointer swap is invisible, and the
+		# shared hall Environment was never written to.
+		_world_env.environment = _hall_env
+		_cross = -1.0
 
 
 func _build_cinematic_ui() -> void:
@@ -787,6 +852,7 @@ func _process(delta: float) -> void:
 	# and swapping on the beast blacked out the sky while we were still in it.
 	if not _inside and _cam.global_position.z > -25.6:
 		_enter_interior()
+	_cross_fade(delta)
 
 	# ── UI beats ──
 	if _location_card != null:
@@ -907,7 +973,10 @@ func _finish_cinematic() -> void:
 	if _world_env != null and _hall_env != null:
 		_world_env.environment = _hall_env
 	if _hall_sun != null:
+		# whatever the fade had reached, the hall gets its own Sun back
 		_hall_sun.visible = true
+		_hall_sun.light_energy = _sun_energy
+		_hall_sun.shadow_opacity = _sun_shadow
 	if _moon_light != null:
 		_moon_light.visible = false
 	if _sky_rig != null:
