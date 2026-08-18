@@ -76,6 +76,13 @@ func _unhandled_input(event: InputEvent) -> void:
 	# to move the camera would make the game unplayable to fix the camera.
 	elif event is InputEventScreenTouch:
 		if event.pressed:
+			# A finger we already think is DOWN pressing again, or a third
+			# joining, means a release went missing — a Control swallowed it,
+			# or the app lost focus mid-gesture. Phantom fingers are worse
+			# than a dropped gesture: they make a ONE-finger drag orbit the
+			# board while the player is trying to play. Flush and start over.
+			if _touches.has(event.index) or _touches.size() >= 2:
+				_touches.clear()
 			_touches[event.index] = event.position
 		else:
 			_touches.erase(event.index)
