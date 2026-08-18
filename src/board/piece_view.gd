@@ -607,10 +607,31 @@ func play_capture(victim: PieceView) -> void:
 			else:
 				await _kill_stab(victim)
 
-	await play_victory_flourish()
+	await _victory_stillness()
 
 
-## Celebratory victory flourish after landing a capture (Dejarik HoloChess battle style)
+## THE STILLNESS (2026-08-17). A dramatic kill does not end in a bounce: it
+## ends with the survivor standing over the body, breathing. A held beat —
+## the guard comes down into a half-speed idle breath — before the director's
+## ramp-up hands the board back; the survivor's face-rest and the camera's
+## return wrap it in another second of calm. Wall clock, so the duel's
+## slow-mo cannot stretch the hold; 0.45 s keeps the slowest kill variant
+## inside test_kill_styles' 3.6 s choreography ceiling. The arcade bounces
+## live on in play_victory_flourish, which the dev console's showcase gallery
+## still calls; a real capture no longer does (kill audit, 2026-08-17: a
+## squash-stretching watchtower after a crush read as a rubber toy).
+func _victory_stillness() -> void:
+	if _anim != null:
+		_anim.play(ANIM_IDLE, 0.5)   # slow blend: the weapon lowers, no cut
+		_anim.speed_scale = 0.45     # breath, not fidget
+	await _beat_wall(0.45)
+	if _anim != null:
+		_anim.speed_scale = 1.0
+
+
+## Celebratory victory flourish (Dejarik HoloChess battle style) — the ARCADE
+## path only: the dev console's showcase gallery (game.test_piece_animation).
+## Real captures end in _victory_stillness instead.
 func play_victory_flourish() -> void:
 	var base_pos := position
 	match piece_type:
@@ -1083,7 +1104,7 @@ func _kill_charge_royal(victim: PieceView) -> void:
 	if _anim != null:
 		_anim.play(ANIM_THROW, 0.04)
 		_anim.speed_scale = 2.0
-	var impact := _mark_off(victim, MOUNTED_STAND_OFF * 0.95)
+	var impact := _mark_off(victim, MOUNTED_STAND_OFF)
 	var charge := create_tween()
 	charge.tween_property(self, "position", impact, 0.28).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 	await charge.finished
@@ -1155,19 +1176,27 @@ func _kill_charge_spellbreaker(victim: PieceView) -> void:
 
 
 ## QUEEN vs KING — "The Kingslayer / Red Wedding"
+## Rebuilt 2026-08-17: the vanish stays, the cartoon does not. She reappears
+## BEHIND the king — past him on the duel line, at the measured STAND_OFF
+## (0.42 in FRONT of his face was the interpenetration defect the STAND_OFF
+## block documents, resurrected on the game's most important kill: audit
+## frame 25_queen_vs_king_slayer — two heads jammed into one silhouette).
+## The reappear is a cubic ease, not a TRANS_BOUNCE: menace, not rubber.
 func _kill_kingslayer(victim: PieceView) -> void:
 	var dir := _flat_dir_to(victim)
 	var home := position
-	# Shadow vanish
+	# Shadow slip
 	var tw_fade := create_tween()
-	tw_fade.tween_property(self, "scale", Vector3(0.1, 1.4, 0.1), 0.12).set_trans(Tween.TRANS_QUAD)
+	tw_fade.tween_property(self, "scale", Vector3(0.06, 1.25, 0.06), 0.10) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 	await tw_fade.finished
-	# Reappear behind the king
-	var behind := victim.position - dir * 0.42
-	position = behind
+	# ...and she is already behind him: BEYOND the king, a full stand-off out.
+	position = Vector3(victim.position.x + dir.x * STAND_OFF, position.y,
+		victim.position.z + dir.z * STAND_OFF)
 	await _face(victim.position - position)
 	var tw_appear := create_tween()
-	tw_appear.tween_property(self, "scale", Vector3.ONE, 0.14).set_trans(Tween.TRANS_BOUNCE)
+	tw_appear.tween_property(self, "scale", Vector3.ONE, 0.12) \
+		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 	await tw_appear.finished
 	if _anim != null:
 		_anim.play(ANIM_THROW, 0.04)
@@ -1182,13 +1211,18 @@ func _kill_kingslayer(victim: PieceView) -> void:
 
 
 ## QUEEN vs QUEEN — "Dance of the Queens"
+## The double pirouette is gone (2026-08-17): a duellist who spins twice on
+## her way in is a figure skater. The dance is the DASH — a hard low closing
+## step to the measured stand-off, blade already moving.
 func _kill_queen_dance(victim: PieceView) -> void:
 	var dir := _flat_dir_to(victim)
 	var home := position
-	var mark := _mark_off(victim, STAND_OFF * 0.8)
-	var dash := create_tween().set_parallel(true)
+	var mark := _mark_off(victim, STAND_OFF)
+	if _anim != null:
+		_anim.play(ANIM_THROW, 0.05)
+		_anim.speed_scale = 1.8
+	var dash := create_tween()
 	dash.tween_property(self, "position", mark, 0.2).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	dash.tween_property(self, "rotation:y", rotation.y + TAU * 2.0, 0.35).set_trans(Tween.TRANS_CUBIC)
 	await dash.finished
 	_strike_flash(victim.global_position + Vector3.UP * 0.65, {"height": 0.6, "scale": 1.3, "life": 0.45})
 	await victim.die(DEATH_BLADE)
@@ -1199,33 +1233,48 @@ func _kill_queen_dance(victim: PieceView) -> void:
 
 
 ## BISHOP vs KING — "Apocalyptic Judgement"
+## Rebuilt 2026-08-17. The shipped cut measured 13.87 s wall and blew the 8 s
+## failsafe (audit): its SCALED tweens dilate 5-8x under the royal tier's deep
+## slow-mo, and the spinning levitation read as pixar, not judgement. The king
+## is now HELD, not spun — a short force-lift — the bolt takes him mid-air,
+## and the hold DROPS him back to the stone before he dies, so the corpse
+## falls from the ground it lands on (the old cut left position:y raised and
+## the death played 0.45 above the floor).
 func _kill_apocalyptic_judgement(victim: PieceView) -> void:
 	var dir := _flat_dir_to(victim)
 	var home := position
 	var give := _ranged_give_ground(victim)
 	var stand := home - dir * give
+	var floor_y := victim.position.y
 	var step := create_tween()
-	step.tween_property(self, "position", stand, 0.2).set_trans(Tween.TRANS_SINE)
+	step.tween_property(self, "position", stand, 0.16).set_trans(Tween.TRANS_SINE)
 	_prepare_bolt(_flat_gap_to(victim) - give)
 	if _anim != null:
 		_anim.play(ANIM_THROW, 0.05)
 		_anim.speed_scale = 0.9
 	await step.finished
-	# Levitate the king into the judgment field
-	var lev := create_tween().set_parallel(true)
-	lev.tween_property(victim, "position:y", victim.position.y + 0.45, 0.3).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	lev.tween_property(victim, "rotation:y", victim.rotation.y + PI * 2.0, 0.5)
-	await lev.finished
+	# THE HOLD: lifted, rigid, no rotation.
+	var lift := create_tween()
+	lift.tween_property(victim, "position:y", floor_y + 0.38, 0.24) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	await lift.finished
 	var chest := victim.global_position + Vector3.UP * 0.6
 	_fire_bolt(chest, 0.55)
 	_strike_flash(victim.global_position, {"height": 1.5, "scale": 2.2, "life": 0.6})
-	await _beat_wall(0.25)
+	await _beat_wall(0.22)
+	# THE DROP: judgement rendered, the hold releases.
+	if is_instance_valid(victim):
+		var drop := create_tween()
+		drop.tween_property(victim, "position:y", floor_y, 0.09) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+		await drop.finished
+		_dust_puff(victim.global_position, 20, 0.5)
 	await victim.die(DEATH_BURN)
 	_stop_bolt()
 	_settle_attacker()
 	if give > 0.01:
 		var ret := create_tween()
-		ret.tween_property(self, "position", home, 0.26).set_trans(Tween.TRANS_SINE)
+		ret.tween_property(self, "position", home, 0.2).set_trans(Tween.TRANS_SINE)
 		await ret.finished
 
 
@@ -1251,7 +1300,7 @@ func _kill_cataclysm_fracture(victim: PieceView) -> void:
 func _kill_clash_of_kings(victim: PieceView) -> void:
 	var dir := _flat_dir_to(victim)
 	var home := position
-	var mark := _mark_off(victim, STAND_OFF * 0.85)
+	var mark := _mark_off(victim, STAND_OFF)
 	var advance := create_tween()
 	advance.tween_property(self, "position", mark, 0.28).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	if _anim != null:
@@ -1307,8 +1356,9 @@ func _kill_portcullis_slam(victim: PieceView) -> void:
 func _kill_david_vs_goliath(victim: PieceView) -> void:
 	var dir := _flat_dir_to(victim)
 	var home := position
-	var mark := _mark_off(victim, STAND_OFF * 0.65)
-	# Low heroic slide under the greatsword
+	var mark := _mark_off(victim, STAND_OFF)
+	# Low heroic slide under the greatsword — the DIP carries the read; the
+	# distance respects the measured two-figures floor.
 	var slide := create_tween().set_parallel(true)
 	slide.tween_property(self, "position", mark, 0.22).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	slide.tween_property(self, "position:y", position.y - 0.08, 0.22)

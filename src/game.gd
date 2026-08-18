@@ -541,7 +541,36 @@ func _ready() -> void:
 			var intro := CathedralCinematicIntroScript.new()
 			intro.name = "CathedralCinematicIntro"
 			add_child(intro)
+			# One wyrm: the fly-in's dragon IS the spectator the player will
+			# watch all match — hide the perched one until the cinematic
+			# lands its twin on the gallery, then swap in the same frame.
+			if spectator != null:
+				spectator.visible = false
+			# The fly-in is a cinematic like any other: chrome out (same
+			# contract the duels and the ashfall use), gamification chip too.
+			_chrome_for_cinematic(true)
+			var arcade_chip := func(shown: bool) -> void:
+				if _holochess != null and is_instance_valid(_holochess):
+					var layer: Node = _holochess.get_node_or_null("HoloChessArcadeLayer")
+					if layer != null:
+						layer.visible = shown
+			arcade_chip.call(false)
+			intro.intro_completed.connect(func() -> void:
+				if spectator != null and is_instance_valid(spectator):
+					spectator.visible = true
+				_chrome_for_cinematic(false)
+				arcade_chip.call(true)
+				if is_instance_valid(intro):
+					intro.queue_free())
 			intro.start_cinematic(game_cam)
+			# Frame-capture harness for the fly-in — runtime-gated exactly
+			# like --smoke / --dump-tree above; never part of a normal launch.
+			for a in args:
+				if str(a).begins_with("--cine-capture="):
+					var drv: Node = load("res://tools/cine_capture_driver.gd").new()
+					drv.name = "CineCaptureDriver"
+					drv.set("out_dir", str(a).substr(15))
+					add_child(drv)
 	if net == null and state.turn != player_color and not game_over:
 		_kick_ai_opening()
 	_lt("ready-exit")
@@ -595,7 +624,15 @@ func _setup_spectator() -> void:
 	var hall: GreatHall = get_node_or_null("GreatHall")
 	if hall != null:
 		spectator.perch_position = hall.spectator_perch()
-		if hall.has_method("dragon_rest"):
+		# THE VIGIL (2026-08-17): the witness watches from the Wyrm's Gallery
+		# over the apse arch — awake, coals banked, head tracking the play —
+		# instead of sleeping on the hall floor. The fly-in cinematic lands
+		# the same silhouette on the same stone, then hands off here.
+		if hall.has_method("wyrm_gallery_rest"):
+			spectator.vigil = true
+			spectator.rest_position = hall.wyrm_gallery_rest()
+			spectator.rest_yaw = PI   # face the board
+		elif hall.has_method("dragon_rest"):
 			spectator.rest_position = hall.dragon_rest()
 		# The ceremony caption may never land on the throne or on the champion
 		# standing at its foot — it slides around them (CineCaption).
@@ -1250,11 +1287,14 @@ func _animate_move(move, mover_is_ember: bool, moment_info: Dictionary = {}) -> 
 			# now running under the director's time curve, moments governor, and battle cam.
 			var d_meta := _duel_meta(mover_is_ember)
 			d_meta.merge(moment_info)
+			# Read BEFORE the duel: play_duel frees the victim, and a freed
+			# object's piece_type is a use-after-free (e2e duel gate red).
+			var victim_type_str := str(victim.piece_type)
 			await duel_director.play_duel(mover, victim, d_meta,
 				func(): await mover.play_capture(victim))
 			if _holochess != null and is_instance_valid(_holochess):
 				var tier_val: int = d_meta.get("tier", 0)
-				_holochess.record_capture(tier_val, str(mover.piece_type), str(victim.piece_type), target)
+				_holochess.record_capture(tier_val, str(mover.piece_type), victim_type_str, target)
 			if spectator != null and is_instance_valid(spectator):
 				spectator.react_capture(sq_of(move.captured_square))  # flinch, self-rate-limited
 	await mover.move_to(target, _walk_time(mover.position, target))

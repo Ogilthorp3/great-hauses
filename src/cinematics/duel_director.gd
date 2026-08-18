@@ -108,6 +108,9 @@ var _last_tick := 0
 
 var _caption_layer: CanvasLayer
 var _caption: Label
+var _letterbox_layer: CanvasLayer
+var _lb_top: ColorRect
+var _lb_bottom: ColorRect
 var _caption_fade := 0        # generation token for the wall-clock fades
 ## World points the caption plate must not cover (see CineCaption). The
 ## championship tableau fills this with the crowned king on the dais — until
@@ -129,6 +132,7 @@ func _ready() -> void:
 	add_child(_cam)
 	_cam.current = false   # never steal the viewport on entry
 	_build_caption()
+	_build_letterbox()
 	_load_lines()
 
 
@@ -595,6 +599,9 @@ func _restore_presentation() -> void:
 	_shake_target = 0.0
 	_shake = 0.0
 	_orbiting = false
+	if _letterbox_layer != null:
+		_letterbox_layer.visible = false
+		_letterbox_set(0.0)
 	_return_the_light()
 	for pr in _props:
 		if is_instance_valid(pr):
@@ -827,8 +834,24 @@ const FRAME_SAFETY := 1.16
 const FIGHTER_TOP := [0.95, 1.24, 1.52, 1.18, 1.40, 1.58]
 
 
-## Swoop from current camera using the Artistic Camera Judge to select
-## the most dramatic cinematic angle (Heroic Dutch, OTS, Combat Rail, Impending Doom, Arcane).
+## THE ARTISTIC JUDGE, REBUILT ON THE FIT (2026-08-17). The first Judge chose
+## between five FIXED offsets with randf() jitter and per-candidate lenses.
+## Measured on rendered frames (kill audit, 2026-08-17) that broke all three
+## guarantees the 2026-08-09 pass had measured in: containment (the rook's
+## "Elevated Arcane" parked the lens where the tower fully hid the crushed
+## man; the knight's charge happened off-screen), the ranged 0.40
+## line-fraction (the queen's four-square shot filmed the back of her own
+## head), and the e2e gate's "settled at the rank's own DUEL_FRAMES fov"
+## (per-candidate lenses meant the framing watcher never sampled at all).
+##
+## Candidates are now DIRECTIONS, not positions: every one is erected at the
+## _duel_fit distance from the fitted focus and shoots through the rank's own
+## DUEL_FRAMES lens, so any candidate that wins contains both fighters BY
+## CONSTRUCTION (the fitted bounding sphere fits the frustum from every
+## direction at that distance) and the e2e gate samples every duel again.
+## Style survives as direction, height and dutch roll. Scoring is DETERMINISTIC
+## — seeded off the two squares — so the same duel films identically on both
+## ends of a head-to-head, the same property the pinned kill_variant protects.
 func _cam_enter_artistic_duel(attacker: Node3D, victim: Node3D, seq: int, tier: int = 0) -> void:
 	if not _cam_take_viewport():
 		return
@@ -836,99 +859,102 @@ func _cam_enter_artistic_duel(attacker: Node3D, victim: Node3D, seq: int, tier: 
 	var v := victim.global_position if is_instance_valid(victim) else a + Vector3.FORWARD
 	var a_type := _fighter_type(attacker)
 	var v_type := _fighter_type(victim)
+	var spec: Array = DUEL_FRAMES.get(a_type, DUEL_FRAMES[0])
+	var standoff := float(spec[0])
+	var height := float(spec[1])
+	var fov := float(spec[2])
+	var reach := float(spec[3])
 
 	var axis := v - a
 	axis.y = 0.0
 	axis = axis.normalized() if axis.length() > 0.01 else Vector3.FORWARD
 	var side := axis.cross(Vector3.UP).normalized()
-	var mid := (a + v) * 0.5 + Vector3.UP * 0.45
+	# Stay on the side the gameplay camera already watches from — a duel never
+	# cuts across the player's line.
+	if side.dot(_cam_base.origin - (a + v) * 0.5) < 0.0:
+		side = -side
 	var top_h := maxf(_fighter_top(attacker), _fighter_top(victim))
+	var fit := _duel_fit(a, v, axis, reach, top_h, fov)
+	var focus: Vector3 = fit["focus"]
+	var back: float = clampf(maxf(float(fit["back"]), standoff), standoff, BACK_MAX)
 
+	var rng := RandomNumberGenerator.new()
+	rng.seed = (int(round(a.x * 4.0)) * 73856093) ^ (int(round(a.z * 4.0)) * 19349663) \
+		^ (int(round(v.x * 4.0)) * 83492791) ^ (int(round(v.z * 4.0)) * 15485863) \
+		^ (a_type * 2971215073) ^ (v_type * 433494437)
+
+	var is_ranged := spec.size() > 4
 	var candidates: Array[Dictionary] = []
-
-	# Candidate 1: HEROIC DUTCH LOW (Game of Thrones Battle Angle)
-	var p_dutch := a - axis * 0.8 + side * 1.6 + Vector3.UP * 0.28
-	candidates.append({
-		"name": "Heroic Dutch Low",
-		"pos": p_dutch,
-		"target": mid + Vector3.UP * 0.25,
-		"fov": 34.0 if tier == 2 else 38.0,
+	if is_ranged:
+		# THE LOOSE — the doctrine shot for arrow and bolt (owner, 2026-08-09):
+		# the lens stands square to the flight at the 0.40 fraction, biased to
+		# the shooter, so the draw is the near large end of the picture and the
+		# far end still holds the man it is aimed at.
+		var frac := float(spec[4])
+		var lo := a - axis * (reach * 0.55)
+		var hi := v + axis * (reach * 0.45)
+		candidates.append({"name": "The Loose",
+			"pos": lo.lerp(hi, frac) + side * back + Vector3.UP * height,
+			"weight": 200.0, "dutch": 0.0})
+	candidates.append({"name": "Duel Line Low",
+		"pos": focus - axis * (back * 0.35) + side * (back * 0.88)
+			+ Vector3.UP * (height * 0.55),
 		"weight": 85.0 if (a_type == 5 or v_type == 5 or a_type == 4) else 70.0,
-		"dutch_roll": deg_to_rad(11.0 if randf() < 0.5 else -11.0)
-	})
+		"dutch": deg_to_rad(9.0) * (1.0 if rng.randf() < 0.5 else -1.0)})
+	candidates.append({"name": "Over The Shoulder",
+		"pos": focus - axis * (back * 0.82) + side * (back * 0.42)
+			+ Vector3.UP * (height + top_h * 0.35),
+		"weight": 95.0 if (v_type == 5 or v_type == 4) and not is_ranged else 60.0,
+		"dutch": deg_to_rad(4.0)})
+	candidates.append({"name": "Combat Rail",
+		# A charge is the run: the rail's claim scales with the rank's reach,
+		# so the knight's gather-and-gallop outbids the royal-victim OTS.
+		"pos": focus + side * back + Vector3.UP * height,
+		"weight": (90.0 + reach * 14.0) if a_type == 2 else (65.0 + reach * 6.0),
+		"dutch": 0.0})
+	candidates.append({"name": "Impending Doom",
+		"pos": focus + axis * (back * 0.80) + side * (back * 0.45)
+			+ Vector3.UP * (height * 0.7),
+		"weight": 88.0 if tier == 2 else 58.0, "dutch": deg_to_rad(-6.0)})
+	candidates.append({"name": "Elevated Judgement",
+		"pos": focus + side * (back * 0.85) - axis * (back * 0.30)
+			+ Vector3.UP * (height + 1.35),
+		"weight": 95.0 if (a_type == 3 or a_type == 1) else 50.0, "dutch": 0.0})
 
-	# Candidate 2: OVER-THE-SHOULDER INTIMATE (Execution anticipation)
-	var p_ots := a - axis * 1.1 + side * 0.45 + Vector3.UP * (top_h * 0.72)
-	candidates.append({
-		"name": "Over The Shoulder",
-		"pos": p_ots,
-		"target": v + Vector3.UP * (_fighter_top(victim) * 0.65),
-		"fov": 32.0 if tier == 2 else 36.0,
-		"weight": 95.0 if (v_type == 5 or v_type == 4) else 75.0,
-		"dutch_roll": deg_to_rad(4.0)
-	})
-
-	# Candidate 3: COMBAT PROFILE RAIL (Tracking battle line)
-	var p_rail := mid + side * 2.2 + Vector3.UP * 0.52
-	candidates.append({
-		"name": "Combat Profile Rail",
-		"pos": p_rail,
-		"target": mid,
-		"fov": 38.0 if tier == 2 else 42.0,
-		"weight": 90.0 if a_type == 2 else 65.0, # Knights love tracking rails!
-		"dutch_roll": 0.0
-	})
-
-	# Candidate 4: REVERSE VICTIM PERSPECTIVE (Mortal Kombat Looming Doom)
-	var p_rev := v + axis * 1.2 - side * 0.55 + Vector3.UP * 0.38
-	candidates.append({
-		"name": "Reverse Impending Doom",
-		"pos": p_rev,
-		"target": a + Vector3.UP * (top_h * 0.65),
-		"fov": 34.0,
-		"weight": 88.0 if tier == 2 else 60.0,
-		"dutch_roll": deg_to_rad(-6.0)
-	})
-
-	# Candidate 5: ELEVATED ARCANE SANCTUM (Bishops and Rooks)
-	var p_arcane := mid + side * 2.4 - axis * 0.9 + Vector3.UP * 1.55
-	candidates.append({
-		"name": "Elevated Arcane",
-		"pos": p_arcane,
-		"target": mid,
-		"fov": 44.0,
-		"weight": 95.0 if (a_type == 3 or a_type == 1) else 50.0,
-		"dutch_roll": 0.0
-	})
-
-	# Artistic Judge scoring pass
-	var best_candidate: Dictionary = candidates[0]
-	var best_score := -9999.0
+	var best: Dictionary = candidates[0]
+	var best_score := -INF
 	var from_cam := _cam_base.origin
-
 	for c in candidates:
-		var score: float = float(c["weight"])
-		var c_pos: Vector3 = c["pos"]
-		var dist: float = from_cam.distance_to(c_pos)
-		score += clampf(20.0 - dist * 1.5, 0.0, 20.0)
-		if c_pos.y < 0.15:
-			score -= 50.0
-		score += randf_range(0.0, 15.0)
+		var pos: Vector3 = c["pos"]
+		pos.y = maxf(pos.y, 0.30)          # never in the flagstones
+		# Containment: direction is the candidate's whole opinion — the
+		# distance is the fit's. Nearer than the fit gets pushed out to it;
+		# farther (The Loose down a long flight) is already contained.
+		var dist := (pos - focus).length()
+		if dist < back and dist > 0.001:
+			pos = focus + (pos - focus) / dist * back
+		c["pos"] = pos
+		var score := float(c["weight"])
+		score += clampf(20.0 - from_cam.distance_to(pos) * 1.5, 0.0, 20.0)
+		# OCCLUSION: a kill whose victim hides directly behind his killer is
+		# not filmed (the rook's own mass hid the crushed man — audit frame
+		# 08_rook_grind). Seven degrees of separation at the lens, or the
+		# candidate is out.
+		var to_a := (a + Vector3.UP * (_fighter_top(attacker) * 0.5) - pos).normalized()
+		var to_v := (v + Vector3.UP * (_fighter_top(victim) * 0.5) - pos).normalized()
+		if to_a.angle_to(to_v) < deg_to_rad(7.0):
+			score -= 500.0
+		score += rng.randf_range(0.0, 15.0)
 		if score > best_score:
 			best_score = score
-			best_candidate = c
+			best = c
 
-	var chosen_pos: Vector3 = best_candidate["pos"]
-	var chosen_target: Vector3 = best_candidate["target"]
-	var chosen_fov: float = float(best_candidate["fov"])
-	var roll: float = float(best_candidate.get("dutch_roll", 0.0))
-
-	var basis := Basis.looking_at(chosen_target - chosen_pos, Vector3.UP)
+	var chosen: Vector3 = best["pos"]
+	var basis := Basis.looking_at(focus - chosen, Vector3.UP)
+	var roll := float(best.get("dutch", 0.0))
 	if absf(roll) > 0.001:
 		basis = basis.rotated(basis.z, roll)
-
-	var target_tf := Transform3D(basis, chosen_pos)
-	await _cam_glide(seq, target_tf, chosen_fov, swoop_wall, 0.35)
+	await _cam_glide(seq, Transform3D(basis, chosen), fov, swoop_wall, 0.35)
 
 
 func _cam_enter_duel(attacker: Node3D, victim: Node3D, seq: int, tier: int = 0) -> void:
@@ -1043,6 +1069,7 @@ func _cam_take_viewport() -> bool:
 	_cam_on = true
 	_shake_target = handheld_amp
 	_last_tick = Time.get_ticks_msec()
+	_letterbox_in(_seq)
 	return true
 
 
@@ -1080,6 +1107,7 @@ func _cam_exit(seq: int) -> void:
 	if not _cam_on:
 		return
 	_shake_target = 0.0
+	_letterbox_out(seq)
 	if _is_xr:
 		await _cam_glide(seq, _prev_xr_transform, 50.0, return_wall, 0.0)
 		_cam_restore()
@@ -1117,6 +1145,56 @@ func _cam_park() -> void:
 	_cam.global_transform = _cam_base   # settle any handheld residue
 	_cam_on = false
 	_prev_cam = null
+
+
+# ── letterbox (the frame that says CINEMA — same 75 px bars as the
+#    cathedral intro, wall-clock animated so slow-mo cannot stretch them) ────
+
+const LETTERBOX_H := 75.0
+
+
+func _build_letterbox() -> void:
+	_letterbox_layer = CanvasLayer.new()
+	_letterbox_layer.name = "CineLetterbox"
+	_letterbox_layer.layer = 89   # under the caption's 90
+	_letterbox_layer.visible = false
+	add_child(_letterbox_layer)
+	_lb_top = ColorRect.new()
+	_lb_top.color = Color.BLACK
+	_lb_top.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	_letterbox_layer.add_child(_lb_top)
+	_lb_bottom = ColorRect.new()
+	_lb_bottom.color = Color.BLACK
+	_lb_bottom.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	_letterbox_layer.add_child(_lb_bottom)
+
+
+func _letterbox_set(h: float) -> void:
+	if _lb_top != null:
+		_lb_top.custom_minimum_size.y = h
+	if _lb_bottom != null:
+		_lb_bottom.custom_minimum_size.y = h
+
+
+## Slide the bars in (concurrent, wall clock). Only when the cine camera owns
+## a real 2D viewport — the visionOS immersive space wears no bars.
+func _letterbox_in(seq: int) -> void:
+	if _is_xr or _letterbox_layer == null:
+		return
+	_letterbox_set(0.0)
+	_letterbox_layer.visible = true
+	_wall_lerp(seq, _letterbox_set, 0.0, LETTERBOX_H, 0.25)
+
+
+## Slide them out alongside the camera's return glide.
+func _letterbox_out(seq: int) -> void:
+	if _letterbox_layer == null or not _letterbox_layer.visible:
+		return
+	var runner := func() -> void:
+		await _wall_lerp(seq, _letterbox_set, LETTERBOX_H, 0.0, 0.25)
+		if _letterbox_layer != null and _seq == seq:
+			_letterbox_layer.visible = false
+	runner.call()
 
 
 # ── caption UI ─────────────────────────────────────────────────────────────

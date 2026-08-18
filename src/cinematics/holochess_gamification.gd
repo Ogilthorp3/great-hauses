@@ -10,6 +10,17 @@ signal holochess_mode_toggled(enabled: bool)
 signal combat_badge_spawned(text: String, world_pos: Vector3, color: Color)
 signal combo_updated(streak: int, title: String)
 
+## Chrome façade. This module is a Node, not a CanvasItem, but integrators
+## reasonably reach for `.visible` to blank the arcade chrome during a
+## cinematic (game.gd's cathedral fly-in does exactly that) — honor it by
+## routing to the badge/HUD layer. The duel-director binding below goes
+## through the same property so the two paths can never fight.
+var visible: bool = true:
+	set(v):
+		visible = v
+		if _badge_layer != null:
+			_badge_layer.visible = v
+
 var is_holochess_active := false
 var combo_streak := 0
 var last_kill_time_ms := 0
@@ -34,6 +45,31 @@ var _hud_streak_label: Label = null
 
 func _ready() -> void:
 	_build_ui()
+	if _badge_layer != null:
+		_badge_layer.visible = visible   # honor a pre-_ready façade write
+	_bind_duel_director()
+
+
+## The arcade chrome leaves the frame when a cinematic owns it — the same
+## contract ISSUES.md #17 set for the glyph rings (audit 2026-08-17: the
+## "BATTLE MOMENTUM" chip burned through all 34 captured duel frames). Wired
+## here rather than in game.gd so the module keeps its own boundary: it finds
+## the sibling DuelDirector itself and listens.
+func _bind_duel_director() -> void:
+	var runner := func() -> void:
+		for _i in 12:   # the director is a sibling built in the same _ready
+			var tree := get_tree()
+			if tree == null:
+				return
+			var dd := tree.root.find_child("DuelDirector", true, false)
+			if dd != null and dd.has_signal("cinematic_started"):
+				dd.cinematic_started.connect(func(_kind: String) -> void:
+					visible = false)
+				dd.cinematic_finished.connect(func(_kind: String) -> void:
+					visible = true)
+				return
+			await tree.process_frame
+	runner.call()
 
 
 func _process(delta: float) -> void:

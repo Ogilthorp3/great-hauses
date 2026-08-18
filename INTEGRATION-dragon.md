@@ -4,6 +4,30 @@ Module delivered 2026-08-08. Per the module boundary it touches **no game
 code**: `game.gd` / `game.tscn` / `duel_director.gd` / `piece_view.gd` are
 unmodified. Everything below is what the integrator wires up.
 
+## THE VIGIL (2026-08-17) — the wyrm takes the gallery
+
+The fly-in cinematic (`cathedral_cinematic_intro.gd`) now lands the witness
+on the cathedral's **Wyrm's Gallery** — the corbelled ledge over the apse
+arch at `GreatHall.wyrm_gallery_rest()` = (0, 12.2, 13.55) — and the
+spectator keeps its vigil THERE for the whole match, awake: `vigil = true`,
+`Perch_Idle` as authored (a standing watch), coals banked at 0.85, head
+tracking the play. Bert's reference art (the beast on the ledge above the
+throne, coals lit, watching the board) is the composition this serves.
+
+With `vigil` on, the slumber coil stays attached at weight 0 so the
+checkmate wake runs the same phase machine — from the ledge it reads as a
+crouch-and-DIVE instead of a floor wake, which is a strictly better beat.
+Reactions play their full clips (`_react` branches on `is_asleep()`, which
+is false at weight 0). The gallery is 9.6 wide precisely so `HitReact`'s
+wings (±4.6 at scale 1.65) clear the side balustrades.
+
+`vigil` defaults to **false**: the floor-sleeper contract below and every
+`tests/test_dragon.gd` assertion are untouched. The WYRM SLEEPS section
+remains the module's own truth; the vigil is an integrator configuration
+(game.gd sets it when the hall provides the gallery anchor). One wyrm:
+game.gd hides the spectator during the fly-in and reveals it the frame the
+cinematic's twin lands on the same stone.
+
 ## THE WYRM SLEEPS (2026-08-09) — rest → stir → wake → burn
 
 The spectator no longer hovers on a perch above the far wall. It **sleeps

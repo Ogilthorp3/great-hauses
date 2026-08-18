@@ -196,6 +196,17 @@ const ASHFALL_LINES: Array[String] = [
 @export var rest_idle_speed := 0.30    ## Perch_Idle, slowed under the coil
 @export var rest_ember_energy := 0.40  ## the throat coals, BANKED
 @export var wake_ember_energy := 2.60  ## …and kindled (emissive only)
+## THE VIGIL (2026-08-17): the wyrm keeps watch AWAKE on a high perch instead
+## of sleeping on the hall floor — the fly-in cinematic lands it on the
+## cathedral's Wyrm's Gallery and it watches the fight from up there (Bert's
+## reference art: the beast on the ledge above the throne, coals lit). With
+## vigil on: no slumber coil, Perch_Idle as authored (a standing watch),
+## reactions play their full clips (`_react` already branches on is_asleep),
+## and at checkmate the wake becomes a crouch-and-dive off the ledge.
+## Default OFF: every floor-sleeper contract and test is untouched.
+@export var vigil := false
+@export var vigil_idle_speed := 0.5
+@export var vigil_ember_energy := 0.85
 ## A stir NEVER uncoils past this. RAISED 0.42 -> 0.62 (2026-08-09) with the
 ## deeper coil: the fold now travels ~220 deg of neck, so 0.42 of it left the
 ## beast half-way between coiled and standing — wings tented flat on the stone
@@ -319,13 +330,15 @@ func _ready() -> void:
 	position = rest_position
 	rotation.y = rest_yaw
 	# THE COIL. Built before the first clip so no frame of the match ever
-	# shows the beast standing to attention.
+	# shows the beast standing to attention. (A vigil keeps the modifier at
+	# weight 0 — attached but dormant, so the checkmate wake path stays one
+	# code path for both postures.)
 	_slumber = rig.attach_slumber(DragonRigScript.slumber_default(), 0.05, 0.55)
-	_set_slumber(1.0)
-	rig.play_loop("Perch_Idle", rest_idle_speed)
+	_set_slumber(0.0 if vigil else 1.0)
+	rig.play_loop("Perch_Idle", vigil_idle_speed if vigil else rest_idle_speed)
 	if rig.anim != null:   # desync from the championship dragon's flap
 		rig.anim.seek(randf() * rig.clip_length("Perch_Idle"))
-	_set_ember(rest_ember_energy)
+	_set_ember(vigil_ember_energy if vigil else rest_ember_energy)
 	caption = CaptionScript.new()
 	caption.name = "AshfallCaption"
 	add_child(caption)
@@ -337,9 +350,9 @@ func _ready() -> void:
 	_end_pos = rest_position
 	_end_yaw = rest_yaw
 	_end_scale = dragon_scale
-	_end_idle_speed = rest_idle_speed
+	_end_idle_speed = vigil_idle_speed if vigil else rest_idle_speed
 	_end_clip = "Perch_Idle"
-	_end_slumber = 1.0
+	_end_slumber = 0.0 if vigil else 1.0
 	_build_gaze()
 	_glance_in = randf_range(glance_min_gap, glance_max_gap)
 
@@ -463,7 +476,8 @@ func _react(clip: String, speed: float, look_pos: Vector3) -> bool:
 	if look_pos.is_finite():
 		_last_move_pos = look_pos
 		_gaze_pulse(look_pos, 0.9, 0.8)
-	_slumber_ramp(stir_slumber_floor, 0.35)
+	if not vigil:
+		_slumber_ramp(stir_slumber_floor, 0.35)
 	_ember_blink()
 	var dur := stir_hold_wall
 	if asleep:
@@ -476,8 +490,10 @@ func _react(clip: String, speed: float, look_pos: Vector3) -> bool:
 		if is_instance_valid(self) and is_inside_tree():
 			_reacting = false
 			if not _ash_active:
-				rig.play_loop("Perch_Idle", rest_idle_speed, 0.5)
-				_slumber_ramp(1.0, 1.1)   # …and settles back
+				rig.play_loop("Perch_Idle",
+					vigil_idle_speed if vigil else rest_idle_speed, 0.5)
+				if not vigil:
+					_slumber_ramp(1.0, 1.1)   # …and settles back
 	runner.call()
 	return true
 

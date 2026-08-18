@@ -4308,23 +4308,29 @@ func _scenario_dragon_live() -> void:
 		await _fail("dragon-glance-idle", "glance target set before any ply")
 		return
 	_pass("dragon-idle-ready (can_react, no glance target yet)")
-	# ── THE SLEEPER, PHOTOGRAPHED FROM THE PLAYER'S OWN SEAT ──
-	# The dragon spends the whole match coiled on the stone beside the board.
-	# This shot is taken BEFORE any cinematic camera exists, so it is the
-	# gameplay camera and nothing else — the only frame that can honestly
-	# answer "does it read as a sleeping animal in the game?".
-	if not bool(spectator.call("is_asleep")):
-		await _fail("dragon-asleep", "the wyrm is not asleep at the board")
+	# ── THE VIGIL, PHOTOGRAPHED FROM THE PLAYER'S OWN SEAT ──
+	# Since 2026-08-17 the wyrm keeps watch AWAKE on the Wyrm's Gallery over
+	# the apse arch (INTEGRATION-dragon.md, THE VIGIL) — the fly-in lands it
+	# there and the spectator holds the perch all match. The contract: vigil
+	# on, not asleep, coil dormant, and the rest anchor on the gallery ledge
+	# above the hall's 11.7 wall crest behind the far wall.
+	if not bool(spectator.get("vigil")):
+		await _fail("dragon-vigil", "spectator.vigil is off — the wyrm should keep watch")
+		return
+	if bool(spectator.call("is_asleep")) \
+			or float(spectator.call("slumber_weight")) > 0.05:
+		await _fail("dragon-vigil-awake", "the watcher is coiled asleep (slumber %.2f)"
+			% float(spectator.call("slumber_weight")))
 		return
 	var rest_pos: Vector3 = spectator.get("rest_position")
-	if rest_pos.y > 0.0 or absf(rest_pos.x) < 4.6:
-		await _fail("dragon-rests-on-the-floor",
-			"rest_position %s is not on the floor beside the board" % str(rest_pos))
+	if rest_pos.y <= 11.7 or rest_pos.z <= 12.0:
+		await _fail("dragon-vigil-gallery",
+			"rest_position %s is not on the gallery over the apse arch" % str(rest_pos))
 		return
-	_pass("dragon-asleep (coiled at %s, slumber %.2f)"
+	_pass("dragon-vigil (keeping watch at %s, slumber %.2f)"
 		% [str(rest_pos), float(spectator.call("slumber_weight"))])
-	await _sleep(1.0)   # let the coil, torches and breathing settle
-	await _shot("dragon_resting")
+	await _sleep(1.0)   # let the perch, torches and breathing settle
+	await _shot("dragon_vigil")
 	var state: Object = game.get("state")
 	if not await _wait_until(func():
 		return game.get("busy") == false and state.turn == false, 15.0):
