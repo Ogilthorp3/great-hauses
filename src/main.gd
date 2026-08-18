@@ -28,6 +28,7 @@ const GAME_SCENE := "res://scenes/game.tscn"
 const SELECT_SCENE: PackedScene = preload("res://scenes/house_select.tscn")
 const SELECT_3D_SCENE: PackedScene = preload("res://scenes/house_select_3d.tscn")
 const OpeningCinematicScript: Script = preload("res://src/cinematics/opening_cinematic.gd")
+const MatchupSplashScript: Script = preload("res://src/ui/matchup_splash.gd")
 const PROBE_FLAGS := ["--smoke", "--dump-tree", "--env-fps", "--env-banner-test", "--skip-select"]
 
 ## Where the last address a player joined is remembered between sessions.
@@ -221,9 +222,36 @@ func _on_selection_complete(house_id: String, opp: Dictionary, chosen_mode: Stri
 	if chosen_mode == "network":
 		return   # the network path seats itself in _on_match_ready
 	Session.apply_selection(house_id, opp, chosen_mode)
-	# Let the "rides to war" banner breathe before the hall doors open.
-	await get_tree().create_timer(0.75).timeout
-	get_tree().change_scene_to_file(GAME_SCENE)
+
+	# Determine rival house
+	var rival_id: String = Session.rival_house()
+	if rival_id.is_empty():
+		var all_houses := HouseRegistry.house_ids()
+		for hid in all_houses:
+			if hid != house_id:
+				rival_id = hid
+				break
+	if rival_id.is_empty():
+		rival_id = "pyre"
+
+	var is_e2e_or_test := _e2e_harness != null
+	if not is_e2e_or_test:
+		for a in OS.get_cmdline_args():
+			if str(a).begins_with("--e2e") or a in PROBE_FLAGS:
+				is_e2e_or_test = true
+				break
+
+	if is_e2e_or_test:
+		get_tree().change_scene_to_file(GAME_SCENE)
+		return
+
+	var splash: CanvasLayer = MatchupSplashScript.new()
+	splash.setup(house_id, rival_id, opp, chosen_mode)
+	get_tree().root.add_child(splash)
+
+	if _select != null:
+		_select.queue_free()
+		_select = null
 
 
 # ── Head-to-head: the Hall's panel wired to the socket ─────────────────────
