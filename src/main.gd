@@ -45,6 +45,7 @@ var _e2e_harness: Node = null
 
 
 func _ready() -> void:
+	RenderingServer.set_default_clear_color(Color(0.02, 0.02, 0.02, 1.0))
 	_install_e2e_harness()   # FIRST: everything below may be under test
 	# visionOS: stand up XR (phase 1) BEFORE any scene is added
 	var _xr_log := FileAccess.open("user://xr_debug.log", FileAccess.WRITE)
@@ -247,7 +248,7 @@ func _on_selection_complete(house_id: String, opp: Dictionary, chosen_mode: Stri
 
 	var splash: CanvasLayer = MatchupSplashScript.new()
 	splash.setup(house_id, rival_id, opp, chosen_mode)
-	get_tree().root.add_child(splash)
+	add_child(splash)
 
 	if _select != null:
 		_select.queue_free()
