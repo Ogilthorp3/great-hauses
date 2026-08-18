@@ -50,15 +50,15 @@ signal intro_completed
 const DragonRigScript := preload("res://src/cinematics/dragon_rig.gd")
 const AdaptiveScaleScript := preload("res://src/ui/adaptive_scale.gd")
 
-const TOTAL := 29.0
-const T_APPROACH := 5.5     # the night establishing ends
-const T_NEEDLE := 11.5      # the circling of the towers ends
-const T_NAVE := 15.5        # the stoop + the threading of the rose ends
-const T_PERCH := 22.0       # the nave run ends
-const T_LAND := 23.2        # Land_Settle begins
-const T_TOUCH := 24.2       # claws on the gallery stone
-const T_ROAR := 24.6
-const T_IDLE := 26.4
+const TOTAL := 30.5
+const T_APPROACH := 5.0     # the night establishing ends
+const T_NEEDLE := 11.5      # the wide bomber turn onto final ends
+const T_NAVE := 18.0        # the long final + the threading ends
+const T_PERCH := 23.5       # the nave run ends
+const T_LAND := 24.7        # Land_Settle begins
+const T_TOUCH := 25.7       # claws on the gallery stone
+const T_ROAR := 26.1
+const T_IDLE := 27.9
 ## The wyrm's own size. Raised from 1.65 (Bert: "the Dragon should be bigger
 ## than that") — at 2.2 its wingspan is ~12 u against a 26.8 u nave, so it
 ## barely fits the church it is flying through, which is the whole point of
@@ -141,23 +141,39 @@ const PATH_NIGHT := [
 ## meant to be. It also rides above the nave ridge cresting (y 39.65) rather
 ## than through it.
 const PATH_APPROACH := [
-	Vector3(-22, 34.5, -40), Vector3(-31, 36.0, -33), Vector3(-32, 38.0, -24),
-	Vector3(-25, 41.5, -16), Vector3(-12, 44.5, -14), Vector3(0, 44.5, -19),
-	Vector3(0, 41, -27)]
+	Vector3(-22, 34.5, -40), Vector3(-30, 34.0, -33),
+	Vector3(-38, 33.0, -40), Vector3(-40, 32.0, -55), Vector3(-33, 31.0, -66),
+	Vector3(-18, 30.3, -71), Vector3(-8, 30.1, -71), Vector3(-2, 30.0, -69),
+	Vector3(0, 30.0, -67.5), Vector3(0, 30.0, -66)]
 ## The pull-up after the oculus clears the ORGAN's centre finial (tip y 20.5
 ## at z -24.8, dead on the axis): at rig scale 2.2 the belly rides ~1.2 under
 ## the root, so the path has to be a good metre higher than the finial, not a
 ## hand's breadth.
 const PATH_NEEDLE := [
-	Vector3(0, 41, -27), Vector3(0, 33, -31.5), Vector3(0, 25.5, -29.5),
-	Vector3(0, 21.4, -27.3), Vector3(0, 20.8, -26.0), Vector3(0, 23.0, -24.4),
-	Vector3(0, 24.2, -20.0), Vector3(0, 22.8, -10.0)]
+	Vector3(0, 30.0, -66), Vector3(0, 28.2, -57), Vector3(0, 26.2, -48),
+	Vector3(0, 24.4, -39), Vector3(0, 23.2, -32), Vector3(0, 22.3, -26.0),
+	Vector3(-0.7, 22.6, -21.0), Vector3(-1.8, 22.6, -15.0),
+	Vector3(-2.6, 22.2, -10.0)]
+## THE NAVE RUN. One long descending curve rather than the hard left it used
+## to open with: the old leg turned 74.9 deg in its first frames because it
+## had to dodge the z -8 chandelier chain the instant it came through the
+## rose. The drift now starts back on the ouverture, so this leg only has to
+## continue it. Body clearance at the chains (x 0, y 15.8 up) is what sets
+## the x offsets; a wing membrane may still sweep a 0.08 u iron rod, which at
+## twenty metres is not a thing anyone can see.
 const PATH_NAVE := [
-	Vector3(0, 22.8, -10.0), Vector3(-6.0, 19.5, -8.0), Vector3(-6.5, 15.0, -3.0),
-	Vector3(-5.0, 11.0, 1.0), Vector3(-1.5, 8.5, 4.5), Vector3(0.5, 7.6, 7.0)]
+	Vector3(-2.6, 22.2, -10.0), Vector3(-4.5, 21.2, -5.5),
+	Vector3(-6.0, 16.5, -0.5), Vector3(-5.0, 12.0, 4.0),
+	Vector3(-2.5, 9.2, 7.0), Vector3(0.5, 9.8, 10.0)]
+## THE FLARE. This one IS a sharp change of direction, and it should be: the
+## gallery sits BEHIND the great hall's own far wall, whose crest is y 11.7,
+## so the wyrm has to climb over that crest and settle down onto the ledge at
+## 12.2 — the belly clears the stone by 0.5 at the z 12 crossing. Birds pitch
+## up hard to land; the smoothness contract in the suite exempts this seam
+## for that reason and that reason only.
 const PATH_PERCH := [
-	Vector3(0.5, 7.6, 7.0), Vector3(1.5, 9.5, 9.8), Vector3(0.5, 13.4, 11.0),
-	Vector3(0.0, 12.9, 12.5), Vector3(0.0, 12.2, 13.55)]
+	Vector3(0.5, 9.8, 10.0), Vector3(1.6, 13.0, 11.6), Vector3(1.2, 14.2, 12.9),
+	Vector3(0.4, 13.0, 13.4), Vector3(0.0, 12.2, 13.55)]
 const PERCH_POS := Vector3(0.0, 12.2, 13.55)
 const LEGS := [PATH_NIGHT, PATH_APPROACH, PATH_NEEDLE, PATH_NAVE, PATH_PERCH]
 
@@ -195,11 +211,12 @@ const BEAT_LIFT := 0.16      ## body rise/fall per wingbeat, in rig scales
 ## wyrm's position at the same instant (the ranges each leg holds are noted).
 const CAM_NIGHT := [Vector3(-46, 6.0, -64), Vector3(-43, 9.0, -60),
 	Vector3(-40, 12.0, -56)]                                     # 96 -> 34 u
-const CAM_APPROACH := [Vector3(-40, 12, -56), Vector3(-48, 20, -46),
-	Vector3(-44, 27, -33), Vector3(-38, 32, -24)]                # 34 -> 26 u
-const CAM_NEEDLE := [Vector3(-38, 32, -24), Vector3(-28, 29, -42),
-	Vector3(-9, 24, -46), Vector3(0, 21.4, -38),
-	Vector3(0, 20.9, -28.5)]                                     # 34 -> 15 u
+const CAM_APPROACH := [Vector3(-40, 12, -56), Vector3(-56, 20, -58),
+	Vector3(-58, 26, -72), Vector3(-40, 28, -86),
+	Vector3(-18, 29, -88)]                                       # 33 -> 28 u
+const CAM_NEEDLE := [Vector3(-18, 29, -88), Vector3(-26, 26, -64),
+	Vector3(-20, 24, -46), Vector3(-13, 22.8, -38),
+	Vector3(-6, 22.4, -34), Vector3(0, 22.1, -31)]               # 28 -> 21 u
 ## …and the lens follows it through the same hole a beat later: this leg
 ## crosses the facade at x 0, y ~20.8 — dead centre of the open oculus, whose
 ## clear radius is 3.0.
@@ -213,7 +230,7 @@ const CAM_NEEDLE := [Vector3(-38, 32, -24), Vector3(-28, 29, -42),
 ## (Key 1 sits a metre off the axis so the organ's centre finial stops
 ## rising through the middle of the reveal — the lens still crosses the
 ## oculus well inside its 3.0 clear radius.)
-const CAM_NAVE := [Vector3(0, 20.9, -28.5), Vector3(1.0, 20.4, -24.0),
+const CAM_NAVE := [Vector3(0, 22.1, -31), Vector3(1.0, 21.4, -24.0),
 	Vector3(1.0, 16.5, -16.5), Vector3(1.6, 12.8, -12.0),
 	Vector3(2.2, 9.0, -8.0)]                                     # 15 -> 18 u
 const CAM_PERCH := [Vector3(2.2, 9.0, -8.0), Vector3(-2.0, 8.2, -7.0),
@@ -584,10 +601,11 @@ func _shot(t: float) -> Array:
 		var u := (t - T_APPROACH) / (T_NEEDLE - T_APPROACH)
 		return [1, u, CAM_APPROACH, u]
 	elif t < T_NAVE:
-		# The stoop accelerates (the wyrm falls); the lens does NOT chase it —
-		# it swings round to face the rose at its own pace and arrives after.
+		# THE OUVERTURE. Steady — a heavy thing already committed to its line,
+		# not a falcon accelerating into a target (Bert: "a dragon is more
+		# like a b2 bomber, not a f35"). The lens holds its own pace too.
 		var u := (t - T_NEEDLE) / (T_NAVE - T_NEEDLE)
-		return [2, ease(u, 1.5), CAM_NEEDLE, ease(u, 0.9)]
+		return [2, ease(u, 1.0), CAM_NEEDLE, ease(u, 0.95)]
 	elif t < T_PERCH:
 		var u := (t - T_NAVE) / (T_PERCH - T_NAVE)
 		return [3, ease(u, 0.92), CAM_NAVE, ease(u, 0.8)]

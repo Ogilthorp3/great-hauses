@@ -25,6 +25,7 @@ func _main() -> void:
 	_test_cathedral_model_exists()
 	await _test_great_hall_cathedral()
 	_test_flight_path()
+	_test_flight_smoothness()
 	print("---")
 	if failed == 0:
 		print("CATHEDRAL OK — all %d checks passed" % passed)
@@ -171,3 +172,59 @@ func _test_flight_path() -> void:
 	else:
 		check("flight: clears the nave ridge cresting (margin %.2f)" % worst_ridge,
 			true, worst_ridge >= 0.0)
+
+
+## SMOOTHNESS IS ALSO GEOMETRY (Bert, 2026-08-18: "make the approach into
+## cathedral ouverture more smooth. Right now it's too sudden. A dragon is
+## more like a b2 bomber, not a f35!").
+##
+## A flight can be continuous in POSITION and still lurch, because what the
+## eye reads is the HEADING. The old cut dropped 20 u of altitude across one
+## unit of ground to reach the rose — a falcon stoop — and then broke 74.9 deg
+## the instant it was through, dodging a chandelier chain. Both are invisible
+## to a seam-gap check and obvious in flight.
+##
+## So: the heading may not jump at a leg boundary. The landing flare is the
+## one exemption, and it is a real one — the gallery sits behind the great
+## hall's 11.7 u wall crest, so the wyrm must climb over the stone and settle
+## onto the ledge. Birds pitch up hard to land.
+const SEAM_TURN_MAX := 25.0     ## degrees, cruise seams
+const FLARE_TURN_MAX := 60.0    ## …and the landing
+const OUVERTURE_SLOPE_MAX := 18.0  ## degrees: a bomber's glideslope, not a dive
+
+
+static func _tangent(p: Array, t: float) -> Vector3:
+	var a := _catmull(p, maxf(t - 0.002, 0.0))
+	var b := _catmull(p, minf(t + 0.002, 0.9999))
+	var v := b - a
+	return v.normalized() if v.length() > 1e-6 else Vector3(0, 0, 1)
+
+
+func _test_flight_smoothness() -> void:
+	var script: Script = load("res://src/cinematics/cathedral_cinematic_intro.gd")
+	var consts := script.get_script_constant_map()
+	var names := ["PATH_NIGHT", "PATH_APPROACH", "PATH_NEEDLE", "PATH_NAVE",
+		"PATH_PERCH"]
+	for i in range(names.size() - 1):
+		var a: Array = consts[names[i]]
+		var b: Array = consts[names[i + 1]]
+		var turn := rad_to_deg(_tangent(a, 0.999).angle_to(_tangent(b, 0.001)))
+		var limit := FLARE_TURN_MAX if names[i + 1] == "PATH_PERCH" else SEAM_TURN_MAX
+		check("flight: %s -> %s heading holds (%.1f deg, max %.0f)"
+			% [names[i].substr(5), names[i + 1].substr(5), turn, limit],
+			true, turn <= limit)
+
+	# THE OUVERTURE IS A GLIDESLOPE, NOT A DIVE: measure the run-in to the
+	# rose from where the leg begins to where it crosses the facade plane.
+	var ouv: Array = consts["PATH_NEEDLE"]
+	var start: Vector3 = ouv[0]
+	var rose := start
+	for p: Vector3 in ouv:
+		if absf(p.z + 26.0) < 0.5:
+			rose = p
+			break
+	var run := absf(rose.z - start.z)
+	var drop := start.y - rose.y
+	var slope := rad_to_deg(atan2(drop, maxf(run, 0.001)))
+	check("flight: the ouverture is a glideslope (%.1f deg over %.0f u, max %.0f)"
+		% [slope, run, OUVERTURE_SLOPE_MAX], true, slope <= OUVERTURE_SLOPE_MAX)
