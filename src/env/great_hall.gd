@@ -90,8 +90,12 @@ const DRAPE_TRIPLE_SCENE: PackedScene = preload("res://assets/kaykit-dungeon/ban
 const TorchScript := preload("res://src/env/torch.gd")
 const BannerScript := preload("res://src/env/banner.gd")
 const DragonRigScript := preload("res://src/cinematics/dragon_rig.gd")
+const CoronaSwayScript := preload("res://src/env/corona_sway.gd")
+const MusiciansScript := preload("res://src/env/musicians.gd")
 
 var cathedral_instance: Node3D = null
+var coronas: CoronaSway = null
+var musicians: Musicians = null
 
 const FLOOR_Y := -0.3         # hall floor top (plinth bottom)
 const WALL_HALF := 12.0       # wall centerline distance from board center
@@ -252,6 +256,7 @@ func _ready() -> void:
 	_build_banners()
 	_build_banner_drapes()
 	_build_throne()
+	_build_musicians()
 	_build_fill_lights()
 	_dress_from_session()
 	var args := OS.get_cmdline_user_args()
@@ -792,6 +797,12 @@ func _build_cathedral() -> void:
 			"*", "MeshInstance3D", true, false):
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		mi.layers |= 1 << 9
+	# The nave coronas hang from their own pivots and are allowed to move:
+	# a draught always, and a real swing when something clips one.
+	coronas = CoronaSwayScript.new()
+	coronas.name = "CoronaSway"
+	add_child(coronas)
+	coronas.adopt(cathedral_instance)
 
 
 ## The Wyrm's Gallery — the corbelled ledge over the apse arch where the
@@ -800,6 +811,19 @@ func _build_cathedral() -> void:
 ## face z 12.85..back 14.55, centred on x 0. The root stands ON the stone.
 func wyrm_gallery_rest() -> Vector3:
 	return Vector3(0.0, 12.2, 13.55)
+
+
+## THE CONSORT. Live music in the hall, standing in the open court the wyrm
+## used to sleep in — see src/env/musicians.gd for why that spot and why it
+## is diegetic rather than decorative.
+func _build_musicians() -> void:
+	musicians = MusiciansScript.new()
+	musicians.name = "Musicians"
+	# Inboard of the old rest spot: at x 9 they were half out of the
+	# gameplay frame against the east wall. x ~6.9 keeps the whole
+	# consort inside the wedge the player actually sees.
+	musicians.stand = dragon_rest() - Vector3(0.7, 0.0, 0.0)
+	add_child(musicians)
 
 
 func _build_fill_lights() -> void:

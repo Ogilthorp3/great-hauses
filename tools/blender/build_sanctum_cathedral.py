@@ -152,20 +152,43 @@ MAT_SPECS = {
     "cathedral_iron":        ((0.085, 0.085, 0.095, 1.0), 0.42, 0.85, None, 0, False),
     "cathedral_glass_sapphire": ((0.08, 0.17, 0.55, 1.0), 0.15, 0.0, (0.16, 0.36, 1.0), 1.7, False),
     "cathedral_glass_amber":    ((0.55, 0.30, 0.08, 1.0), 0.15, 0.0, (1.0, 0.55, 0.12), 1.9, False),
-    "cathedral_glass_ember":    ((0.52, 0.12, 0.04, 1.0), 0.15, 0.0, (1.0, 0.26, 0.06), 2.2, False),
+    "cathedral_glass_ember":    ((0.42, 0.09, 0.03, 1.0), 0.15, 0.0, (1.0, 0.20, 0.05), 1.15, False),
     "cathedral_candle":         ((0.96, 0.92, 0.80, 1.0), 0.5, 0.0, (1.0, 0.86, 0.55), 1.2, False),
     "cathedral_flame":          ((1.0, 0.86, 0.45, 1.0), 0.4, 0.0, (1.0, 0.66, 0.24), 9.0, False),
+    ## THE KYBER — JEDI GREEN (Bert: "make it JEDI glowing green!").
+    ##
+    ## The first cut ran emission at 7.0 and 12.0 and came back WHITE. That is
+    ## not a colour choice going wrong, it is arithmetic: emission colour times
+    ## energy, through a filmic tonemap with NO glow pass to catch the
+    ## overflow, saturates every channel it pushes past ~4 — so a bright green
+    ## and a bright red land in the same place, which is white.
+    ##
+    ## A lightsaber is therefore built the way a lightsaber is built: keep the
+    ## GREEN channel hot and hold RED and BLUE down, so only green clips. The
+    ## blade body reads vivid green; the thin core runs brighter and goes
+    ## white-green, which is exactly the read we want and is the only part
+    ## allowed to approach white.
+    "cathedral_kyber":          ((0.04, 0.34, 0.10, 1.0), 0.08, 0.0, (0.10, 1.0, 0.10), 3.4, False),
+    "cathedral_kyber_core":     ((0.34, 0.92, 0.42, 1.0), 0.05, 0.0, (0.38, 1.0, 0.26), 4.2, False),
     "cathedral_rock":        ((0.225, 0.21, 0.20, 1.0), 0.95, 0.0, None, 0, True),
     "cathedral_void":        ((0.015, 0.013, 0.018, 1.0), 1.0, 0.0, None, 0, False),
 }
 
 BUCKETS = {}
+## Parts that must survive as their OWN nodes in the GLB instead of being
+## merged into the shared per-material meshes — because something in the game
+## has to be able to MOVE them. `bucket("cathedral_iron", part="Corona_0")`
+## puts that geometry in its own bucket; `PART_PIVOTS` records where the part
+## hangs from, and the exporter parents its meshes to an Empty placed there so
+## a rotation of that Empty swings the part about its suspension point.
+PART_PIVOTS = {}
 
 
-def bucket(name):
-    if name not in BUCKETS:
-        BUCKETS[name] = bmesh.new()
-    return BUCKETS[name]
+def bucket(name, part=None):
+    key = name if part is None else "%s@%s" % (name, part)
+    if key not in BUCKETS:
+        BUCKETS[key] = bmesh.new()
+    return BUCKETS[key]
 
 
 # ── low-level builders (all take godot coordinates) ──────────────────────────
@@ -1065,13 +1088,13 @@ def build_organ_loft():
             add_cone(brass, (fx, base, -23.75), 0.115, 0.105, h, segments=8)
 
 
-def corona(cx, cz, ring_y, chain_top, radius, n_candles):
+def corona(cx, cz, ring_y, chain_top, radius, n_candles, part=None):
     """One iron corona: ring, inner ring, suspension arms, chain, and a crown
     of LIT candles — cup, wax and a bright flame tip, all emissive, because
     this asset still ships zero Light3D."""
-    iron = bucket("cathedral_iron")
-    candle = bucket("cathedral_candle")
-    flame = bucket("cathedral_flame")
+    iron = bucket("cathedral_iron", part)
+    candle = bucket("cathedral_candle", part)
+    flame = bucket("cathedral_flame", part)
     seg = 18
     ring = [(cx + radius * math.cos(2 * math.pi * i / seg), ring_y,
              cz + radius * math.sin(2 * math.pi * i / seg))
@@ -1093,6 +1116,9 @@ def corona(cx, cz, ring_y, chain_top, radius, n_candles):
     if chain_top > ring_y + 2.3:
         sweep_box(iron, [(cx, ring_y + 1.7, cz), (cx, chain_top, cz)],
                   0.055, 0.055)
+    if part is not None:
+        # it swings from where it is hung, not from its own middle
+        PART_PIVOTS[part] = (cx, chain_top, cz)
     for i in range(n_candles):
         a = 2 * math.pi * i / n_candles
         px = cx + radius * math.cos(a)
@@ -1107,6 +1133,55 @@ def corona(cx, cz, ring_y, chain_top, radius, n_candles):
         add_cone(iron, (px, ring_y - 0.48, pz), 0.05, 0.05, 0.12, segments=6)
         add_cone(candle, (px, ring_y - 0.36, pz), 0.045, 0.038, 0.30, segments=6)
         add_cone(flame, (px, ring_y - 0.02, pz), 0.065, 0.0, 0.30, segments=5)
+
+
+def crystal(cx, cy, cz, half_h, half_w, mat, seg=6, twist=0.0):
+    """A faceted bipyramid — two cones meeting at a waist, which is the
+    shape every kyber crystal in the canon is: long, hexagonal, pointed at
+    both ends."""
+    bm = bucket(mat)
+    add_cone(bm, (cx, cy, cz), half_w, 0.0, half_h, segments=seg, yaw=twist)
+    add_cone(bm, (cx, cy, cz), half_w, 0.0, -half_h, segments=seg, yaw=twist)
+
+
+def build_kyber():
+    """THE HEART OF THE TEMPLE (Bert, 2026-08-18: "the Sanctum Cathedral is
+    the Temple of Kyber, so we should have a glowing green kyber behind the
+    dragon once he's perched to watch the fight").
+
+    It stands in the apse directly BEHIND the Wyrm's Gallery — the ledge is
+    at (0, 12.2, 13.55) facing the board, so from the hall the perched wyrm
+    is seen against this. Placed low enough (y 17.6) to sit behind the beast
+    rather than above it, and clear of the ember rose at y 20 in the chevet
+    so the two do not fight: green crystal at the animal's height, warm rose
+    over it.
+
+    Emissive only — the cathedral still ships ZERO lights, and a ninth omni
+    would push the shell past the Mobile renderer's per-mesh light cap.
+    """
+    stone = bucket("cathedral_stone_mid")
+    dark = bucket("cathedral_stone_dark")
+    iron = bucket("cathedral_iron")
+    KY_Y = 17.6
+    KY_Z = 23.4
+    # the dais/bracket it stands on, out from the chevet wall
+    add_box(dark, (0.0, KY_Y - 4.6, KY_Z + 1.0), (5.2, 1.0, 3.2))
+    add_box(stone, (0.0, KY_Y - 5.4, KY_Z + 1.4), (6.4, 0.7, 3.8))
+    for sx in (-1, 1):
+        add_box(dark, (sx * 2.0, KY_Y - 3.2, KY_Z + 0.9), (0.5, 2.0, 0.5))
+    # the crystal itself, and its brighter core
+    crystal(0.0, KY_Y, KY_Z, 4.6, 1.55, "cathedral_kyber", seg=6)
+    crystal(0.0, KY_Y, KY_Z, 2.4, 0.40, "cathedral_kyber_core", seg=6, twist=0.5)
+    # an iron ring cradling the waist
+    ring = [(1.85 * math.cos(2 * math.pi * i / 14), KY_Y - 0.2,
+             KY_Z + 1.85 * math.sin(2 * math.pi * i / 14)) for i in range(15)]
+    sweep_box(iron, ring, 0.09, 0.07)
+    # attendant shards on the dais, so it reads as a reliquary not an ornament
+    for (sx, sh, sw, dy, dz) in [(-3.1, 1.5, 0.42, -3.4, 0.6),
+                                 (3.1, 1.5, 0.42, -3.4, 0.6),
+                                 (-2.2, 1.0, 0.30, -3.9, 2.0),
+                                 (2.2, 1.0, 0.30, -3.9, 2.0)]:
+        crystal(sx, KY_Y + dy, KY_Z + dz, sh, sw, "cathedral_kyber", seg=5)
 
 
 def build_chandeliers():
@@ -1138,8 +1213,12 @@ def build_chandeliers():
     flies down, and the suite sweeps the flight against every fixture to keep
     it that way.
     """
-    for cz in (-16.0, -6.0, 4.0):
-        corona(0.0, cz, 27.0, VAULT_APEX - 0.4, 2.6, 16)
+    for i, cz in enumerate((-16.0, -6.0, 4.0)):
+        # DETACHABLE: the wyrm brushes these on its way in, and a chandelier
+        # that takes a dragon's wingtip without moving is the tell that none
+        # of this is real (Bert: "he hits the first chandelier, that's ok, but
+        # that chandelier should wobble"). src/env/corona_sway.gd swings them.
+        corona(0.0, cz, 27.0, VAULT_APEX - 0.4, 2.6, 16, part="Corona_%d" % i)
     for sx in (-1, 1):
         for cz in (-19.0, -11.0, -3.0, 5.0):
             corona(sx * 16.7, cz, 9.0, 15.4, 1.5, 10)
@@ -1226,21 +1305,45 @@ def main():
     build_east_end()
     build_buttresses()
     build_organ_loft()
+    build_kyber()
     build_chandeliers()
 
     ao_objects = []
     total_tris = 0
-    for name, bm in BUCKETS.items():
+    part_roots = {}
+    for part, pivot in PART_PIVOTS.items():
+        empty = bpy.data.objects.new(part, None)
+        empty.empty_display_size = 0.5
+        empty.location = G(*pivot)
+        bpy.context.collection.objects.link(empty)
+        part_roots[part] = empty
+    for key, bm in BUCKETS.items():
+        name, _, part = key.partition("@")
         bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-4)
-        mesh = bpy.data.meshes.new(name + "_mesh")
+        if part:
+            # BAKE THE PIVOT OFFSET INTO THE GEOMETRY. glTF has no notion of
+            # Blender's parent-inverse and the exporter drops it: the first
+            # cut of this shipped the meshes at their world coordinates AND
+            # the pivot on the parent, which added the two together and put
+            # the coronas 26 u above the vault, sitting on the roof (Bert:
+            # "the chandeliers are now on top of the cathedral"). Authoring
+            # the part's vertices RELATIVE to its pivot is unambiguous in
+            # every exporter.
+            bmesh.ops.translate(bm, verts=bm.verts,
+                                vec=-G(*PART_PIVOTS[part]))
+        mesh = bpy.data.meshes.new(key.replace("@", "_") + "_mesh")
         bm.to_mesh(mesh)
         bm.free()
-        obj = bpy.data.objects.new(name, mesh)
+        obj = bpy.data.objects.new(key.replace("@", "_"), mesh)
         bpy.context.collection.objects.link(obj)
+        if part:
+            # the geometry is already pivot-relative (above), so a plain
+            # parent with an identity local transform is correct
+            obj.parent = part_roots[part]
         obj.data.materials.append(make_material(name))
         tris = sum(len(p.vertices) - 2 for p in mesh.polygons)
         total_tris += tris
-        print(f"[cathedral] {name:28s} tris={tris}")
+        print(f"[cathedral] {key:34s} tris={tris}")
         if MAT_SPECS[name][5]:
             attr = mesh.color_attributes.new(name="Col", type='BYTE_COLOR',
                                              domain='CORNER')

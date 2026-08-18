@@ -290,6 +290,7 @@ var _location_card: Control = null
 var _sting: AudioStreamPlayer = null
 var _sway: Node = null                # DragonRig.FlightSway (secondary motion)
 var _flap := "Fast_Flying"            # the beat clip: Soar when it merged
+var _coronas: Node = null             # GreatHall.coronas — the swinging fixtures
 var _arc: Array = []                  # per leg: cumulative arc-length table
 
 var _is_running := false
@@ -328,6 +329,9 @@ func start_cinematic(game_cam: Camera3D) -> void:
 	_cam.make_current()
 
 	_build_arc_tables()
+	var hall := get_parent().get_node_or_null("GreatHall")
+	if hall != null:
+		_coronas = hall.get("coronas")
 	_build_night_sky()
 	_build_cinematic_ui()
 	_spawn_dragon()
@@ -707,6 +711,17 @@ func _process(delta: float) -> void:
 		if absf(_fwd.dot(up)) < 0.995:
 			_dragon_root.global_basis = Basis.looking_at(-_fwd, up)
 		_path_pos = pos
+		# IT BRUSHES WHAT IT PASSES. The wyrm is 10.6 u across, so a fixture
+		# it slides under gets clipped by a wingtip — and a chandelier that
+		# takes a dragon's wing without moving is the tell that none of this
+		# is real. The strike is proportional to how near the miss was.
+		if _coronas != null and is_instance_valid(_coronas):
+			# generous: a wingtip counts, and the wyrm is inside two of the
+			# nave coronas at once as it comes down the church
+			var reach: float = WYRM_SPAN * 0.5 + CORONA_NAVE_R + 2.0
+			var hit: int = _coronas.strike_all_within(pos, _fwd, reach, 0.9)
+			if hit > 0:
+				_shake = maxf(_shake, 0.05)
 		# THE WINGBEAT LIFTS THE BODY. The clip's own playhead drives it, so
 		# the rise lands on the downstroke instead of drifting against it.
 		_dragon_root.global_position = pos + Vector3.UP * _beat_lift()
