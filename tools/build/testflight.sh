@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # testflight.sh — build Great Hauses for iPad and ship it to TestFlight.
 #
-#   ./tools/build/testflight.sh            # export + archive + .ipa, no upload
-#   ./tools/build/testflight.sh --upload   # …and upload to App Store Connect
+#   ./tools/build/testflight.sh                     # iOS: export + archive + .ipa
+#   ./tools/build/testflight.sh --upload            # …and upload to TestFlight
+#   ./tools/build/testflight.sh --visionos          # visionOS: archive + .ipa
+#   ./tools/build/testflight.sh --visionos --upload # …and upload to TestFlight
 #
 # WHAT THIS NEEDS THAT A MAC BUILD DOES NOT
 #
@@ -48,15 +50,93 @@ ASC_ISSUER="bb24799c-61ce-4ae8-b07a-7138e06ec34c"
 
 UPLOAD=0
 CONFIG="release"
+PLATFORM="ios"
 for arg in "$@"; do
   case "$arg" in
     --upload) UPLOAD=1 ;;
     --debug) CONFIG="debug" ;;
+    --visionos) PLATFORM="visionos" ;;
     *) echo "unknown flag: $arg" >&2; exit 2 ;;
   esac
 done
 
 say() { printf '\n[testflight] %s\n' "$*"; }
+
+# ── visionOS ──────────────────────────────────────────────────────────────
+# A DIFFERENT PIPELINE, not a flag on the iOS one. Godot's iOS exporter runs
+# `xcodebuild archive` and `exportArchive` itself, so the iOS path below is
+# one command. The visionOS exporter only writes the Xcode project — the
+# archive and export are ours to drive, and they need the App Store method
+# rather than the `debugging` method a device build leaves behind.
+#
+# THE BLOCKER YOU WILL HIT FIRST (2026-08-18): altool answers
+#   "Cannot determine the Apple ID from Bundle ID 'haus.sanctum.greathauses'
+#    and platform 'VISION_OS'"
+# That is not a signing problem and not a build problem. It means the App
+# Store Connect record has only the iOS platform on it. Adding visionOS is a
+# one-time action in the App Store Connect UI (Apps -> Great Hauses Chess ->
+# add the visionOS platform) and needs Account Holder / Admin / App Manager;
+# a Developer-role API key is REFUSED (403 FORBIDDEN_ERROR, confirmed by
+# POSTing an appStoreVersions record with platform VISION_OS). Once the
+# platform exists, re-run this script and nothing else changes.
+if [ "$PLATFORM" = "visionos" ]; then
+  VDIST="$ROOT/../great-hauses-dist/visionos"
+  ARCHIVE="$VDIST/GreatHauses-appstore.xcarchive"
+  EXPORTED="$VDIST/appstore-export"
+
+  if [ ! -d "$VDIST/GreatHauses.xcodeproj" ]; then
+    echo "FAIL: no visionOS xcodeproj — run ./tools/build/build.sh visionos first" >&2
+    exit 1
+  fi
+  if ! security find-identity -v -p codesigning | grep -q "$TEAM"; then
+    echo "FAIL: no codesigning identity for team $TEAM" >&2; exit 1
+  fi
+
+  cat > "$VDIST/ExportOptions-appstore.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>destination</key><string>export</string>
+	<key>method</key><string>app-store-connect</string>
+	<key>signingStyle</key><string>automatic</string>
+	<key>stripSwiftSymbols</key><true/>
+	<key>teamID</key><string>$TEAM</string>
+	<key>uploadSymbols</key><true/>
+</dict>
+</plist>
+PLIST
+
+  say "archiving visionOS (generic/platform=visionOS)"
+  rm -rf "$ARCHIVE" "$EXPORTED"
+  xcodebuild -project "$VDIST/GreatHauses.xcodeproj" -scheme GreatHauses \
+    -configuration Release -destination 'generic/platform=visionOS' \
+    -archivePath "$ARCHIVE" archive
+
+  say "exporting the archive (App Store method)"
+  xcodebuild -exportArchive -archivePath "$ARCHIVE" -exportPath "$EXPORTED" \
+    -exportOptionsPlist "$VDIST/ExportOptions-appstore.plist"
+
+  VIPA="$EXPORTED/GreatHauses.ipa"
+  [ -f "$VIPA" ] || { echo "FAIL: no .ipa at $VIPA" >&2; exit 1; }
+  say "built: $VIPA ($(du -h "$VIPA" | cut -f1))"
+
+  if [ "$UPLOAD" != "1" ]; then
+    say "not uploading (pass --upload). Bundle: $BUNDLE_ID (visionOS)"
+    exit 0
+  fi
+  KEY="$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+  [ -f "$KEY" ] || { echo "FAIL: ASC key not found at $KEY" >&2; exit 1; }
+
+  say "validating with App Store Connect"
+  xcrun altool --validate-app -f "$VIPA" -t visionos \
+    --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER"
+  say "uploading to App Store Connect (TestFlight, visionOS)"
+  xcrun altool --upload-app -f "$VIPA" -t visionos \
+    --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER"
+  say "uploaded. TestFlight > visionOS builds for $BUNDLE_ID."
+  exit 0
+fi
 
 # ── preflight, because every one of these failures is silent-ish ───────────
 say "preflight"
