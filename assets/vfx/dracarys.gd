@@ -94,15 +94,51 @@ const HEAT_SHIMMER_SHADER := preload("res://assets/vfx/heat_shimmer.gdshader")
 # Values above 1.0 bloom. They are deliberately MODEST: additive particles
 # stack, so a "hot" per-particle colour plus 200 overlapping quads saturates
 # the frame to white paste. Density does the brightness, not the constant.
-const WHITE_HOT := Color(2.60, 2.25, 1.72)
-const YELLOW_HOT := Color(2.45, 1.30, 0.32)
-const ORANGE := Color(1.70, 0.50, 0.072)
-const DEEP_RED := Color(0.86, 0.11, 0.018)
-const EMBER_RED := Color(0.62, 0.07, 0.012)
+## THE PALETTE IS A CHOICE NOW (2026-08-18). This file's own API notes asked
+## for it — "colour is currently one palette; if hauses need tinted fire
+## (green, blue), the ramps should move behind a small palette resource" —
+## and the ask arrived: Bert, "when a bishop kill an ennemy with his magic,
+## it should be green like in GoT". Wildfire.
+##
+## These five were `const`. They are plain vars set once by `_apply_palette()`
+## at the top of `_build()`, BEFORE any ramp is made, so all 37 sites that
+## reference them by name keep working untouched and no caller can change the
+## colour after the gradients are baked. Nothing outside this file ever read
+## them, so nothing outside this file had to change.
+enum Palette {
+	FIRE,      ## the wyrm's breath, and every torch-lit thing
+	WILDFIRE,  ## a bishop's magic: alchemical green, GoT's wildfire
+}
+@export var palette: Palette = Palette.FIRE
+
+var WHITE_HOT := Color(2.60, 2.25, 1.72)
+var YELLOW_HOT := Color(2.45, 1.30, 0.32)
+var ORANGE := Color(1.70, 0.50, 0.072)
+var DEEP_RED := Color(0.86, 0.11, 0.018)
+var EMBER_RED := Color(0.62, 0.07, 0.012)
 # Deliberately DARK. Smoke in an unlit hall is not lit by anything; a bright
 # grey makes a cotton-wool blob that is brighter than the stone behind it.
-const SMOKE_GREY := Color(0.105, 0.098, 0.092)
-const ASH_GREY := Color(0.34, 0.325, 0.30)
+var SMOKE_GREY := Color(0.105, 0.098, 0.092)
+var ASH_GREY := Color(0.34, 0.325, 0.30)
+
+
+## Wildfire keeps the FIRE ramp's *structure* — a near-white core falling
+## through a saturated mid to a dark ember — because that structure is what
+## reads as fire at all. Only the hue moves. The core stays hot enough to
+## blow out to white at the muzzle; the mid is the acid green everyone
+## pictures; the tail dies to a deep bottle green rather than to red. Smoke
+## takes a green cast too, or the plume reads as ordinary soot lit by a
+## novelty lamp.
+func _apply_palette() -> void:
+	if palette != Palette.WILDFIRE:
+		return
+	WHITE_HOT = Color(1.85, 2.70, 2.05)
+	YELLOW_HOT = Color(0.80, 2.55, 0.95)
+	ORANGE = Color(0.26, 1.72, 0.44)
+	DEEP_RED = Color(0.05, 0.78, 0.21)
+	EMBER_RED = Color(0.025, 0.52, 0.14)
+	SMOKE_GREY = Color(0.086, 0.112, 0.094)
+	ASH_GREY = Color(0.29, 0.34, 0.30)
 
 # Wall-clock phase offsets, seconds from ignition. Documented in the API doc;
 # the demo's screenshot schedule is derived from these.
@@ -805,6 +841,9 @@ func _kit_dir() -> String:
 
 func _build() -> void:
 	_built = true
+	# FIRST: the ramps below bake these colours into gradients and shaders, so
+	# the palette has to be chosen before any of them exists.
+	_apply_palette()
 	shake_envelope = make_shake_curve()
 	shake_envelope.bake()
 	_noise_tex = _make_noise()

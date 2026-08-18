@@ -2384,6 +2384,12 @@ func _prepare_bolt(gap: float = 1.6) -> void:
 		return
 	var fx: Node3D = DracarysScript.new()
 	fx.name = "StaffBolt"
+	# WILDFIRE. A bishop does not breathe dragonfire — he casts, and the
+	# alchemical green is the one everyone already reads as sorcery (Bert:
+	# "when a bishop kill an ennemy with his magic, it should be green like
+	# in GoT"). Set BEFORE add_child with the rest of the tuning: the kit
+	# bakes its ramps in _ready and the palette has to be chosen first.
+	fx.palette = DracarysScript.Palette.WILDFIRE
 	fx.reach = clampf(gap * 1.12, 1.6, 8.5)
 	fx.torrent_spread = 6.0
 	# 0.30, not the kit's 1.0 and not the wyrm's 0.40. This is a ONE-METRE shot
