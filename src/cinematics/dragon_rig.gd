@@ -124,6 +124,22 @@ static func spawn(parent: Node, rig_name: String, pos: Vector3, yaw: float,
 	return rig
 
 
+## THE SOAR CYCLE (2026-08-18). `Fast_Flying` is 25 LINEAR keys per second on
+## a 104-degree shoulder swing — a velocity corner every 2.4 rendered frames,
+## which is what read as mechanical once the wyrm was big enough to see.
+## `tools/blender/author_dragon_flight.py` re-times and re-samples those same
+## authored poses into a smooth, asymmetric, overlapping cycle.
+##
+## It ships as an ANIMATION-ONLY companion file rather than inside dragon.glb,
+## because re-exporting the shared asset compressed every existing clip to
+## 40 % of its duration (glTF samples at the scene fps; the source is 24 and
+## the new cycle needs 60) and the ashfall is choreographed against those
+## lengths. Merging it here costs one instantiate at spawn and leaves
+## dragon.glb byte-identical.
+const SOAR_SCENE_PATH := "res://assets/custom-props/dragon_soar.glb"
+const SOAR_CLIP := "Soar"
+
+
 func _ready() -> void:
 	var model := DRAGON_SCENE.instantiate()
 	model.name = "Model"
@@ -133,6 +149,70 @@ func _ready() -> void:
 	anim = anims[0] if not anims.is_empty() else null
 	var skels := model.find_children("*", "Skeleton3D", true, false)
 	skeleton = skels[0] if not skels.is_empty() else null
+	_merge_soar()
+
+
+## Pull `Soar` out of the companion file and into THIS rig's player, with its
+## track paths retargeted onto the paths this player already uses — so the
+## merge cannot break on a node-naming difference between the two files.
+## Silent no-op if the companion is absent: every caller stays duck-safe and
+## falls back to `Fast_Flying`.
+func _merge_soar() -> void:
+	if anim == null or anim.has_animation(SOAR_CLIP):
+		return
+	if not ResourceLoader.exists(SOAR_SCENE_PATH):
+		return
+	# The prefix this player addresses its skeleton by, read off a clip that
+	# is already known to work rather than assumed.
+	var prefix := ""
+	for clip in anim.get_animation_list():
+		var existing := anim.get_animation(clip)
+		for i in existing.get_track_count():
+			var p := existing.track_get_path(i)
+			if String(p.get_concatenated_subnames()) != "":
+				prefix = String(p.get_name(0))
+				for k in range(1, p.get_name_count()):
+					prefix += "/" + String(p.get_name(k))
+				break
+		if prefix != "":
+			break
+	if prefix == "":
+		return
+	var inst: Node = (load(SOAR_SCENE_PATH) as PackedScene).instantiate()
+	var players := inst.find_children("*", "AnimationPlayer", true, false)
+	if players.is_empty():
+		inst.free()
+		return
+	var src: AnimationPlayer = players[0]
+	# The companion carries exactly one clip. Godot's glTF importer names a
+	# lone animation "Animation" rather than after the action, so match by
+	# name when it happens to survive and fall back to "the only one there".
+	var names := src.get_animation_list()
+	var found := ""
+	for n in names:
+		if n.ends_with(SOAR_CLIP):
+			found = n
+			break
+	if found == "" and names.size() == 1:
+		found = names[0]
+	if found == "":
+		inst.free()
+		return
+	var clip_res: Animation = src.get_animation(found).duplicate()
+	for i in clip_res.get_track_count():
+		var sub := String(clip_res.track_get_path(i).get_concatenated_subnames())
+		clip_res.track_set_path(i, NodePath(prefix + ":" + sub))
+	clip_res.loop_mode = Animation.LOOP_LINEAR
+	var lib := anim.get_animation_library("")
+	if lib != null:
+		lib.add_animation(SOAR_CLIP, clip_res)
+	inst.free()
+
+
+## Did the smooth cycle make it in? (Probed by tests and by the cinematic,
+## which falls back to `Fast_Flying` when it did not.)
+func has_soar() -> bool:
+	return has_clip(SOAR_CLIP)
 
 
 ## The 8-omni budget is FULL — no light for the dragon. It is lit out of the

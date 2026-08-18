@@ -122,9 +122,28 @@ const FLIGHT_FOV := 58.0        ## wide glass keeps the world around the wyrm
 const PATH_NIGHT := [
 	Vector3(38, 50, -82), Vector3(34, 48, -78), Vector3(14, 42, -64),
 	Vector3(-6, 37, -52), Vector3(-16, 34.5, -46), Vector3(-22, 34.5, -40)]
+## THE TOWER LEG, re-flown 2026-08-18 (Bert: "when the dragon is close to the
+## outside tower, it gets jerky and then does thru the tower"). Both faults
+## were real and both are measurable:
+##
+##   * it STARTED 8.49 u from where the night leg ended — a teleport at the
+##     beat seam, and because the heading is taken from the frame's own
+##     displacement, that one bad frame also slammed the bank hard over. The
+##     jerk and the beat boundary were the same event. Leg endpoints are now
+##     shared exactly, and tests/test_cathedral_and_dragon.gd asserts it.
+##   * it passed 3.13 u from the north tower's centre line. The tower is 5.5 u
+##     of masonry and the wyrm is 12.4 u across, so it needs 11.7 u of centre
+##     clearance and had a quarter of that: it flew through the stonework.
+##
+## The re-flight sweeps WIDE around the west front (never nearer than 13 u to
+## either tower) and comes back onto the axis to thread the gap BETWEEN the
+## spires, which at this height is 25 u wide — the shot the beat was always
+## meant to be. It also rides above the nave ridge cresting (y 39.65) rather
+## than through it.
 const PATH_APPROACH := [
-	Vector3(-16, 34.5, -46), Vector3(-26, 35.5, -38), Vector3(-25, 35.0, -28),
-	Vector3(-12, 38.0, -24), Vector3(0, 41, -27)]
+	Vector3(-22, 34.5, -40), Vector3(-31, 36.0, -33), Vector3(-32, 38.0, -24),
+	Vector3(-25, 41.5, -16), Vector3(-12, 44.5, -14), Vector3(0, 44.5, -19),
+	Vector3(0, 41, -27)]
 ## The pull-up after the oculus clears the ORGAN's centre finial (tip y 20.5
 ## at z -24.8, dead on the axis): at rig scale 2.2 the belly rides ~1.2 under
 ## the root, so the path has to be a good metre higher than the finial, not a
@@ -225,6 +244,7 @@ var _location_card: Control = null
 
 var _sting: AudioStreamPlayer = null
 var _sway: Node = null                # DragonRig.FlightSway (secondary motion)
+var _flap := "Fast_Flying"            # the beat clip: Soar when it merged
 var _arc: Array = []                  # per leg: cumulative arc-length table
 
 var _is_running := false
@@ -475,7 +495,11 @@ func _spawn_dragon() -> void:
 	_dragon_rig.scale = Vector3.ONE * DRAGON_SCALE
 	_dragon_root.add_child(_dragon_rig)
 	_dragon_root.global_position = PATH_NIGHT[1]
-	_dragon_rig.play_loop("Fast_Flying", 1.0)
+	# The smooth, asymmetric, overlapping cycle authored in Blender — with a
+	# fallback to the asset's own clip if the companion file is missing.
+	if _dragon_rig.has_soar():
+		_flap = DragonRigScript.SOAR_CLIP
+	_dragon_rig.play_loop(_flap, 1.0)
 	# The animal on top of the animation: head leads the turns, tail throws
 	# wide and waves down its length (DragonRig.FlightSway).
 	_sway = _dragon_rig.attach_flight_sway()
@@ -727,7 +751,7 @@ func _beat_lift() -> float:
 	if _dragon_rig == null or _dragon_rig.anim == null:
 		return 0.0
 	var clip := _dragon_rig.anim.current_animation
-	if clip != "Fast_Flying":
+	if clip != _flap:
 		return 0.0
 	var len := _dragon_rig.clip_length(clip)
 	if len <= 0.01:
@@ -754,7 +778,7 @@ func _fly_anim(t: float) -> void:
 		if _dragon_rig.anim.current_animation != "Flying_Idle":
 			_dragon_rig.play_loop("Flying_Idle", 0.9, 0.6)   # the flare
 		return
-	var flapping := _dragon_rig.anim.current_animation == "Fast_Flying"
+	var flapping := _dragon_rig.anim.current_animation == _flap
 	var climb := _fwd.y
 	if t >= T_NEEDLE and t < T_NAVE:
 		# The stoop: wings IN. A falcon does not flap on the way down, and at
@@ -771,7 +795,7 @@ func _fly_anim(t: float) -> void:
 			_dragon_rig.anim.speed_scale = clampf(0.85 + climb * 1.6, 0.7, 1.5)
 	else:
 		if climb > -0.04:
-			_dragon_rig.play_loop("Fast_Flying", 1.0, 0.7)
+			_dragon_rig.play_loop(_flap, 1.0, 0.7)
 		else:
 			_dragon_rig.anim.speed_scale = clampf(0.9 + absf(climb) * 0.5, 0.9, 1.3)
 

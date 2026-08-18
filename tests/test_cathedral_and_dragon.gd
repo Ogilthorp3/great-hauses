@@ -24,6 +24,7 @@ func _main() -> void:
 	print("\n=== Great Hauses Chess — Sanctum Cathedral Suite ===")
 	_test_cathedral_model_exists()
 	await _test_great_hall_cathedral()
+	_test_flight_path()
 	print("---")
 	if failed == 0:
 		print("CATHEDRAL OK — all %d checks passed" % passed)
@@ -86,3 +87,87 @@ func _test_great_hall_cathedral() -> void:
 		crest_y > 11.7)
 
 	hall.queue_free()
+
+
+## THE FLIGHT PATH IS GEOMETRY, AND GEOMETRY CAN BE CHECKED.
+##
+## Both faults Bert caught on 2026-08-18 were measurable before they were
+## visible, and neither would have survived this test:
+##   * the tower leg began 8.49 u from where the night leg ended — a teleport
+##     at the beat seam, which also slammed the bank because the heading is
+##     read from the frame's own displacement;
+##   * that leg then passed 3.13 u from the north tower's centre, where the
+##     masonry alone is 5.5 u and the wyrm is 12.4 u across.
+##
+## So: consecutive legs must share an endpoint exactly, and no sampled point
+## of the flight may come within TOWER_CLEAR of either tower's axis, nor
+## belly through the nave ridge cresting on the way over the roof.
+const TOWER_X := 15.8
+const TOWER_Z := -27.6
+const TOWER_CLEAR := 11.7      ## 5.5 masonry + 6.2 half-wingspan at scale 2.2
+const RIDGE_TOP := 39.65       ## ridge + cresting spikes
+const RIDGE_HALF_W := 14.6
+const BELLY := 1.2             ## how far under the root the body rides
+
+
+static func _catmull(p: Array, t: float) -> Vector3:
+	var n := p.size()
+	var f := clampf(t, 0.0, 0.9999) * (n - 1)
+	var i := int(f)
+	var u := f - i
+	var p0: Vector3 = p[maxi(i - 1, 0)]
+	var p1: Vector3 = p[i]
+	var p2: Vector3 = p[mini(i + 1, n - 1)]
+	var p3: Vector3 = p[mini(i + 2, n - 1)]
+	return 0.5 * ((2.0 * p1) + (-p0 + p2) * u
+		+ (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * u * u
+		+ (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * u * u * u)
+
+
+func _test_flight_path() -> void:
+	var script: Script = load("res://src/cinematics/cathedral_cinematic_intro.gd")
+	var consts := script.get_script_constant_map()
+	var names := ["PATH_NIGHT", "PATH_APPROACH", "PATH_NEEDLE", "PATH_NAVE",
+		"PATH_PERCH"]
+	var legs: Array = []
+	for n in names:
+		legs.append(consts[n])
+
+	# 1. the legs are ONE flight, not five
+	var worst_seam := 0.0
+	for i in range(legs.size() - 1):
+		var gap: float = (legs[i][-1] as Vector3).distance_to(legs[i + 1][0] as Vector3)
+		worst_seam = maxf(worst_seam, gap)
+	check("flight: legs share their endpoints (worst gap %.3f)" % worst_seam,
+		true, worst_seam < 0.01)
+
+	# 2. nothing flies through the twin towers
+	var worst_tower := INF
+	var where := Vector3.ZERO
+	for leg: Array in legs:
+		for i in 801:
+			var p := _catmull(leg, float(i) / 800.0)
+			if p.y <= 20.0:
+				continue   # below the belfries: the towers are not there yet
+			for sx in [-1.0, 1.0]:
+				var d := Vector2(p.x - sx * TOWER_X, p.z - TOWER_Z).length()
+				if d < worst_tower:
+					worst_tower = d
+					where = p
+	check("flight: clears the twin towers (min %.2f at %s)"
+		% [worst_tower, str(where.round())], true, worst_tower >= TOWER_CLEAR)
+
+	# 3. and rides OVER the nave ridge rather than through its cresting
+	var worst_ridge := INF
+	for leg: Array in legs:
+		for i in 801:
+			var p := _catmull(leg, float(i) / 800.0)
+			if p.y < 32.0:
+				continue   # inside the church, under its vault: not the roof
+			if absf(p.x) <= RIDGE_HALF_W and p.z >= -26.0 and p.z <= 14.0:
+				worst_ridge = minf(worst_ridge, p.y - BELLY - RIDGE_TOP)
+	if worst_ridge == INF:
+		check("flight: no exterior pass over the nave roof", true, true)
+	else:
+		check("flight: clears the nave ridge cresting (margin %.2f)" % worst_ridge,
+			true, worst_ridge >= 0.0)
