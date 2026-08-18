@@ -366,6 +366,9 @@ var _ring_shown := false    # target state (true while fading in)
 var _mitre_brim: Dictionary = {}   # bishop only: hat MeshInstance3D -> brim surfaces
 var _hovered := false
 var _is_selected := false
+var _badge: Node3D = null            # the type glyph, hoisted overhead
+var _badge_tween: Tween = null
+var _badge_bob: Tween = null
 var _bolt: Node3D           # bishop only: the DracarysVFX kit, built on the first bolt
 
 
@@ -424,8 +427,82 @@ func setup(new_type: Type, new_side: House, new_house_id: String = "") -> void:
 
 ## Selection feedback: the ring stays lit for the whole selection and the
 ## engraved glyph warms from engraving to beacon.
+## THE BADGE — "when you select a piece, the icon of the piece should be on
+## top of them to show what they are" (Bert, 2026-08-18).
+##
+## It is the SAME glyph the engraved ring already carries, lifted over the
+## piece's head and turned to face the camera. Reusing that art rather than
+## drawing a second icon language means a knight is the same knight mark
+## wherever the player meets it — under the piece on hover, over its head on
+## selection — and it costs no new asset.
+##
+## Sits above the piece's own measured height, so a mounted knight's badge
+## clears the horse and a pawn's does not float. Billboarded, so it is
+## legible from any orbit angle, and emissive so it reads against dark stone.
+## The gameplay camera looks DOWN at ~49 deg, so 'above the head' in world
+## space lands ON the head in screen space. The badge has to clear the
+## silhouette by a real margin before it reads as a separate mark.
+const BADGE_RISE := 0.98          ## above the piece's crown
+const BADGE_SCALE := 0.52
+const BADGE_BOB := 0.035
+
+
+func _build_badge() -> void:
+	if _badge != null and is_instance_valid(_badge):
+		return
+	var sp := Sprite3D.new()
+	sp.name = "TypeBadge"
+	sp.texture = PieceAssets.badge_icon(piece_type)
+	sp.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	sp.shaded = false
+	sp.no_depth_test = true          # over the army standing in front of it
+	sp.render_priority = 3
+	sp.modulate = Color(1.0, 0.90, 0.55)
+	sp.pixel_size = 0.014
+	sp.position = Vector3(0.0, PieceAssets.piece_height(piece_type) + BADGE_RISE, 0.0)
+	add_child(sp)
+	_badge = sp
+
+
+func _show_badge(on: bool) -> void:
+	if on:
+		_build_badge()
+	if _badge == null or not is_instance_valid(_badge):
+		return
+	if _badge_tween != null:
+		_badge_tween.kill()
+	if _badge_bob != null:
+		_badge_bob.kill()
+		_badge_bob = null
+	var base := Vector3.ONE * BADGE_SCALE
+	if on:
+		_badge.visible = true
+		_badge.scale = base * 0.35
+		_badge_tween = create_tween()
+		_badge_tween.tween_property(_badge, "scale", base, 0.22) \
+			.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		# The idle bob rides a LOOPING TWEEN, not _process: PieceView has no
+		# per-frame script and thirty-two of them should not gain one for a
+		# 3 cm rise.
+		var y0: float = PieceAssets.piece_height(piece_type) + BADGE_RISE
+		var bob := create_tween().set_loops()
+		bob.tween_property(_badge, "position:y", y0 + BADGE_BOB, 1.15) \
+			.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+		bob.tween_property(_badge, "position:y", y0, 1.15) \
+			.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+		_badge_bob = bob
+	else:
+		_badge_tween = create_tween()
+		_badge_tween.tween_property(_badge, "scale", base * 0.25, 0.12) \
+			.set_trans(Tween.TRANS_SINE)
+		_badge_tween.tween_callback(func() -> void:
+			if is_instance_valid(_badge):
+				_badge.visible = false)
+
+
 func set_selected(selected: bool) -> void:
 	_is_selected = selected
+	_show_badge(selected)
 	_update_ring_visibility()
 	if _glyph_mat == null:
 		return

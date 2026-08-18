@@ -50,7 +50,17 @@ const INSTRUMENT_BONE := {"lute": "handslot.l", "drum": "handslot.l",
 @export var figure_scale := 0.42               ## players, not giants: well under a piece
 
 var _players: Array[Dictionary] = []
+var _notes: Array[Dictionary] = []
 var _t := 0.0
+
+## THE NOTES (Bert: "have some little music signs over them to show there are
+## playing"). Little glowing notes that rise off the consort, drift, and fade.
+## A pool, not a particle system: three players at two notes each is six
+## meshes that never allocate again, and the shapes have to be NOTES rather
+## than the round sprites a GPUParticles emitter would give us.
+const NOTES_EACH := 2
+const NOTE_RISE := 0.95        ## how high one climbs before it is gone
+const NOTE_LIFE := 2.6         ## seconds, and its own drift is seeded from it
 var _bones_found := 0
 
 
@@ -58,7 +68,55 @@ func _ready() -> void:
 	position = stand
 	for i in CONSORT.size():
 		_build_player(i, CONSORT[i])
+	for i in _players.size():
+		for k in NOTES_EACH:
+			_spawn_note(i, float(k) / float(NOTES_EACH))
 	set_process(not _players.is_empty())
+
+
+## One glowing note: a slurred head and a stem, which is the whole read at
+## this size. Its own material, so it can fade without touching its siblings.
+func _spawn_note(player_index: int, t0: float) -> void:
+	var n := Node3D.new()
+	n.name = "Note%d_%d" % [player_index, _notes.size()]
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(1.0, 0.95, 0.72, 1.0)
+	mat.emission_enabled = true
+	mat.emission = Color(1.0, 0.88, 0.55)
+	mat.emission_energy_multiplier = 2.6
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	mat.billboard_keep_scale = true
+	mat.disable_receive_shadows = true
+	var head := SphereMesh.new()
+	head.radius = 0.038
+	head.height = 0.056
+	head.material = mat
+	var hi := MeshInstance3D.new()
+	hi.mesh = head
+	hi.rotation = Vector3(0.0, 0.0, 0.42)
+	hi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	n.add_child(hi)
+	var stem := BoxMesh.new()
+	stem.size = Vector3(0.012, 0.13, 0.012)
+	stem.material = mat
+	var si := MeshInstance3D.new()
+	si.mesh = stem
+	si.position = Vector3(0.032, 0.075, 0.0)
+	si.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	n.add_child(si)
+	add_child(n)
+	_notes.append({
+		"node": n, "mat": mat, "player": player_index,
+		"t": t0 * NOTE_LIFE, "drift": Vector3.ZERO, "spin": 0.0,
+	})
+	_reseed_note(_notes[-1])
+
+
+func _reseed_note(note: Dictionary) -> void:
+	note["drift"] = Vector3(randf_range(-0.20, 0.20), 0.0, randf_range(-0.16, 0.16))
+	note["spin"] = randf_range(-0.9, 0.9)
 
 
 func count() -> int:
@@ -126,6 +184,21 @@ func _build_player(i: int, spec: Array) -> void:
 			# The pack's hand bones carry the rig's own scale; a prop parented
 			# raw comes through too small to read at 0.6 figure scale.
 			inst.scale = Vector3.ONE * 1.9
+			# HOW IT IS CARRIED. The pack's handslot bones point a prop the
+			# way a sword wants to go, which is not how any of these want to
+			# go: the lute lies across the body with its neck up and out, the
+			# drum turns its head toward the beating hand, the shawm tips up
+			# to the mouth.
+			match kind:
+				"lute":
+					inst.rotation = Vector3(-0.35, 0.0, -0.95)
+					inst.position = Vector3(0.06, 0.04, 0.0)
+				"drum":
+					inst.rotation = Vector3(0.0, 0.0, -0.55)
+					inst.position = Vector3(0.05, 0.02, 0.02)
+				_:
+					inst.rotation = Vector3(-0.55, 0.0, 0.25)
+					inst.position = Vector3(0.0, 0.05, 0.02)
 			_bones_found += 1
 		else:
 			root.add_child(inst)
@@ -309,3 +382,22 @@ func _process(delta: float) -> void:
 		var rate: float = p["rate"]
 		root.rotation.z = sin(_t * rate + ph) * 0.035
 		root.position.y = absf(sin(_t * rate * 0.5 + ph)) * 0.022
+	# …and the notes they are making
+	for note in _notes:
+		var n: Node3D = note["node"]
+		if not is_instance_valid(n):
+			continue
+		note["t"] = float(note["t"]) + delta
+		var u: float = fmod(float(note["t"]), NOTE_LIFE) / NOTE_LIFE
+		if u < delta / NOTE_LIFE:          # wrapped: a new note, new drift
+			_reseed_note(note)
+		var src: Node3D = _players[int(note["player"])]["root"]
+		var base: Vector3 = src.position + Vector3(0.0, 0.62, 0.0)
+		n.position = base + (note["drift"] as Vector3) * u \
+			+ Vector3.UP * (NOTE_RISE * u)
+		n.rotation.z = float(note["spin"]) * u
+		# in fast, out slow — a note is heard before it is gone
+		var a: float = clampf(u / 0.18, 0.0, 1.0) * clampf((1.0 - u) / 0.55, 0.0, 1.0)
+		var mat: StandardMaterial3D = note["mat"]
+		mat.albedo_color.a = a
+		n.scale = Vector3.ONE * (0.75 + 0.35 * u)

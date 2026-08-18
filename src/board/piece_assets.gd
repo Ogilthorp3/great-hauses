@@ -1592,3 +1592,113 @@ func _remap_value(img: Image, floor_v: float, gain: float,
 				% [floor_v, gain])
 		return
 	img.adjust_bcs(2.0 * gain / c, c, 1.0)
+
+
+# ── TYPE BADGE ICONS ───────────────────────────────────────────────────────
+# "When you select a piece, the icon of the piece should be on top of them to
+# show what they are" (Bert, 2026-08-18).
+#
+# The first attempt hoisted the engraved glyph out of the ring asset. It does
+# not survive the trip: that mark is authored to be read FLAT and large under
+# a piece, and billboarded down to badge size over its head it is a smudge.
+# So the badge gets purpose-built art — a bold, filled silhouette drawn into a
+# small image once per type and cached, worn on a Sprite3D, which billboards
+# natively and costs one draw call.
+#
+# Silhouettes, not portraits: at 48 px the shape is the whole message, which
+# is the same reasoning the cathedral's Seven are emblems rather than saints.
+const BADGE_PX := 48
+var _badge_icons: Dictionary = {}
+
+
+func badge_icon(piece_type: int) -> Texture2D:
+	if _badge_icons.has(piece_type):
+		return _badge_icons[piece_type]
+	var img := Image.create(BADGE_PX, BADGE_PX, false, Image.FORMAT_RGBA8)
+	img.fill(Color(0, 0, 0, 0))
+	_draw_badge(img, piece_type)
+	var tex := ImageTexture.create_from_image(img)
+	_badge_icons[piece_type] = tex
+	return tex
+
+
+static func _disc(img: Image, cx: float, cy: float, r: float) -> void:
+	for y in range(maxi(int(cy - r) - 1, 0), mini(int(cy + r) + 2, img.get_height())):
+		for x in range(maxi(int(cx - r) - 1, 0), mini(int(cx + r) + 2, img.get_width())):
+			if Vector2(x - cx, y - cy).length() <= r:
+				img.set_pixel(x, y, Color.WHITE)
+
+
+static func _rect(img: Image, x0: float, y0: float, x1: float, y1: float) -> void:
+	for y in range(maxi(int(y0), 0), mini(int(y1) + 1, img.get_height())):
+		for x in range(maxi(int(x0), 0), mini(int(x1) + 1, img.get_width())):
+			img.set_pixel(x, y, Color.WHITE)
+
+
+## Scanline fill of one triangle — the only primitive the crown points, the
+## mitre and the knight's head need that circles and boxes cannot give.
+static func _tri(img: Image, a: Vector2, b: Vector2, c: Vector2) -> void:
+	var lo := int(floorf(minf(a.y, minf(b.y, c.y))))
+	var hi := int(ceilf(maxf(a.y, maxf(b.y, c.y))))
+	for y in range(maxi(lo, 0), mini(hi + 1, img.get_height())):
+		var xs: Array[float] = []
+		for e in [[a, b], [b, c], [c, a]]:
+			var p: Vector2 = e[0]
+			var q: Vector2 = e[1]
+			if (p.y <= y and q.y > y) or (q.y <= y and p.y > y):
+				xs.append(p.x + (float(y) - p.y) / (q.y - p.y) * (q.x - p.x))
+		if xs.size() < 2:
+			continue
+		xs.sort()
+		for x in range(maxi(int(xs[0]), 0), mini(int(xs[-1]) + 1, img.get_width())):
+			img.set_pixel(x, y, Color.WHITE)
+
+
+static func _draw_badge(img: Image, piece_type: int) -> void:
+	var n := float(BADGE_PX)
+	match piece_type:
+		0:   # PAWN — head over a shoulder, the humblest silhouette there is
+			_disc(img, n * 0.5, n * 0.34, n * 0.15)
+			_tri(img, Vector2(n * 0.30, n * 0.78), Vector2(n * 0.70, n * 0.78),
+				Vector2(n * 0.5, n * 0.44))
+			_rect(img, n * 0.26, n * 0.76, n * 0.74, n * 0.86)
+		1:   # ROOK — a tower and its crenellations
+			_rect(img, n * 0.28, n * 0.34, n * 0.72, n * 0.78)
+			for k in 3:
+				var x := n * (0.28 + 0.22 * float(k))
+				_rect(img, x, n * 0.20, x + n * 0.14, n * 0.36)
+			_rect(img, n * 0.22, n * 0.76, n * 0.78, n * 0.86)
+		2:   # KNIGHT — the horse head, muzzle to the left, ears up
+			_tri(img, Vector2(n * 0.62, n * 0.20), Vector2(n * 0.72, n * 0.44),
+				Vector2(n * 0.52, n * 0.40))
+			_tri(img, Vector2(n * 0.66, n * 0.30), Vector2(n * 0.30, n * 0.52),
+				Vector2(n * 0.70, n * 0.62))
+			_tri(img, Vector2(n * 0.30, n * 0.52), Vector2(n * 0.26, n * 0.62),
+				Vector2(n * 0.52, n * 0.62))
+			_rect(img, n * 0.40, n * 0.60, n * 0.74, n * 0.78)
+			_rect(img, n * 0.26, n * 0.76, n * 0.78, n * 0.86)
+		3:   # BISHOP — the mitre and its slit
+			_tri(img, Vector2(n * 0.5, n * 0.16), Vector2(n * 0.70, n * 0.56),
+				Vector2(n * 0.30, n * 0.56))
+			_disc(img, n * 0.5, n * 0.56, n * 0.19)
+			_rect(img, n * 0.30, n * 0.68, n * 0.70, n * 0.78)
+			_rect(img, n * 0.24, n * 0.76, n * 0.76, n * 0.86)
+		4:   # QUEEN — five points, no cross
+			for k in 5:
+				var x := n * (0.22 + 0.14 * float(k))
+				_tri(img, Vector2(x, n * 0.22), Vector2(x + n * 0.07, n * 0.52),
+					Vector2(x - n * 0.07, n * 0.52))
+				_disc(img, x, n * 0.20, n * 0.05)
+			_rect(img, n * 0.24, n * 0.48, n * 0.76, n * 0.64)
+			_rect(img, n * 0.28, n * 0.62, n * 0.72, n * 0.78)
+			_rect(img, n * 0.22, n * 0.76, n * 0.78, n * 0.86)
+		_:   # KING — the crown, and the cross that makes it a king's
+			_rect(img, n * 0.45, n * 0.08, n * 0.55, n * 0.32)
+			_rect(img, n * 0.36, n * 0.15, n * 0.64, n * 0.24)
+			_tri(img, Vector2(n * 0.22, n * 0.32), Vector2(n * 0.32, n * 0.56),
+				Vector2(n * 0.12, n * 0.56))
+			_tri(img, Vector2(n * 0.78, n * 0.32), Vector2(n * 0.88, n * 0.56),
+				Vector2(n * 0.68, n * 0.56))
+			_rect(img, n * 0.18, n * 0.34, n * 0.82, n * 0.60)
+			_rect(img, n * 0.26, n * 0.58, n * 0.74, n * 0.78)
+			_rect(img, n * 0.20, n * 0.76, n * 0.80, n * 0.86)
