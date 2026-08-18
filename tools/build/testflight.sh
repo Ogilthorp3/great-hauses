@@ -107,6 +107,23 @@ if [ "$PLATFORM" = "visionos" ]; then
 </plist>
 PLIST
 
+  # THE iOS KEY IN A visionOS BUNDLE. Godot's visionOS exporter is derived
+  # from the iOS one and stamps
+  #     UIRequiredDeviceCapabilities = ["iphone-ipad-minimum-performance-a12"]
+  # into the generated Info.plist. App Store Connect rejects the upload:
+  #     "This bundle is invalid. The key UIRequiredDeviceCapabilities contains
+  #      value 'iphone-ipad-minimum-performance-a12' which is incompatible with
+  #      the MinimumOSVersion value of '26.0'. (90098)"
+  # It is an iPhone/iPad chip-floor declaration and means nothing on a headset.
+  # The export REGENERATES this file, so fixing the file by hand lasts exactly
+  # until the next build — it has to be stripped here, at the point of use,
+  # every time. Idempotent: absent key is not an error.
+  VPLIST="$VDIST/GreatHauses/GreatHauses-Info.plist"
+  if [ -f "$VPLIST" ] && /usr/libexec/PlistBuddy -c "Print :UIRequiredDeviceCapabilities" "$VPLIST" >/dev/null 2>&1; then
+    say "stripping iOS-only UIRequiredDeviceCapabilities from the visionOS plist"
+    /usr/libexec/PlistBuddy -c "Delete :UIRequiredDeviceCapabilities" "$VPLIST"
+  fi
+
   say "archiving visionOS (generic/platform=visionOS)"
   rm -rf "$ARCHIVE" "$EXPORTED"
   xcodebuild -project "$VDIST/GreatHauses.xcodeproj" -scheme GreatHauses \
