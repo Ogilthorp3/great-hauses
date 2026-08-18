@@ -87,6 +87,7 @@ func _ready() -> void:
 			_select.net_remembered_address(_load_remembered_address())
 		_probe_oracle()
 		_probe_maester()
+		_disable_offline_unreachable()
 		return
 
 	if _xr_log:
@@ -209,6 +210,29 @@ func _probe_oracle() -> void:
 		_select.set_opponent_enabled("ds4_oracle", up,
 			"" if up else probe.offline_reason)
 	probe.queue_free()
+
+
+## THE HAUS IS NOT ON THE ROAD (iOS, 2026-08-18). The Jedi Council seats are
+## LAN services on the Mini and the friend match is a direct peer link; an
+## iPad on cellular or a hotel network can reach neither. Left enabled they
+## do not fail fast — the council awaits five per-seat timeouts before it
+## gives up, which reads as a hung game rather than an absent opponent.
+##
+## They also drag iOS-specific baggage: a plain-HTTP call to a private
+## address needs an ATS exception, and any local-network traffic triggers
+## the system permission prompt and needs a usage string in Info.plist.
+## Rather than ship that half-configured, the iPad build offers the four
+## engine tiers — a complete game of chess that needs nothing but the
+## device — and says plainly why the others are dark.
+func _disable_offline_unreachable() -> void:
+	if not OS.has_feature("ios"):
+		return
+	if not (is_instance_valid(_select) and _select.is_inside_tree()):
+		return
+	_select.set_opponent_enabled("jedi_council", false,
+		"the Council sits in the haus — it cannot be reached from here")
+	_select.set_opponent_enabled("network", false,
+		"a friend match needs the haus network")
 
 
 func _probe_maester() -> void:
