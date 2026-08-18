@@ -14,6 +14,9 @@ extends Node3D
 @export var max_pitch := 0.45    ## Look up into soaring vaults and rose window
 @export var orbit_sensitivity := 0.008
 @export var zoom_step := 1.12
+## A pan gesture reports in points-per-frame, which is far coarser than a
+## mouse's pixel deltas; without a gain a two-finger drag barely moves.
+const TOUCH_ORBIT_GAIN := 7.0
 @export var lerp_speed := 12.0
 
 var _target_yaw := 0.0
@@ -43,10 +46,29 @@ func _unhandled_input(event: InputEvent) -> void:
 				if event.pressed:
 					target_distance = clampf(target_distance * zoom_step, min_distance, max_distance)
 	elif event is InputEventMouseMotion and _dragging:
-		_target_yaw = wrapf(_target_yaw - event.relative.x * orbit_sensitivity, -PI, PI)
-		_target_pitch = clampf(
-			_target_pitch - event.relative.y * orbit_sensitivity, min_pitch, max_pitch
-		)
+		_orbit_by(event.relative)
+	# ── TOUCH ──────────────────────────────────────────────────────────────
+	# A finger has no right button and no wheel, so on an iPad the camera was
+	# simply immovable: right-drag orbits and the wheel zooms, and a
+	# touchscreen offers neither. Godot raises real gesture events on Apple
+	# devices, so two fingers do what the right button did and a pinch does
+	# what the wheel did. A ONE-finger drag is deliberately left alone — it
+	# is how the board is played (touch is emulated as a left click), and
+	# stealing it would make the game unplayable to fix the camera.
+	elif event is InputEventPanGesture:
+		_orbit_by(-event.delta * TOUCH_ORBIT_GAIN)
+	elif event is InputEventMagnifyGesture:
+		# factor > 1 is fingers spreading, which should bring the board CLOSER
+		target_distance = clampf(target_distance / maxf(event.factor, 0.01),
+			min_distance, max_distance)
+
+
+## Shared by mouse drag and two-finger pan so the two can never drift apart.
+func _orbit_by(delta_px: Vector2) -> void:
+	_target_yaw = wrapf(_target_yaw - delta_px.x * orbit_sensitivity, -PI, PI)
+	_target_pitch = clampf(
+		_target_pitch - delta_px.y * orbit_sensitivity, min_pitch, max_pitch
+	)
 
 
 func _process(delta: float) -> void:

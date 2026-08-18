@@ -33,6 +33,19 @@ window/dpi/allow_hidpi=true
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
 
+[display]
+
+; iPad: this game is a board seen from a seat — it has no portrait layout, and
+; the HUD is laid out for a wide frame. Sensor landscape so either way up
+; works when the player picks the tablet off a table.
+window/handheld/orientation="sensor_landscape"
+
+[input_devices]
+
+; Explicit rather than relying on the engine default: a tap MUST arrive as a
+; left click, because that is the only way the board is played on glass.
+pointing/emulate_mouse_from_touch=true
+
 [rendering]
 
 environment/defaults/default_clear_color=Color(0.02, 0.02, 0.02, 1)

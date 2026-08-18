@@ -137,6 +137,10 @@ func is_ready() -> bool:
 func start(path := "") -> bool:
 	if _pipe != null:
 		return true
+	# iOS and Web cannot fork at all — refuse before touching the filesystem
+	# so the caller greys the seat out instead of waiting on a timeout.
+	if OS.has_feature("ios") or OS.has_feature("web"):
+		return false
 	var exe := path if not path.is_empty() else find_stockfish()
 	if exe.is_empty():
 		push_warning("UciEngine: no stockfish binary found (%s)" % install_hint())

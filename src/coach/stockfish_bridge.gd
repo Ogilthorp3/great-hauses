@@ -20,6 +20,9 @@ static func get_stockfish_path() -> String:
 		return _cached_bin_path
 
 	_checked_bin = true
+	if not platform_can_spawn():
+		_cached_bin_path = ""
+		return _cached_bin_path
 	for p in STOCKFISH_PATHS:
 		if FileAccess.file_exists(p):
 			_cached_bin_path = p
@@ -36,6 +39,15 @@ static func get_stockfish_path() -> String:
 
 	_cached_bin_path = ""
 	return ""
+
+
+## PLATFORMS THAT CANNOT FORK. iOS forbids spawning a child process outright
+## (App Store review rejects it and the sandbox blocks it), and Web has no
+## process model at all. Asking is the FIRST question, before any filesystem
+## probe or `which`, so the existing degradation path — a greyed-out Grand
+## Maester rather than a crash — is what the player meets on an iPad.
+static func platform_can_spawn() -> bool:
+	return not (OS.has_feature("ios") or OS.has_feature("web"))
 
 
 ## Check if Stockfish 18 is available
