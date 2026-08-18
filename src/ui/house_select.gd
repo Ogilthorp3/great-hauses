@@ -69,11 +69,11 @@ var _preview_swatches: HBoxContainer
 var _preview_pledge_btn: Button
 var _pledge_banner: PanelContainer
 
-var _opp_panel: PanelContainer
+var _opp_panel: Control
 var _opp_buttons: Array[Button] = []
 var _opp_confirm_btn: Button
 
-var _mode_panel: PanelContainer
+var _mode_panel: Control
 var _mode_buttons: Array[Button] = []
 var _mode_summary_label: Label
 var _mode_start_btn: Button
@@ -313,6 +313,13 @@ func _set_phase(p: Phase) -> void:
 	_net_panel.visible = p == Phase.NET
 	_preview.visible = p == Phase.HOUSE
 	_pledge_banner.visible = false
+
+	# Cleanly hide background crests and ring when in modals so nothing overlaps
+	if _ring != null:
+		_ring.visible = p == Phase.HOUSE
+	for crest in _crests:
+		crest.visible = p == Phase.HOUSE
+
 	_refresh_crest_highlights()
 	
 	if p == Phase.HOUSE:
@@ -320,6 +327,10 @@ func _set_phase(p: Phase) -> void:
 		_footer.text = "Click or Pinch a Haus to Preview · Click Again or Press Pledge Allegiance"
 	elif p == Phase.OPPONENT:
 		_set_opp_index(_opp_index)
+		var h := HouseRegistry.get_house(selected_house)
+		var sub: Label = _opp_panel.find_child("OppSubtitle", true, false)
+		if sub != null:
+			sub.text = "Pledged to %s  •  “%s”" % [str(h.get("name", "Great Haus")).to_upper(), str(h.get("motto", ""))]
 		_footer.text = "Choose your rival · Click Continue to proceed · Esc / Back to return"
 	elif p == Phase.MODE:
 		_set_mode_index(_mode_index)
@@ -383,26 +394,27 @@ func _style_opp_button(b: Button, active: bool, disabled := false) -> void:
 	if disabled:
 		var ash := Color(0.4, 0.38, 0.35)
 		b.add_theme_color_override("font_color", ash)
-		b.text = "%s  (Offline)" % title
+		b.text = "%s  (Offline)\n%s" % [title, desc]
 		b.tooltip_text = desc
 		return
 	
 	b.add_theme_color_override("font_color", GOLD if active else TEXT_WARM)
-	b.text = ("▶  %s  ◀\n%s" % [title, desc]) if active else ("%s\n%s" % [title, desc])
+	b.add_theme_font_size_override("font_size", AdaptiveScaleScript.font(15, self))
+	b.text = ("◆  %s  ◆\n%s" % [title, desc]) if active else ("%s\n%s" % [title, desc])
 	
 	var style := StyleBoxFlat.new()
 	style.corner_radius_top_left = 8
 	style.corner_radius_top_right = 8
 	style.corner_radius_bottom_left = 8
 	style.corner_radius_bottom_right = 8
-	style.set_content_margin_all(10)
+	style.set_content_margin_all(8)
 	if active:
-		style.bg_color = Color(0.22, 0.16, 0.1, 0.95)
+		style.bg_color = Color(0.24, 0.17, 0.09, 0.95)
 		style.border_color = GOLD
 		style.set_border_width_all(2)
 	else:
-		style.bg_color = Color(0.08, 0.07, 0.07, 0.75)
-		style.border_color = Color(0.3, 0.25, 0.2, 0.6)
+		style.bg_color = Color(0.08, 0.07, 0.08, 0.85)
+		style.border_color = Color(0.32, 0.28, 0.22, 0.6)
 		style.set_border_width_all(1)
 	b.add_theme_stylebox_override("normal", style)
 	b.add_theme_stylebox_override("hover", style)
@@ -413,20 +425,21 @@ func _style_mode_button(b: Button, active: bool) -> void:
 	var title: String = b.get_meta("label")
 	var desc: String = b.get_meta("desc")
 	b.add_theme_color_override("font_color", GOLD if active else TEXT_WARM)
-	b.text = ("▶  %s  ◀\n%s" % [title, desc]) if active else ("%s\n%s" % [title, desc])
+	b.add_theme_font_size_override("font_size", AdaptiveScaleScript.font(16, self))
+	b.text = ("◆  %s  ◆\n%s" % [title, desc]) if active else ("%s\n%s" % [title, desc])
 	
 	var style := StyleBoxFlat.new()
 	style.corner_radius_top_left = 8
 	style.corner_radius_top_right = 8
 	style.corner_radius_bottom_left = 8
 	style.corner_radius_bottom_right = 8
-	style.set_content_margin_all(14)
+	style.set_content_margin_all(10)
 	if active:
-		style.bg_color = Color(0.25, 0.18, 0.1, 0.95)
+		style.bg_color = Color(0.26, 0.18, 0.1, 0.95)
 		style.border_color = GOLD
-		style.set_border_width_all(3)
+		style.set_border_width_all(2)
 	else:
-		style.bg_color = Color(0.08, 0.07, 0.07, 0.75)
+		style.bg_color = Color(0.08, 0.07, 0.08, 0.85)
 		style.border_color = Color(0.35, 0.3, 0.22, 0.7)
 		style.set_border_width_all(1)
 	b.add_theme_stylebox_override("normal", style)
@@ -748,32 +761,49 @@ func _build_pledge_banner() -> void:
 
 
 func _build_opp_panel() -> void:
-	_opp_panel = PanelContainer.new()
+	_opp_panel = Control.new()
 	_opp_panel.name = "ChooseOpponent"
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.06, 0.05, 0.05, 0.96)
-	style.border_color = Color(0.65, 0.5, 0.25)
-	style.set_border_width_all(2)
-	style.set_content_margin_all(20)
-	style.corner_radius_top_left = 10
-	style.corner_radius_top_right = 10
-	style.corner_radius_bottom_left = 10
-	style.corner_radius_bottom_right = 10
-	_opp_panel.add_theme_stylebox_override("panel", style)
-	_opp_panel.set_anchors_preset(Control.PRESET_CENTER)
-	_opp_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	_opp_panel.grow_vertical = Control.GROW_DIRECTION_BOTH
+	_opp_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_opp_panel.z_index = 50
 	_opp_panel.visible = false
 
-	var root := VBoxContainer.new()
-	root.add_theme_constant_override("separation", 10)
-	_opp_panel.add_child(root)
+	# 1. Dark Vignette Scrim
+	var scrim := ColorRect.new()
+	scrim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	scrim.color = Color(0.02, 0.02, 0.03, 0.92)
+	_opp_panel.add_child(scrim)
 
+	# 2. Centered Zelda Slate Card
+	var card := PanelContainer.new()
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.07, 0.06, 0.08, 0.98)
+	style.border_color = GOLD
+	style.set_border_width_all(2)
+	style.set_content_margin_all(24)
+	style.corner_radius_top_left = 12
+	style.corner_radius_top_right = 12
+	style.corner_radius_bottom_left = 12
+	style.corner_radius_bottom_right = 12
+	card.add_theme_stylebox_override("panel", style)
+	card.set_anchors_preset(Control.PRESET_CENTER)
+	card.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	card.grow_vertical = Control.GROW_DIRECTION_BOTH
+	card.custom_minimum_size = Vector2(680, 560)
+	_opp_panel.add_child(card)
+
+	var root := VBoxContainer.new()
+	root.add_theme_constant_override("separation", 12)
+	card.add_child(root)
+
+	# Top Bar with clean Back Button & Centered Title
 	var top_bar := HBoxContainer.new()
+	top_bar.alignment = BoxContainer.ALIGNMENT_CENTER
+	root.add_child(top_bar)
+
 	var back_btn := Button.new()
-	back_btn.text = "← BACK TO HOUSES"
+	back_btn.text = "⎋  BACK TO HOUSES"
 	back_btn.focus_mode = Control.FOCUS_NONE
-	back_btn.add_theme_font_size_override("font_size", AdaptiveScaleScript.font(15, self))
+	back_btn.add_theme_font_size_override("font_size", AdaptiveScaleScript.font(13, self))
 	back_btn.add_theme_color_override("font_color", TEXT_DIM)
 	back_btn.pressed.connect(_step_back)
 	top_bar.add_child(back_btn)
@@ -782,22 +812,42 @@ func _build_opp_panel() -> void:
 	head.text = "CHOOSE YOUR OPPONENT"
 	head.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	head.add_theme_font_size_override("font_size", AdaptiveScaleScript.font(24, self))
-	head.add_theme_color_override("font_color", TEXT_WARM)
+	head.add_theme_font_size_override("font_size", AdaptiveScaleScript.font(22, self))
+	head.add_theme_color_override("font_color", GOLD)
+	head.add_theme_color_override("font_outline_color", Color.BLACK)
+	head.add_theme_constant_override("outline_size", 8)
 	top_bar.add_child(head)
-	root.add_child(top_bar)
 
+	var spacer := Control.new()
+	spacer.custom_minimum_size = Vector2(130, 0)
+	top_bar.add_child(spacer)
+
+	# Subtitle Haus Badge
+	var sub := Label.new()
+	sub.name = "OppSubtitle"
+	sub.text = "Select combatant difficulty tier for your campaign"
+	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sub.add_theme_font_size_override("font_size", AdaptiveScaleScript.font(13, self))
+	sub.add_theme_color_override("font_color", TEXT_WARM)
+	root.add_child(sub)
+
+	# Separator
+	var sep := HSeparator.new()
+	sep.add_theme_constant_override("separation", 8)
+	root.add_child(sep)
+
+	# Opponent Buttons List
 	var scroll := ScrollContainer.new()
 	scroll.name = "OppScroll"
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
-	scroll.custom_minimum_size = Vector2(580, clampf(size.y - 220.0, 280.0, 480.0))
+	scroll.custom_minimum_size = Vector2(630, 320)
 	root.add_child(scroll)
 
 	var list_box := VBoxContainer.new()
 	list_box.name = "OppList"
 	list_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	list_box.add_theme_constant_override("separation", 6)
+	list_box.add_theme_constant_override("separation", 8)
 	scroll.add_child(list_box)
 
 	for i in OPPONENTS.size():
@@ -805,29 +855,28 @@ func _build_opp_panel() -> void:
 		b.set_meta("label", str(OPPONENTS[i]["label"]))
 		b.set_meta("desc", str(OPPONENTS[i].get("desc", "")))
 		b.focus_mode = Control.FOCUS_NONE
-		b.custom_minimum_size = Vector2(560, 56)
-		b.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		b.add_theme_font_size_override("font_size", AdaptiveScaleScript.font(17, self))
+		b.custom_minimum_size = Vector2(610, 64)
 		b.pressed.connect(_on_opponent_pressed.bind(i))
 		_style_opp_button(b, i == 0)
 		list_box.add_child(b)
 		_opp_buttons.append(b)
 
+	# Confirm Button
 	_opp_confirm_btn = Button.new()
-	_opp_confirm_btn.text = "CONTINUE TO WAR MODE  →"
+	_opp_confirm_btn.text = "⚔️  CONTINUE TO WAR MODE  ▶"
 	_opp_confirm_btn.focus_mode = Control.FOCUS_NONE
-	_opp_confirm_btn.custom_minimum_size = Vector2(560, 46)
-	_opp_confirm_btn.add_theme_font_size_override("font_size", AdaptiveScaleScript.font(19, self))
-	_opp_confirm_btn.add_theme_color_override("font_color", GOLD)
+	_opp_confirm_btn.custom_minimum_size = Vector2(630, 48)
+	_opp_confirm_btn.add_theme_font_size_override("font_size", AdaptiveScaleScript.font(18, self))
+	_opp_confirm_btn.add_theme_color_override("font_color", Color(1.0, 0.92, 0.6))
 	
 	var cstyle := StyleBoxFlat.new()
-	cstyle.bg_color = Color(0.2, 0.15, 0.08, 0.95)
+	cstyle.bg_color = Color(0.24, 0.16, 0.08, 0.98)
 	cstyle.border_color = GOLD
 	cstyle.set_border_width_all(2)
-	cstyle.corner_radius_top_left = 6
-	cstyle.corner_radius_top_right = 6
-	cstyle.corner_radius_bottom_left = 6
-	cstyle.corner_radius_bottom_right = 6
+	cstyle.corner_radius_top_left = 8
+	cstyle.corner_radius_top_right = 8
+	cstyle.corner_radius_bottom_left = 8
+	cstyle.corner_radius_bottom_right = 8
 	_opp_confirm_btn.add_theme_stylebox_override("normal", cstyle)
 	_opp_confirm_btn.add_theme_stylebox_override("hover", cstyle)
 	_opp_confirm_btn.add_theme_stylebox_override("pressed", cstyle)
@@ -838,50 +887,75 @@ func _build_opp_panel() -> void:
 
 
 func _build_mode_panel() -> void:
-	_mode_panel = PanelContainer.new()
+	_mode_panel = Control.new()
 	_mode_panel.name = "HowWillYouFight"
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.06, 0.05, 0.05, 0.96)
-	style.border_color = Color(0.65, 0.5, 0.25)
-	style.set_border_width_all(2)
-	style.set_content_margin_all(26)
-	style.corner_radius_top_left = 10
-	style.corner_radius_top_right = 10
-	style.corner_radius_bottom_left = 10
-	style.corner_radius_bottom_right = 10
-	_mode_panel.add_theme_stylebox_override("panel", style)
-	_mode_panel.set_anchors_preset(Control.PRESET_CENTER)
-	_mode_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	_mode_panel.grow_vertical = Control.GROW_DIRECTION_BOTH
+	_mode_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_mode_panel.z_index = 50
 	_mode_panel.visible = false
+
+	# 1. Dark Vignette Scrim
+	var scrim := ColorRect.new()
+	scrim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	scrim.color = Color(0.02, 0.02, 0.03, 0.92)
+	_mode_panel.add_child(scrim)
+
+	# 2. Centered Zelda Slate Card
+	var card := PanelContainer.new()
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.07, 0.06, 0.08, 0.98)
+	style.border_color = GOLD
+	style.set_border_width_all(2)
+	style.set_content_margin_all(24)
+	style.corner_radius_top_left = 12
+	style.corner_radius_top_right = 12
+	style.corner_radius_bottom_left = 12
+	style.corner_radius_bottom_right = 12
+	card.add_theme_stylebox_override("panel", style)
+	card.set_anchors_preset(Control.PRESET_CENTER)
+	card.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	card.grow_vertical = Control.GROW_DIRECTION_BOTH
+	card.custom_minimum_size = Vector2(680, 520)
+	_mode_panel.add_child(card)
 
 	var root := VBoxContainer.new()
 	root.add_theme_constant_override("separation", 14)
-	_mode_panel.add_child(root)
+	card.add_child(root)
 
 	var top_bar := HBoxContainer.new()
+	top_bar.alignment = BoxContainer.ALIGNMENT_CENTER
+	root.add_child(top_bar)
+
 	var back_btn := Button.new()
-	back_btn.text = "← BACK TO OPPONENTS"
+	back_btn.text = "⎋  BACK TO OPPONENTS"
 	back_btn.focus_mode = Control.FOCUS_NONE
-	back_btn.add_theme_font_size_override("font_size", 15)
+	back_btn.add_theme_font_size_override("font_size", AdaptiveScaleScript.font(13, self))
 	back_btn.add_theme_color_override("font_color", TEXT_DIM)
 	back_btn.pressed.connect(_step_back)
 	top_bar.add_child(back_btn)
 
 	var head := Label.new()
-	head.text = "HOW WILL YOU FIGHT?"
+	head.text = "CAMPAIGN WAR MODE"
 	head.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	head.add_theme_font_size_override("font_size", 24)
-	head.add_theme_color_override("font_color", TEXT_WARM)
+	head.add_theme_font_size_override("font_size", AdaptiveScaleScript.font(22, self))
+	head.add_theme_color_override("font_color", GOLD)
+	head.add_theme_color_override("font_outline_color", Color.BLACK)
+	head.add_theme_constant_override("outline_size", 8)
 	top_bar.add_child(head)
-	root.add_child(top_bar)
+
+	var spacer := Control.new()
+	spacer.custom_minimum_size = Vector2(150, 0)
+	top_bar.add_child(spacer)
 
 	_mode_summary_label = Label.new()
 	_mode_summary_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_mode_summary_label.add_theme_font_size_override("font_size", 18)
-	_mode_summary_label.add_theme_color_override("font_color", GOLD)
+	_mode_summary_label.add_theme_font_size_override("font_size", AdaptiveScaleScript.font(15, self))
+	_mode_summary_label.add_theme_color_override("font_color", Color(1.0, 0.88, 0.5))
 	root.add_child(_mode_summary_label)
+
+	var sep := HSeparator.new()
+	sep.add_theme_constant_override("separation", 8)
+	root.add_child(sep)
 
 	var list_box := VBoxContainer.new()
 	list_box.add_theme_constant_override("separation", 10)
@@ -892,8 +966,7 @@ func _build_mode_panel() -> void:
 		b.set_meta("label", str(MODES[i]["label"]))
 		b.set_meta("desc", str(MODES[i].get("desc", "")))
 		b.focus_mode = Control.FOCUS_NONE
-		b.custom_minimum_size = Vector2(560, 64)
-		b.add_theme_font_size_override("font_size", 22)
+		b.custom_minimum_size = Vector2(630, 68)
 		b.pressed.connect(_on_mode_pressed.bind(i))
 		_style_mode_button(b, i == 0)
 		list_box.add_child(b)
@@ -902,14 +975,14 @@ func _build_mode_panel() -> void:
 	_mode_start_btn = Button.new()
 	_mode_start_btn.text = "⚔️  START THE WAR  ⚔️"
 	_mode_start_btn.focus_mode = Control.FOCUS_NONE
-	_mode_start_btn.custom_minimum_size = Vector2(560, 56)
-	_mode_start_btn.add_theme_font_size_override("font_size", 24)
-	_mode_start_btn.add_theme_color_override("font_color", Color(1.0, 0.9, 0.5))
+	_mode_start_btn.custom_minimum_size = Vector2(630, 52)
+	_mode_start_btn.add_theme_font_size_override("font_size", AdaptiveScaleScript.font(20, self))
+	_mode_start_btn.add_theme_color_override("font_color", Color(1.0, 0.92, 0.6))
 	
 	var sstyle := StyleBoxFlat.new()
 	sstyle.bg_color = Color(0.3, 0.2, 0.08, 0.98)
 	sstyle.border_color = GOLD
-	sstyle.set_border_width_all(3)
+	sstyle.set_border_width_all(2)
 	sstyle.corner_radius_top_left = 8
 	sstyle.corner_radius_top_right = 8
 	sstyle.corner_radius_bottom_left = 8

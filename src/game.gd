@@ -58,6 +58,7 @@ const CoachEngineScript := preload("res://src/coach/coach_engine.gd")
 const CoachOverlayScript := preload("res://src/coach/coach_overlay.gd")
 const DevConsoleScript := preload("res://src/ui/dev_console.gd")
 const JediCouncilOpponentScript := preload("res://src/ai/jedi_council.gd")
+const CathedralCinematicIntroScript := preload("res://src/cinematics/cathedral_cinematic_intro.gd")
 
 const TOURNAMENT_UNDO_LIMIT := 3     # take-backs per tournament game (single: unlimited)
 
@@ -534,6 +535,13 @@ func _ready() -> void:
 		_smoke()
 	elif args.has("--dump-tree"):
 		_dump_tree()
+	else:
+		var game_cam := get_node_or_null("CameraRig/Camera3D") as Camera3D
+		if game_cam != null and not Session.is_network():
+			var intro := CathedralCinematicIntroScript.new()
+			intro.name = "CathedralCinematicIntro"
+			add_child(intro)
+			intro.start_cinematic(game_cam)
 	if net == null and state.turn != player_color and not game_over:
 		_kick_ai_opening()
 	_lt("ready-exit")
