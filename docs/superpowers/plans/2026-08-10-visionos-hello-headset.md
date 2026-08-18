@@ -328,6 +328,11 @@ encrypt_directory=false
 application/app_role=1
 application/immersion_style=0
 application/bundle_identifier="vc.triptyq.greathauses"
+; ^ SUPERSEDED 2026-08-18 — the shipping identifier is
+;   haus.sanctum.greathauses. This line is left as the historical record of
+;   what the visionOS plan specified; do not copy it. Great Hauses is a
+;   SANCTUM product, and the two lanes do not cross: the haus must not hang
+;   off the firm's identity. See tools/build/testflight.sh for the rule.
 application/short_version="0.3.0"
 application/version="0.3.0"
 application/min_visionos_version="26.0"

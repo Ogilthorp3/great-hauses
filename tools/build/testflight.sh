@@ -23,6 +23,14 @@
 #      role and this key is a Developer key. Until that record exists, upload
 #      fails with "no suitable application record was found".
 #
+# WHY THE BUNDLE ID IS haus.sanctum.*: this is a SANCTUM product, not a
+# Triptyq one. The two lanes do not cross — the haus must not hang off the
+# firm's identity, or the app is misfiled the day Bert leaves it. The rule
+# (memory: haus-vs-product domains) is that anything a Sanctum USER touches
+# lives at sanctum.haus / sanctum.run, which reverses to haus.sanctum.*;
+# personal haus infrastructure would be nepveu.name. A chess game with a
+# Sanctum cathedral and a Sanctum council in it is the product.
+#
 # WHY THE EXPORT METHOD MATTERS: TestFlight takes an APP STORE build.
 # Ad-Hoc is signed to a fixed device list and App Store Connect rejects it.
 # The preset carries method 0 (App Store) for release; do not "fix" it to
@@ -33,7 +41,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DIST="$ROOT/../great-hauses-dist/ios"
 PRESET="iOS"
-BUNDLE_ID="vc.triptyq.greathauses"
+BUNDLE_ID="haus.sanctum.greathauses"
 TEAM="GJ994MN2YF"
 ASC_KEY_ID="DYWDH8NDH7"
 ASC_ISSUER="bb24799c-61ce-4ae8-b07a-7138e06ec34c"
