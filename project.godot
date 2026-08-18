@@ -35,6 +35,7 @@ window/stretch/aspect="expand"
 
 [rendering]
 
+environment/defaults/default_clear_color=Color(0.02, 0.02, 0.02, 1)
 renderer/rendering_method="mobile"
 textures/vram_compression/import_etc2_astc=true
 vrs/mode=0

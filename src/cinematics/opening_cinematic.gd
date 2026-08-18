@@ -1,158 +1,156 @@
 class_name OpeningCinematic
 extends CanvasLayer
 ## OpeningCinematic — Civilization-Style Epic Opening Sequence for Great Hauses Chess.
-## Displays the cinematic trailer with prominent shimmering Gold typography,
-## dramatic narration cards, and smooth transition to the Hall of Banners.
+## Displays the Sanctum Gothic Cathedral backdrop with gold typography,
+## responsive layout, and smooth zero-hitch transition to the Hall of Banners.
 
 signal cinematic_completed()
 
-var _video_player: VideoStreamPlayer = null
-var _title_label: Label = null
-var _subtitle_label: Label = null
-var _prompt_label: Label = null
-var _fade_rect: ColorRect = null
-var _tween: Tween = null
-var _audio_player: AudioStreamPlayer = null
+const INTRO_IMG_PATH := "res://assets/cinematics/opening_cathedral.jpg"
+const AdaptiveScaleScript := preload("res://src/ui/adaptive_scale.gd")
 
-const INTRO_VIDEO_PATH := "res://assets/cinematics/opening_intro.ogv"
 const GOLD_TITLE := Color(1.0, 0.88, 0.42)
 const GOLD_SUB := Color(0.92, 0.78, 0.32)
-const TEXT_WARM := Color(0.93, 0.90, 0.84)
-const OUTLINE_DARK := Color(0.06, 0.04, 0.02, 0.95)
+const TEXT_WARM := Color(0.94, 0.90, 0.84)
+const OUTLINE_DARK := Color(0.04, 0.03, 0.02, 0.95)
+
+var _bg_rect: TextureRect = null
+var _prompt_label: Label = null
+var _fade_rect: ColorRect = null
+var _has_finished: bool = false
 
 
 func _ready() -> void:
-	layer = 50
+	layer = 80
 	_build_ui()
-	_start_playback()
+	_start_animation()
 
 
 func _build_ui() -> void:
-	# Dark cinematic backdrop
-	var bg := ColorRect.new()
-	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
-	bg.color = Color(0.02, 0.02, 0.04, 1.0)
-	add_child(bg)
+	# 1. Base Dark Slate Backdrop
+	var base_bg := ColorRect.new()
+	base_bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	base_bg.color = Color(0.03, 0.025, 0.03, 1.0)
+	add_child(base_bg)
 
-	# Video Player
-	_video_player = VideoStreamPlayer.new()
-	_video_player.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_video_player.expand = true
-	_video_player.loop = false
-	_video_player.finished.connect(_on_video_finished)
-	add_child(_video_player)
+	# 2. Cathedral Artwork Image (Full Screen Cover)
+	_bg_rect = TextureRect.new()
+	_bg_rect.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_bg_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	_bg_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	if ResourceLoader.exists(INTRO_IMG_PATH):
+		_bg_rect.texture = load(INTRO_IMG_PATH)
+	add_child(_bg_rect)
 
-	# Cinematic Title Overlay Container
-	var overlay := VBoxContainer.new()
-	overlay.set_anchors_preset(Control.PRESET_CENTER)
-	overlay.position = Vector2(-500, -120)
-	overlay.custom_minimum_size = Vector2(1000, 240)
-	overlay.add_theme_constant_override("separation", 14)
-	add_child(overlay)
+	# 3. Vignette Gradient Overlay
+	var vig_grad := Gradient.new()
+	vig_grad.set_color(0, Color(0.0, 0.0, 0.0, 0.25))
+	vig_grad.set_color(1, Color(0.0, 0.0, 0.0, 0.85))
+	var vig_tex := GradientTexture2D.new()
+	vig_tex.gradient = vig_grad
+	vig_tex.fill = GradientTexture2D.FILL_RADIAL
+	vig_tex.fill_from = Vector2(0.5, 0.5)
+	vig_tex.fill_to = Vector2(0.5, 1.0)
+	var vignette := TextureRect.new()
+	vignette.texture = vig_tex
+	vignette.stretch_mode = TextureRect.STRETCH_SCALE
+	vignette.set_anchors_preset(Control.PRESET_FULL_RECT)
+	add_child(vignette)
 
-	# Main Title in BIG GOLD FONT
-	_title_label = Label.new()
-	_title_label.text = "G R E A T   H A U S E S   C H E S S"
-	_title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_title_label.add_theme_font_size_override("font_size", 46)
-	_title_label.add_theme_color_override("font_color", GOLD_TITLE)
-	_title_label.add_theme_color_override("font_outline_color", OUTLINE_DARK)
-	_title_label.add_theme_constant_override("outline_size", 10)
-	_title_label.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.8))
-	_title_label.add_theme_constant_override("shadow_offset_x", 3)
-	_title_label.add_theme_constant_override("shadow_offset_y", 4)
-	overlay.add_child(_title_label)
+	# 4. Centered Title & Lore Container
+	var center_box := VBoxContainer.new()
+	center_box.set_anchors_preset(Control.PRESET_CENTER)
+	center_box.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	center_box.grow_vertical = Control.GROW_DIRECTION_BOTH
+	center_box.alignment = BoxContainer.ALIGNMENT_CENTER
+	center_box.add_theme_constant_override("separation", 14)
+	add_child(center_box)
 
-	# Subtitle / Motto in Rich Gold
-	_subtitle_label = Label.new()
-	_subtitle_label.text = "⚔️   NINE BANNERS. ONE THRONE.   ⚔️"
-	_subtitle_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_subtitle_label.add_theme_font_size_override("font_size", 20)
-	_subtitle_label.add_theme_color_override("font_color", GOLD_SUB)
-	_subtitle_label.add_theme_color_override("font_outline_color", OUTLINE_DARK)
-	_subtitle_label.add_theme_constant_override("outline_size", 6)
-	overlay.add_child(_subtitle_label)
+	var title_lbl := Label.new()
+	title_lbl.text = "G R E A T   H A U S E S   C H E S S"
+	title_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title_lbl.add_theme_font_size_override("font_size", AdaptiveScaleScript.font(44, self))
+	title_lbl.add_theme_color_override("font_color", GOLD_TITLE)
+	title_lbl.add_theme_color_override("font_outline_color", OUTLINE_DARK)
+	title_lbl.add_theme_constant_override("outline_size", 10)
+	title_lbl.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.85))
+	title_lbl.add_theme_constant_override("shadow_offset_x", 3)
+	title_lbl.add_theme_constant_override("shadow_offset_y", 4)
+	center_box.add_child(title_lbl)
 
-	# Narrative Lore line
-	var lore_label := Label.new()
-	lore_label.text = "“From the embers of ancient stone, the armies assemble for war.”"
-	lore_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	lore_label.add_theme_font_size_override("font_size", 16)
-	lore_label.add_theme_color_override("font_color", TEXT_WARM)
-	lore_label.add_theme_color_override("font_outline_color", OUTLINE_DARK)
-	lore_label.add_theme_constant_override("outline_size", 4)
-	overlay.add_child(lore_label)
+	var sub_lbl := Label.new()
+	sub_lbl.text = "⚔️   NINE BANNERS. ONE THRONE.   ⚔️"
+	sub_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sub_lbl.add_theme_font_size_override("font_size", AdaptiveScaleScript.font(20, self))
+	sub_lbl.add_theme_color_override("font_color", GOLD_SUB)
+	sub_lbl.add_theme_color_override("font_outline_color", OUTLINE_DARK)
+	sub_lbl.add_theme_constant_override("outline_size", 6)
+	center_box.add_child(sub_lbl)
 
-	# Pulsing skip prompt at bottom
+	var lore_lbl := Label.new()
+	lore_lbl.text = "“In the soaring vaults of the Grand Cathedral, the ancient battle begins.”"
+	lore_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lore_lbl.add_theme_font_size_override("font_size", AdaptiveScaleScript.font(16, self))
+	lore_lbl.add_theme_color_override("font_color", TEXT_WARM)
+	lore_lbl.add_theme_color_override("font_outline_color", OUTLINE_DARK)
+	lore_lbl.add_theme_constant_override("outline_size", 4)
+	center_box.add_child(lore_lbl)
+
+	# 5. Pulsing Bottom Prompt
+	var bottom_box := MarginContainer.new()
+	bottom_box.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	bottom_box.add_theme_constant_override("margin_bottom", 40)
+	add_child(bottom_box)
+
 	_prompt_label = Label.new()
-	_prompt_label.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	_prompt_label.position = Vector2(0, -65)
+	_prompt_label.text = "▶  PRESS SPACE, ENTER OR CLICK TO ENTER THE HALL OF BANNERS  ◀"
 	_prompt_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_prompt_label.add_theme_font_size_override("font_size", 15)
+	_prompt_label.add_theme_font_size_override("font_size", AdaptiveScaleScript.font(15, self))
 	_prompt_label.add_theme_color_override("font_color", GOLD_SUB)
 	_prompt_label.add_theme_color_override("font_outline_color", OUTLINE_DARK)
-	_prompt_label.add_theme_constant_override("outline_size", 5)
-	_prompt_label.text = "▶  PRESS SPACE, ENTER OR CLICK TO ENTER THE HALL OF BANNERS  ◀"
-	add_child(_prompt_label)
+	_prompt_label.add_theme_constant_override("outline_size", 6)
+	bottom_box.add_child(_prompt_label)
 
-	# Subtle breathing pulse on prompt
 	var pulse := create_tween().set_loops()
-	pulse.tween_property(_prompt_label, "modulate:a", 0.4, 0.9).set_trans(Tween.TRANS_SINE)
-	pulse.tween_property(_prompt_label, "modulate:a", 1.0, 0.9).set_trans(Tween.TRANS_SINE)
+	pulse.tween_property(_prompt_label, "modulate:a", 0.35, 0.85).set_trans(Tween.TRANS_SINE)
+	pulse.tween_property(_prompt_label, "modulate:a", 1.0, 0.85).set_trans(Tween.TRANS_SINE)
 
-	# Audio player for cinematic stinger
-	_audio_player = AudioStreamPlayer.new()
-	_audio_player.bus = &"Master"
-	add_child(_audio_player)
-
-	# Fade overlay
+	# 6. Fade-In Black Curtain
 	_fade_rect = ColorRect.new()
 	_fade_rect.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_fade_rect.color = Color(0, 0, 0, 1.0)
 	add_child(_fade_rect)
 
 
-func _start_playback() -> void:
-	# Fade in from black
-	_tween = create_tween()
-	_tween.tween_property(_fade_rect, "color:a", 0.0, 1.0)
+func _start_animation() -> void:
+	var tw := create_tween()
+	tw.tween_property(_fade_rect, "color:a", 0.0, 0.8).set_trans(Tween.TRANS_SINE)
 
-	# Play video if present
-	if ResourceLoader.exists(INTRO_VIDEO_PATH):
-		var stream = load(INTRO_VIDEO_PATH)
-		if stream is VideoStream:
-			_video_player.stream = stream
-			_video_player.play()
-			return
+	# Subtle Ken Burns zoom on the Cathedral
+	var zoom_tw := create_tween()
+	zoom_tw.tween_property(_bg_rect, "scale", Vector2(1.06, 1.06), 12.0).set_trans(Tween.TRANS_SINE)
 
-	# Fallback timer when no video stream present
-	var seq_tween := create_tween()
-	seq_tween.tween_interval(5.0)
-	seq_tween.tween_callback(finish_cinematic)
+	# Auto-advance after 4.5 seconds if untouched
+	var auto_tw := create_tween()
+	auto_tw.tween_interval(4.5)
+	auto_tw.tween_callback(finish_cinematic)
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventKey and event.pressed and not event.echo:
-		if event.keycode in [KEY_SPACE, KEY_ESCAPE, KEY_ENTER]:
-			finish_cinematic()
-			get_viewport().set_input_as_handled()
-	elif event is InputEventMouseButton and event.pressed:
+	if _has_finished:
+		return
+	if (event is InputEventKey and event.pressed and not event.echo) or (event is InputEventMouseButton and event.pressed):
 		finish_cinematic()
 		get_viewport().set_input_as_handled()
 
 
-func _on_video_finished() -> void:
-	finish_cinematic()
-
-
 func finish_cinematic() -> void:
-	if _fade_rect.color.a > 0.8:
+	if _has_finished:
 		return
-	if _video_player != null and _video_player.is_playing():
-		_video_player.stop()
+	_has_finished = true
 
 	var t := create_tween()
-	t.tween_property(_fade_rect, "color:a", 1.0, 0.4)
+	t.tween_property(_fade_rect, "color:a", 1.0, 0.35).set_trans(Tween.TRANS_SINE)
 	t.tween_callback(func():
 		cinematic_completed.emit()
 		queue_free()
