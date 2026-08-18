@@ -118,7 +118,8 @@ func _build_ui() -> void:
 
 	# Player 1 Champion Card
 	var p_data := HouseRegistry.get_house(_player_house_id)
-	_p1_panel = _create_fighter_card(p_data, "1P DEFENDING CHAMPION", "WHITE ARMY", ARCADE_GOLD, true)
+	var p1_rank := "Defending Grand Champion (1P)"
+	_p1_panel = _create_fighter_card(p_data, "1P DEFENDING CHAMPION", "WHITE ARMY", ARCADE_GOLD, true, p1_rank)
 	arena.add_child(_p1_panel)
 
 	# Center Punch-Out VS Emblem
@@ -146,10 +147,10 @@ func _build_ui() -> void:
 	_vs_node.add_child(_fight_label)
 
 	var prompt_label := Label.new()
-	prompt_label.text = "[ Space / Enter ]"
+	prompt_label.text = "[ Space / Enter to Begin Battle ]"
 	prompt_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	prompt_label.add_theme_font_size_override("font_size", AdaptiveScaleScript.font(11, self))
-	prompt_label.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
+	prompt_label.add_theme_color_override("font_color", Color(0.85, 0.85, 0.85))
 	_vs_node.add_child(prompt_label)
 
 	# Player 2 Challenger Card
@@ -205,7 +206,9 @@ func _build_ui() -> void:
 
 func _create_fighter_card(house: Dictionary, role_tag: String, army: String, border_col: Color, is_p1: bool, extra_stat: String = "") -> PanelContainer:
 	var card := PanelContainer.new()
-	card.custom_minimum_size = Vector2(420, 520)
+	card.custom_minimum_size = Vector2(430, 540)
+	card.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	card.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 
 	var style := StyleBoxFlat.new()
 	style.bg_color = Color(0.06, 0.05, 0.08, 0.96)
@@ -220,6 +223,7 @@ func _create_fighter_card(house: Dictionary, role_tag: String, army: String, bor
 
 	var vbox := VBoxContainer.new()
 	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	vbox.custom_minimum_size = Vector2(398, 508)
 	vbox.add_theme_constant_override("separation", 10)
 	card.add_child(vbox)
 
@@ -235,12 +239,12 @@ func _create_fighter_card(house: Dictionary, role_tag: String, army: String, bor
 
 	# 2. Majestic Heraldic Centerpiece — Ornate Shield & Glowing Sigil
 	var emblem_container := CenterContainer.new()
-	emblem_container.custom_minimum_size = Vector2(380, 240)
+	emblem_container.custom_minimum_size = Vector2(398, 230)
 	vbox.add_child(emblem_container)
 
 	# Ornate Shield Background
 	var shield_box := PanelContainer.new()
-	shield_box.custom_minimum_size = Vector2(240, 240)
+	shield_box.custom_minimum_size = Vector2(230, 230)
 	var shield_style := StyleBoxFlat.new()
 	
 	# Extract House Primary / Secondary Color
@@ -252,10 +256,10 @@ func _create_fighter_card(house: Dictionary, role_tag: String, army: String, bor
 	shield_style.bg_color = sec_col.lerp(Color.BLACK, 0.45)
 	shield_style.border_color = border_col
 	shield_style.set_border_width_all(4)
-	shield_style.corner_radius_top_left = 120
-	shield_style.corner_radius_top_right = 120
-	shield_style.corner_radius_bottom_left = 120
-	shield_style.corner_radius_bottom_right = 120
+	shield_style.corner_radius_top_left = 115
+	shield_style.corner_radius_top_right = 115
+	shield_style.corner_radius_bottom_left = 115
+	shield_style.corner_radius_bottom_right = 115
 	shield_box.add_theme_stylebox_override("panel", shield_style)
 	emblem_container.add_child(shield_box)
 
@@ -264,7 +268,7 @@ func _create_fighter_card(house: Dictionary, role_tag: String, army: String, bor
 	shield_box.add_child(sigil_center)
 
 	var sigil_tex := TextureRect.new()
-	sigil_tex.custom_minimum_size = Vector2(170, 170)
+	sigil_tex.custom_minimum_size = Vector2(160, 160)
 	sigil_tex.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	sigil_tex.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 
@@ -305,11 +309,12 @@ func _create_fighter_card(house: Dictionary, role_tag: String, army: String, bor
 
 	# 4. Tale of the Tape Stats Grid
 	var stats_panel := PanelContainer.new()
+	stats_panel.custom_minimum_size = Vector2(398, 110)
 	var sstyle := StyleBoxFlat.new()
 	sstyle.bg_color = Color(0.03, 0.03, 0.04, 0.90)
 	sstyle.border_color = border_col.lerp(Color.BLACK, 0.3)
 	sstyle.set_border_width_all(1)
-	sstyle.set_content_margin_all(10)
+	sstyle.set_content_margin_all(8)
 	sstyle.corner_radius_top_left = 8
 	sstyle.corner_radius_top_right = 8
 	sstyle.corner_radius_bottom_left = 8
@@ -318,7 +323,8 @@ func _create_fighter_card(house: Dictionary, role_tag: String, army: String, bor
 	vbox.add_child(stats_panel)
 
 	var stats_vbox := VBoxContainer.new()
-	stats_vbox.add_theme_constant_override("separation", 4)
+	stats_vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	stats_vbox.add_theme_constant_override("separation", 3)
 	stats_panel.add_child(stats_vbox)
 
 	var realm_lbl := Label.new()
@@ -378,7 +384,7 @@ func _process(delta: float) -> void:
 	if not _is_loading:
 		return
 	_elapsed += delta
-	var progress := clampf(_elapsed / 2.2, 0.0, 1.0)
+	var progress := clampf(_elapsed / 6.2, 0.0, 1.0)
 	if _meter_bar != null:
 		_meter_bar.value = progress * 100.0
 
@@ -387,7 +393,7 @@ func _process(delta: float) -> void:
 		var pulse := 1.0 + 0.08 * sin(_elapsed * 12.0)
 		_vs_label.scale = Vector2(pulse, pulse)
 
-	if _elapsed >= 2.4:
+	if _elapsed >= 7.0:
 		_proceed_to_game()
 
 
