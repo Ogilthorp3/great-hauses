@@ -5,14 +5,13 @@ extends Node3D
 ## the pivot. Right-drag orbits, mouse wheel zooms, everything lerps.
 
 @export var target_distance := 11.5
-@export var min_distance := 4.0
-## Clamped so the camera can never back out through the great hall's walls
-## at shallow pitch (env module's framing note: safe ceiling ~13).
-@export var max_distance := 13.0
+@export var min_distance := 3.5
+## Expanded distance & pitch bounds for the soaring Sanctum Gothic Cathedral
+@export var max_distance := 26.0
 @export var yaw := PI            ## radians; PI = behind the Frost side
 @export var pitch := -0.85       ## radians; negative looks down at the board
-@export var min_pitch := -1.35
-@export var max_pitch := -0.12
+@export var min_pitch := -1.52   ## Near vertical top-down view
+@export var max_pitch := 0.45    ## Look up into soaring vaults and rose window
 @export var orbit_sensitivity := 0.008
 @export var zoom_step := 1.12
 @export var lerp_speed := 12.0

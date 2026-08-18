@@ -82,42 +82,26 @@ const PILLAR_SCENE: PackedScene = preload("res://assets/kaykit-dungeon/pillar.gl
 const TABLE_SCENE: PackedScene = preload("res://assets/kaykit-dungeon/table_long.gltf")
 const CANDLE_SCENE: PackedScene = preload("res://assets/kaykit-dungeon/candle_triple.gltf")
 const THRONE_SCENE: PackedScene = preload("res://assets/custom-props/throne.glb")
-## The drape shapes the sigil-less dressing is cut from — same CC0 pack, same
-## dungeon_texture.png, so they cost no new texture memory. banner_thin is one
-## 1.1 u drop (83 tris); banner_triple is a 3.7 u three-panel swag in a SINGLE
-## mesh (263 tris), which is why the corners are cheap.
+const CATHEDRAL_SCENE: PackedScene = preload("res://assets/environment/sanctum_cathedral.glb")
+
 const DRAPE_THIN_SCENE: PackedScene = preload("res://assets/kaykit-dungeon/banner_thin_white.gltf")
 const DRAPE_TRIPLE_SCENE: PackedScene = preload("res://assets/kaykit-dungeon/banner_triple_white.gltf")
 
 const TorchScript := preload("res://src/env/torch.gd")
 const BannerScript := preload("res://src/env/banner.gd")
-## Shared dragon controller (loader + clips + emissive lift) — the single
-## owner of the dragon.glb staging since the spectator/ashfall module.
 const DragonRigScript := preload("res://src/cinematics/dragon_rig.gd")
+const CathedralDragonScript := preload("res://src/env/cathedral_dragon.gd")
+
+var cathedral_instance: Node3D = null
+var cathedral_dragon: CathedralDragon = null
 
 const FLOOR_Y := -0.3         # hall floor top (plinth bottom)
 const WALL_HALF := 12.0       # wall centerline distance from board center
 const SEGMENT_XS := [-10.0, -6.0, -2.0, 2.0, 6.0, 10.0]  # 6 x 4u = 24u side
 
-## ── THE HALL HAD NO TOP (critic defect, 2026-08-09) ───────────────────────
-## One wall course is 4 u, so the stone stopped at y 3.7 and above that the
-## room was the Environment's background colour. Two frames were shipping that
-## hole: `showcase/10_throne_room` is ~40 % black over the banners (its camera
-## looks level at the far wall, whose frame top is y 7.20 — three and a half
-## units of nothing), and `dragon-live/04_mid_ashfall` films the airborne wyrm
-## from a low dolly, so every sightline behind it left the room entirely.
-##
-## Both are the same missing geometry, and the fix is the cheapest one there
-## is: TWO more courses of the wall mesh — appended to the SAME MultiMesh, so
-## the enclosure costs zero extra draw calls — plus a ceiling and a rafter
-## band above the ceremony's flight ceiling.
 const WALL_COURSE := 4.0      # one wall segment's height
 const WALL_COURSES := 3       # 3 x 4 u: stone up to y 11.7
 const CEILING_Y := FLOOR_Y + WALL_COURSE * WALL_COURSES
-## The rafters hang under the ceiling, and they must clear EVERY airborne beat
-## the ceremony has: the tableau dragon tops out near y 7.6 (root 4.04 at
-## scale 1.6) and the ashfall bank flies at root 5.11 — 9.6 is above both with
-## room to spare, and still inside the frame of any camera looking up.
 const RAFTER_Y := 9.6
 const RAFTER_ZS := [-10.0, -6.0, -2.0, 2.0, 6.0, 10.0]
 
@@ -260,9 +244,8 @@ var _fps_seconds := 0
 
 
 func _ready() -> void:
+	_build_cathedral()
 	_build_floor()
-	_build_walls()
-	_build_roof()
 	_build_wainscot()
 	_build_pillars()
 	_build_tables()
@@ -271,6 +254,7 @@ func _ready() -> void:
 	_build_banner_drapes()
 	_build_throne()
 	_build_fill_lights()
+	_build_cathedral_dragon()
 	_dress_from_session()
 	var args := OS.get_cmdline_user_args()
 	if args.has("--env-fps"):
@@ -794,30 +778,40 @@ func dragon_rest() -> Vector3:
 	return Vector3(7.6, FLOOR_Y, 0.0)
 
 
+func _build_cathedral() -> void:
+	if CATHEDRAL_SCENE != null:
+		cathedral_instance = CATHEDRAL_SCENE.instantiate()
+		cathedral_instance.name = "SanctumCathedral"
+		add_child(cathedral_instance)
+
+
+func _build_cathedral_dragon() -> void:
+	cathedral_dragon = CathedralDragonScript.new()
+	cathedral_dragon.name = "CathedralDragon"
+	add_child(cathedral_dragon)
+
+
 func _build_fill_lights() -> void:
-	## Readability pass, part 2 (part 1 is the Environment in game.tscn).
-	## Cool fill from the camera side lifts House Frost's back rank; a rim
-	## from beyond the far wall silhouettes House Ember against the dark.
-	## Both shadowless — the Sun stays the only shadow caster.
-	##
-	## ISSUES.md #15: the FAR army reads as mud because it faces the camera
-	## (-Z) while the Sun rakes from the near-left and the torches are wall
-	## fixtures. CoolFill is the only light that hits a far fighter's FACE,
-	## and at 0.24 it barely did — more than doubled. Adding a light is not
-	## an option (the Mobile renderer's 8-omni budget is full with the hall
-	## torches), so the two existing fill directionals carry it.
 	var fill := DirectionalLight3D.new()
 	fill.name = "CoolFill"
 	fill.light_color = Color(0.6, 0.68, 0.86)
 	fill.light_energy = 0.5
 	fill.basis = Basis.looking_at(Vector3(-0.45, -0.7, 0.55).normalized())
 	add_child(fill)
+
 	var rim := DirectionalLight3D.new()
 	rim.name = "Rim"
 	rim.light_color = Color(0.7, 0.75, 0.9)
 	rim.light_energy = 0.55
 	rim.basis = Basis.looking_at(Vector3(0.1, -0.5, -1.0).normalized())
 	add_child(rim)
+
+	var rose_light := DirectionalLight3D.new()
+	rose_light.name = "RoseWindowLight"
+	rose_light.light_color = Color(1.0, 0.84, 0.55)
+	rose_light.light_energy = 0.65
+	rose_light.basis = Basis.looking_at(Vector3(0.0, -0.65, -0.75).normalized())
+	add_child(rose_light)
 
 
 # -- fps probe -------------------------------------------------------------

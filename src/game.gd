@@ -305,6 +305,11 @@ func test_piece_animation(piece_type: int = -1) -> void:
 
 
 func test_dragon_action(action: String) -> void:
+	var hall: GreatHall = get_node_or_null("GreatHall")
+	if hall != null and is_instance_valid(hall):
+		var cd = hall.get("cathedral_dragon")
+		if cd != null and is_instance_valid(cd) and cd.has_method("swoop_over_altar"):
+			cd.swoop_over_altar()
 	if spectator == null:
 		return
 	match action.to_lower():
