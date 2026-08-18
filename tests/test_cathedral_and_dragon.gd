@@ -27,6 +27,7 @@ func _main() -> void:
 	_test_flight_path()
 	_test_flight_smoothness()
 	_test_dragon_door()
+	_test_coronas()
 	print("---")
 	if failed == 0:
 		print("CATHEDRAL OK — all %d checks passed" % passed)
@@ -260,3 +261,51 @@ func _test_dragon_door() -> void:
 	var off := Vector2(crossing.x - centre.x, crossing.y - centre.y).length()
 	check("door: the whole animal clears the stone (centre offset %.2f + half-span %.1f <= %.1f)"
 		% [off, span * 0.5, clear_r], true, off + span * 0.5 <= clear_r)
+
+
+## NOTHING HANGS IN THE CORRIDOR THE DRAGON FLIES DOWN.
+##
+## A corona is not just its ring — it is a column of iron from that ring up
+## to the vault. Sweeping the flight against the fixtures as SOLIDS (the wyrm
+## expanded by its half-span laterally and half-height vertically) is what
+## caught all three of the originals; two were struck on the ring and one on
+## the chain, and no amount of looking at stills had shown it.
+func _corona_clear(fixtures: Array, radius: float, chain_top: float,
+		legs: Array, label: String) -> void:
+	var half := WYRM_SPAN_HALF
+	var worst := ""
+	for f: Vector3 in fixtures:
+		for leg: Array in legs:
+			for i in 1201:
+				var p := _catmull(leg, float(i) / 1200.0)
+				var horiz := Vector2(p.x - f.x, p.z - f.z).length()
+				# the chain: a thin column from just above the ring upward
+				if horiz < half + 0.2 and p.y + WYRM_H > f.y + 1.6 \
+						and p.y - WYRM_H < chain_top:
+					worst = "chain at %s, wyrm %s" % [str(f.round()), str(p.round())]
+				# the ring itself
+				if horiz < half + radius and absf(p.y - f.y) < WYRM_H + 0.2:
+					worst = "ring at %s, wyrm %s" % [str(f.round()), str(p.round())]
+	check("coronas: %s clear of the flight%s"
+		% [label, "" if worst == "" else " — HIT " + worst], true, worst == "")
+
+
+const WYRM_SPAN_HALF := 5.3
+const WYRM_H := 1.2
+
+
+func _test_coronas() -> void:
+	var script: Script = load("res://src/cinematics/cathedral_cinematic_intro.gd")
+	var c := script.get_script_constant_map()
+	var legs: Array = []
+	for n in ["PATH_NEEDLE", "PATH_NAVE", "PATH_PERCH"]:
+		legs.append(c[n])
+	_corona_clear(c["CORONA_NAVE"], c["CORONA_NAVE_R"],
+		c["CORONA_NAVE_CHAIN_TOP"], legs, "the nave pair")
+	var aisle: Array = []
+	for sx in [-1.0, 1.0]:
+		for z: float in c["CORONA_AISLE_ZS"]:
+			aisle.append(Vector3(sx * float(c["CORONA_AISLE_X"]),
+				float(c["CORONA_AISLE_Y"]), z))
+	_corona_clear(aisle, c["CORONA_AISLE_R"], c["CORONA_AISLE_CHAIN_TOP"],
+		legs, "the aisle eight")

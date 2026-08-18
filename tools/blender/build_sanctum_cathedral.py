@@ -153,7 +153,8 @@ MAT_SPECS = {
     "cathedral_glass_sapphire": ((0.08, 0.17, 0.55, 1.0), 0.15, 0.0, (0.16, 0.36, 1.0), 1.7, False),
     "cathedral_glass_amber":    ((0.55, 0.30, 0.08, 1.0), 0.15, 0.0, (1.0, 0.55, 0.12), 1.9, False),
     "cathedral_glass_ember":    ((0.52, 0.12, 0.04, 1.0), 0.15, 0.0, (1.0, 0.26, 0.06), 2.2, False),
-    "cathedral_candle":         ((1.0, 0.78, 0.40, 1.0), 0.4, 0.0, (1.0, 0.68, 0.28), 2.4, False),
+    "cathedral_candle":         ((0.96, 0.92, 0.80, 1.0), 0.5, 0.0, (1.0, 0.86, 0.55), 1.2, False),
+    "cathedral_flame":          ((1.0, 0.86, 0.45, 1.0), 0.4, 0.0, (1.0, 0.66, 0.24), 9.0, False),
     "cathedral_rock":        ((0.225, 0.21, 0.20, 1.0), 0.95, 0.0, None, 0, True),
     "cathedral_void":        ((0.015, 0.013, 0.018, 1.0), 1.0, 0.0, None, 0, False),
 }
@@ -1064,32 +1065,84 @@ def build_organ_loft():
             add_cone(brass, (fx, base, -23.75), 0.115, 0.105, h, segments=8)
 
 
-def build_chandeliers():
-    # Three wheels on the nave axis at y 14.2 — ABOVE the orbit camera's
-    # sweep (the gameplay camera rides a ring at y ~9, climbing to ~13 at
-    # full pitch: the first build hung one wheel straight through the lens)
-    # and spaced as slalom gates for the dragon's nave run.
+def corona(cx, cz, ring_y, chain_top, radius, n_candles):
+    """One iron corona: ring, inner ring, suspension arms, chain, and a crown
+    of LIT candles — cup, wax and a bright flame tip, all emissive, because
+    this asset still ships zero Light3D."""
     iron = bucket("cathedral_iron")
     candle = bucket("cathedral_candle")
-    for z in (-8.0, 0.0, 8.0):
-        y = 14.2
-        seg = 14
-        ring = [(2.1 * math.cos(2 * math.pi * i / seg), y,
-                 z + 2.1 * math.sin(2 * math.pi * i / seg))
-                for i in range(seg + 1)]
-        sweep_box(iron, ring, 0.09, 0.06)
-        for k in range(3):
-            a = 2 * math.pi * k / 3 + 0.5
-            sweep_box(iron, [(0.0, y + 2.0, z),
-                             (1.9 * math.cos(a), y + 0.15, z + 1.9 * math.sin(a))],
-                      0.04, 0.04)
-        sweep_box(iron, [(0.0, y + 1.6, z), (0.0, VAULT_APEX - 0.6, z)],
-                  0.05, 0.05)
-        for i in range(10):
-            a = 2 * math.pi * i / 10
-            cx, cz = 2.1 * math.cos(a), z + 2.1 * math.sin(a)
-            add_cone(iron, (cx, y + 0.05, cz), 0.05, 0.05, 0.16, segments=6)
-            add_cone(candle, (cx, y + 0.21, cz), 0.045, 0.02, 0.16, segments=6)
+    flame = bucket("cathedral_flame")
+    seg = 18
+    ring = [(cx + radius * math.cos(2 * math.pi * i / seg), ring_y,
+             cz + radius * math.sin(2 * math.pi * i / seg))
+            for i in range(seg + 1)]
+    sweep_box(iron, ring, 0.10, 0.07)
+    inner = [(cx + radius * 0.62 * math.cos(2 * math.pi * i / seg), ring_y - 0.55,
+              cz + radius * 0.62 * math.sin(2 * math.pi * i / seg))
+             for i in range(seg + 1)]
+    sweep_box(iron, inner, 0.07, 0.05)
+    for k in range(4):
+        a = 2 * math.pi * k / 4 + 0.4
+        sweep_box(iron, [(cx, ring_y + 2.1, cz),
+                         (cx + radius * 0.94 * math.cos(a), ring_y + 0.12,
+                          cz + radius * 0.94 * math.sin(a))], 0.045, 0.045)
+        sweep_box(iron, [(cx + radius * math.cos(a), ring_y - 0.05,
+                          cz + radius * math.sin(a)),
+                         (cx + radius * 0.62 * math.cos(a), ring_y - 0.55,
+                          cz + radius * 0.62 * math.sin(a))], 0.04, 0.04)
+    if chain_top > ring_y + 2.3:
+        sweep_box(iron, [(cx, ring_y + 1.7, cz), (cx, chain_top, cz)],
+                  0.055, 0.055)
+    for i in range(n_candles):
+        a = 2 * math.pi * i / n_candles
+        px = cx + radius * math.cos(a)
+        pz = cz + radius * math.sin(a)
+        add_cone(iron, (px, ring_y + 0.07, pz), 0.055, 0.055, 0.14, segments=6)
+        add_cone(candle, (px, ring_y + 0.21, pz), 0.05, 0.042, 0.34, segments=6)
+        add_cone(flame, (px, ring_y + 0.58, pz), 0.075, 0.0, 0.34, segments=5)
+    for i in range(n_candles // 2):
+        a = 2 * math.pi * (i + 0.5) / (n_candles // 2)
+        px = cx + radius * 0.62 * math.cos(a)
+        pz = cz + radius * 0.62 * math.sin(a)
+        add_cone(iron, (px, ring_y - 0.48, pz), 0.05, 0.05, 0.12, segments=6)
+        add_cone(candle, (px, ring_y - 0.36, pz), 0.045, 0.038, 0.30, segments=6)
+        add_cone(flame, (px, ring_y - 0.02, pz), 0.065, 0.0, 0.30, segments=5)
+
+
+def build_chandeliers():
+    """WHERE THE CORONAS MAY HANG (Bert, 2026-08-18: "the chandeliers are in
+    the way and they should have candles... solve either by agility or
+    architecture").
+
+    Architecture — and the placement is measured, not judged. A corona
+    occupies a whole vertical column: ring, AND the chain above it. The wyrm
+    crosses the nave 10.6 u wide, so anything hanging on the axis under its
+    line is struck by a wing even when the body misses. Swept against the
+    live flight envelope, the old three (z -8, 0, +8) were ALL hit — two on
+    the ring, one on the chain — and the flight only drops below a 14.2 ring
+    east of z ~ +4.
+
+    Moving them east was the first answer and the suite refused it: the
+    LANDING FLARE climbs to 14.2 at z 13 to clear the hall's wall crest, so a
+    ring at that height anywhere east of z 4 is inside a wingspan of it. Work
+    the constraint properly and the nave axis has no window at all at corona
+    height — the descent sweeps every height between 23 and 9, and the chain
+    above any ring is struck by the ouverture besides.
+
+    So on the axis the coronas hang HIGH, up under the vault at y 27 on short
+    chains, above the whole flight envelope (which tops out at 24.7 including
+    the body) — cathedral vault lighting, far overhead, reading as points of
+    fire in the dark of the webs. The mid-level warmth comes from the AISLES
+    instead, beyond the arcade and 10.7 u clear of the widest wingtip, so it
+    arrives through the arches. Nothing hangs in the corridor the dragon
+    flies down, and the suite sweeps the flight against every fixture to keep
+    it that way.
+    """
+    for cz in (-16.0, -6.0, 4.0):
+        corona(0.0, cz, 27.0, VAULT_APEX - 0.4, 2.6, 16)
+    for sx in (-1, 1):
+        for cz in (-19.0, -11.0, -3.0, 5.0):
+            corona(sx * 16.7, cz, 9.0, 15.4, 1.5, 10)
 
 
 # ── vertex-colour AO + grime ─────────────────────────────────────────────────

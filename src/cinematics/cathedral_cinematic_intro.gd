@@ -186,6 +186,23 @@ const PERCH_POS := Vector3(0.0, 12.2, 13.55)
 const ROSE_CENTRE := Vector3(0.0, 23.5, -26.0)
 const ROSE_CLEAR_R := 6.6
 const WYRM_SPAN := 10.6      ## measured posed width at DRAGON_SCALE
+const WYRM_HALF_H := 1.2     ## …and how far the body rides above/below the root
+
+## THE CORONAS, mirrored from the generator's build_chandeliers(). A hanging
+## fixture occupies its ring AND the chain above it, all the way to the
+## vault, so on the nave axis it is struck by a wingtip even when the body
+## misses: the old three (z -8, 0, +8) were every one of them hit. These hang
+## where the wyrm passes BENEATH them (east, over the board) or out beyond
+## the arcade in the aisles. `[centre, ring radius, chain top]`.
+const CORONA_NAVE := [Vector3(0.0, 27.0, -16.0), Vector3(0.0, 27.0, -6.0),
+	Vector3(0.0, 27.0, 4.0)]
+const CORONA_NAVE_R := 2.6
+const CORONA_NAVE_CHAIN_TOP := 30.6
+const CORONA_AISLE_X := 16.7
+const CORONA_AISLE_ZS := [-19.0, -11.0, -3.0, 5.0]
+const CORONA_AISLE_Y := 9.0
+const CORONA_AISLE_R := 1.5
+const CORONA_AISLE_CHAIN_TOP := 15.4
 const LEGS := [PATH_NIGHT, PATH_APPROACH, PATH_NEEDLE, PATH_NAVE, PATH_PERCH]
 
 ## ── HOW IT FLIES (Bert, 2026-08-18: "he looks like a robot") ───────────────
