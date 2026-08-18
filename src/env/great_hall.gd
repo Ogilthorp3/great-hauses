@@ -90,10 +90,8 @@ const DRAPE_TRIPLE_SCENE: PackedScene = preload("res://assets/kaykit-dungeon/ban
 const TorchScript := preload("res://src/env/torch.gd")
 const BannerScript := preload("res://src/env/banner.gd")
 const DragonRigScript := preload("res://src/cinematics/dragon_rig.gd")
-const CathedralDragonScript := preload("res://src/env/cathedral_dragon.gd")
 
 var cathedral_instance: Node3D = null
-var cathedral_dragon: CathedralDragon = null
 
 const FLOOR_Y := -0.3         # hall floor top (plinth bottom)
 const WALL_HALF := 12.0       # wall centerline distance from board center
@@ -255,7 +253,6 @@ func _ready() -> void:
 	_build_banner_drapes()
 	_build_throne()
 	_build_fill_lights()
-	_build_cathedral_dragon()
 	_dress_from_session()
 	var args := OS.get_cmdline_user_args()
 	if args.has("--env-fps"):
@@ -780,16 +777,29 @@ func dragon_rest() -> Vector3:
 
 
 func _build_cathedral() -> void:
-	if CATHEDRAL_SCENE != null:
-		cathedral_instance = CATHEDRAL_SCENE.instantiate()
-		cathedral_instance.name = "SanctumCathedral"
-		add_child(cathedral_instance)
+	if CATHEDRAL_SCENE == null:
+		return
+	cathedral_instance = CATHEDRAL_SCENE.instantiate()
+	cathedral_instance.name = "SanctumCathedral"
+	add_child(cathedral_instance)
+	# The shell wraps the whole hall, so its roofs sit between the Sun and
+	# the board: shadow casting OFF keeps the gameplay lighting exactly what
+	# it was before the cathedral existed (depth on the shell is carried by
+	# its baked vertex-colour AO instead). Layer 10 is added so the fly-in's
+	# cull-masked WyrmGlow can paint the vaults without spending the hall
+	# meshes' full 8-omni torch budget on a ninth light.
+	for mi: MeshInstance3D in cathedral_instance.find_children(
+			"*", "MeshInstance3D", true, false):
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		mi.layers |= 1 << 9
 
 
-func _build_cathedral_dragon() -> void:
-	cathedral_dragon = CathedralDragonScript.new()
-	cathedral_dragon.name = "CathedralDragon"
-	add_child(cathedral_dragon)
+## The Wyrm's Gallery — the corbelled ledge over the apse arch where the
+## spectator keeps its vigil (and where the fly-in lands). Coordinates are
+## the cathedral generator's GALLERY_* constants: ledge top y 12.2, front
+## face z 12.85..back 14.55, centred on x 0. The root stands ON the stone.
+func wyrm_gallery_rest() -> Vector3:
+	return Vector3(0.0, 12.2, 13.55)
 
 
 func _build_fill_lights() -> void:
@@ -806,13 +816,10 @@ func _build_fill_lights() -> void:
 	rim.light_energy = 0.55
 	rim.basis = Basis.looking_at(Vector3(0.1, -0.5, -1.0).normalized())
 	add_child(rim)
-
-	var rose_light := DirectionalLight3D.new()
-	rose_light.name = "RoseWindowLight"
-	rose_light.light_color = Color(1.0, 0.84, 0.55)
-	rose_light.light_energy = 0.65
-	rose_light.basis = Basis.looking_at(Vector3(0.0, -0.65, -0.75).normalized())
-	add_child(rose_light)
+	# NO third fill. The census contract is 8 torches + 2 fills (asserted by
+	# tests/test_cinematics.gd) and the scene Sun makes directional #3 of the
+	# Mobile renderer's 4 — the last slot belongs to the fly-in's moon. The
+	# stained glass lights itself: it is emissive by authoring.
 
 
 # -- fps probe -------------------------------------------------------------
