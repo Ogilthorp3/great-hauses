@@ -8,6 +8,17 @@ Two independent silent-green traps, both checked here:
    room instead of an immersive app, and nothing else in the build catches
    it. (export_presets.cfg, [preset.N.options] for the visionOS platform.)
 
+   THE STYLE IS PROGRESSIVE, NOT FULL (changed 2026-08-18, Bert's call).
+   Full immersion takes the room away at launch and never gives it back:
+   one posture for a cinematic that lasts thirty seconds and for a chess
+   match that lasts an hour. Progressive hands that choice to the player
+   through the DIGITAL CROWN — dial out to see the table, the coffee and
+   the kid you are playing; dial in and the cathedral closes over you. A
+   partially-dialled cathedral is not a compromise between the two, it is
+   a portal into the nave, which is the best frame this game has.
+   This assertion is what stops the value drifting back to a default, so
+   it moves with the decision rather than being deleted.
+
 2. project.godot's xr/shaders/enabled defaults to false
    (rendering_server.cpp:3816) and gates whether the Mobile renderer's
    multiview shader variants are ever compiled
@@ -30,7 +41,7 @@ import sys
 
 PRESET_REQUIRED = {
     "application/app_role": "1",         # 0=Window, 1=Immersive
-    "application/immersion_style": "0",  # 0=Full, 1=Mixed, 2=Progressive
+    "application/immersion_style": "2",  # 0=Full, 1=Mixed, 2=Progressive
 }
 
 # (section, key) -> required value, read from project.godot.
@@ -115,7 +126,7 @@ def main(preset_path: str) -> int:
         return 1
 
     print(
-        "OK: visionOS preset is app_role=Immersive, immersion_style=Full, "
+        "OK: visionOS preset is app_role=Immersive, immersion_style=Progressive, "
         "xr/shaders/enabled=true"
     )
     return 0
