@@ -39,7 +39,13 @@ environment/defaults/default_clear_color=Color(0.02, 0.02, 0.02, 1)
 renderer/rendering_method="mobile"
 textures/vram_compression/import_etc2_astc=true
 vrs/mode=0
-anti_aliasing/quality/msaa_2d=2
+; 2D MSAA is OFF: the engine itself reports "2D MSAA is enabled while there
+; is no 2D content" on every frame of a perf run. This project's 2D is HUD
+; text and rects, which take nothing from multisampling, and on an iPad at
+; native resolution the resolve is pure bandwidth for no pixels. 3D MSAA
+; stays at 4x — the gothic tracery is all thin diagonal edges and it is the
+; one place multisampling earns its cost.
+anti_aliasing/quality/msaa_2d=0
 anti_aliasing/quality/msaa_3d=2
 anti_aliasing/quality/screen_space_aa=1
 
