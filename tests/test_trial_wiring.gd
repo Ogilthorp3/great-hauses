@@ -153,15 +153,15 @@ func _test_which_draws() -> void:
 		TrialBridge.settles_by_fire(ChessState.RESULT.STALEMATE))
 	check("policy: insufficient material goes to the arena", true,
 		TrialBridge.settles_by_fire(ChessState.RESULT.INSUFFICIENT))
-	check("policy: threefold keeps the card", false,
+	check("policy: threefold goes to the arena", true,
 		TrialBridge.settles_by_fire(ChessState.RESULT.THREEFOLD))
-	check("policy: fifty-move keeps the card", false,
+	check("policy: fifty-move goes to the arena", true,
 		TrialBridge.settles_by_fire(ChessState.RESULT.FIFTY_MOVE))
 	check("policy: a checkmate is not a draw", false,
 		TrialBridge.settles_by_fire(ChessState.RESULT.CHECKMATE))
 	check("policy: an ongoing game is not a draw", false,
 		TrialBridge.settles_by_fire(ChessState.RESULT.ONGOING))
-	check("policy: exactly two draws settle by fire", 2, TrialBridge.BY_FIRE.size())
+	check("policy: all four draws settle by fire", 4, TrialBridge.BY_FIRE.size())
 
 
 # ── the two difficulty enums ────────────────────────────────────────────────

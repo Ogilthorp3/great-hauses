@@ -39,6 +39,8 @@ var _mutex := Mutex.new()
 var _rx: Array[String] = []      # reader thread -> main thread line queue
 var _handshaken := false
 var _cur_multipv := 1
+var _cur_skill_level := -1
+var _cur_elo := -1
 
 
 ## The platform's stockfish filename.
@@ -194,6 +196,20 @@ func search(fen: String, opts: Dictionary = {}) -> Dictionary:
 	if multipv != _cur_multipv:
 		_send("setoption name MultiPV value %d" % multipv)
 		_cur_multipv = multipv
+	if opts.has("skill_level"):
+		var skill := clampi(int(opts["skill_level"]), 0, 20)
+		if skill != _cur_skill_level:
+			_send("setoption name Skill Level value %d" % skill)
+			_cur_skill_level = skill
+	if opts.has("uci_elo"):
+		var elo := int(opts["uci_elo"])
+		if elo != _cur_elo:
+			if elo >= 1320:
+				_send("setoption name UCI_LimitStrength value true")
+				_send("setoption name UCI_Elo value %d" % elo)
+			else:
+				_send("setoption name UCI_LimitStrength value false")
+			_cur_elo = elo
 	_take_lines()   # drop any stale output from a previous search
 	_send("isready")
 	if not await _wait_line(func(l: String) -> bool: return l == "readyok", 5.0):

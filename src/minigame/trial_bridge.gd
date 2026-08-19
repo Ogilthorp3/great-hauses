@@ -22,10 +22,9 @@ extends RefCounted
 ##      still standing when the kings ran out of moves — harvested from the
 ##      live ChessState, not mocked.
 ##
-## WHICH DRAWS. Stalemate and insufficient material only (see BY_FIRE). Both
-## are draws where neither army CAN win — the kings settling it themselves is
-## the thematically honest answer. Threefold and fifty-move are draws by
-## bookkeeping rather than by position, and they keep the existing draw card.
+## WHICH DRAWS. All draws (stalemate, insufficient material, threefold repetition,
+## fifty-move rule) settle by fire in single-player matches. The kings settling it
+## themselves is the thematically honest answer.
 
 const TRIAL_SCENE := "res://scenes/minigame/trial_by_fire.tscn"
 
@@ -43,6 +42,8 @@ const VERDICT_HOLD_SEC := 2.4
 const BY_FIRE: Array[int] = [
 	ChessState.RESULT.STALEMATE,
 	ChessState.RESULT.INSUFFICIENT,
+	ChessState.RESULT.THREEFOLD,
+	ChessState.RESULT.FIFTY_MOVE,
 ]
 
 
@@ -203,15 +204,6 @@ func run(game: Node, result: int) -> Dictionary:
 func _refuse_reason(game: Node, result: int) -> String:
 	if not settles_by_fire(result):
 		return "this draw is settled by the book, not by fire"
-	if not _is_tournament():
-		# THE OWNER'S RULE IS "offer it, do not force it" FOR A SINGLE MATCH,
-		# and v1 ships the decline half of that honestly rather than the force
-		# half quietly. There is no offer UI because there is nowhere to put
-		# one: `_end_sequence` only reaches this seam inside `_in_tournament()`,
-		# and that call site was fenced off this phase. Wiring the offer is
-		# three lines there (call the seam for a single-match draw too, behind a
-		# prompt) plus deleting this guard — see RELEASE-NOTES.
-		return "a single match keeps its draw — the trial settles brackets"
 	if Session.is_network():
 		# SAID PLAINLY RATHER THAN FAKED. The chess is turn-based and
 		# host-authoritative; this duel is real-time, and a real-time duel

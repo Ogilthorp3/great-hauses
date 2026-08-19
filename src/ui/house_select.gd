@@ -24,13 +24,15 @@ const GOLD := Color(0.92, 0.74, 0.32)
 const GOLD_HOVER := Color(1.0, 0.85, 0.45)
 
 const OPPONENTS: Array[Dictionary] = [
-	{"kind": "engine", "level": "casual", "difficulty": ChessAI.Difficulty.EASY,
-		"label": "🌱 Casual", "desc": "A forgiving duel for aspiring commanders (~1200 Elo)"},
-	{"kind": "engine", "level": "seasoned", "difficulty": ChessAI.Difficulty.MEDIUM,
-		"label": "🛡️ Seasoned", "desc": "Tactical discipline and sharp defense (~1700 Elo)"},
-	{"kind": "engine", "level": "grandmaster", "difficulty": ChessAI.Difficulty.HARD,
+	{"kind": "engine", "level": "page", "difficulty": ChessAI.Difficulty.EASY, "skill_level": 2, "elo": 1000,
+		"label": "🌱 Page", "desc": "A beginner in training (~1000 Elo)"},
+	{"kind": "engine", "level": "squire", "difficulty": ChessAI.Difficulty.MEDIUM, "skill_level": 6, "elo": 1400,
+		"label": "🛡️ Squire", "desc": "Tactical discipline and sharp defense (~1400 Elo)"},
+	{"kind": "engine", "level": "knight", "difficulty": ChessAI.Difficulty.HARD, "skill_level": 12, "elo": 2000,
+		"label": "⚔️ Knight", "desc": "Veteran commander with deep tactical vision (~2000 Elo)"},
+	{"kind": "engine", "level": "grandmaster", "difficulty": ChessAI.Difficulty.HARD, "skill_level": 17, "elo": 2700,
 		"label": "👑 Grand Master", "desc": "Ruthless calculation with zero mercy (~2700 Elo)"},
-	{"kind": "engine", "level": "godmode", "difficulty": ChessAI.Difficulty.HARD,
+	{"kind": "engine", "level": "godmode", "difficulty": ChessAI.Difficulty.HARD, "skill_level": 20, "elo": 3600,
 		"label": "💀 God Mode", "desc": "Unconstrained superhuman mastery — IDDQD / Nightmare (~3500+ Elo)"},
 	{"kind": "jedi_council", "council_mode": "jedi_council",
 		"label": "⚔️ The Jedi Council of Sanctum", "desc": "5-Mind Pure LLM: Yoda (Fable), Windu (Gemini), Qui-Gon, Cilghal & Mundi"},

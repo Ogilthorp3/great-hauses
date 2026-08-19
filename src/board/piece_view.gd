@@ -457,7 +457,12 @@ func _build_badge() -> void:
 	sp.shaded = false
 	sp.no_depth_test = true          # over the army standing in front of it
 	sp.render_priority = 3
-	sp.modulate = Color(1.0, 0.90, 0.55)
+	if piece_type == Type.KING:
+		sp.modulate = Color(1.0, 0.82, 0.20)    # Royal Gold crown & cross
+	elif piece_type == Type.QUEEN:
+		sp.modulate = Color(0.92, 0.96, 1.0)    # Radiant Diamond silver tiara
+	else:
+		sp.modulate = Color(1.0, 0.90, 0.55)
 	sp.pixel_size = 0.014
 	sp.position = Vector3(0.0, PieceAssets.piece_height(piece_type) + BADGE_RISE, 0.0)
 	add_child(sp)
@@ -3084,6 +3089,8 @@ func _build_glyph_ring() -> void:
 				var glyph: Color = body
 				if HouseRegistry.has_house(house_id):
 					glyph = HouseRegistry.get_colors(house_id)["accent"]
+				if piece_type == Type.KING:
+					_glyph_mat.emission_energy_multiplier = PieceAssets.GLYPH_ENERGY_REST * 1.35
 				_glyph_mat.albedo_color = glyph
 				_glyph_mat.emission = glyph
 				_glyph_mat.disable_receive_shadows = true

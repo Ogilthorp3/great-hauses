@@ -163,6 +163,8 @@ const BANTER_YIELD_MAX_SEC := 6.0
 var _blunder_engine: UciEngine = null
 var _blunder_failed := false
 var _blunder_busy := false
+var _match_engine: UciEngine = null
+var _match_engine_failed := false
 var blunder_count := 0               # e2e evidence: the blunder hook fired
 var _victory_panel: PanelContainer
 var _victory_label: Label
@@ -1183,7 +1185,15 @@ func _ai_ply() -> void:
 	if oracle != null:
 		move = await oracle.choose_move(state, ai_difficulty)  # MAX thinking, difficulty ignored
 	else:
-		move = await ai.choose_move(state, ai_difficulty)  # WorkerThreadPool search
+		var match_eng: UciEngine = await _ensure_match_engine()
+		if match_eng != null and match_eng.is_ready():
+			var opts := _get_stockfish_opts()
+			var res: Dictionary = await match_eng.search(state.get_fen(), opts)
+			var best: String = str(res.get("bestmove", ""))
+			if not best.is_empty():
+				move = state.move_from_uci(best)
+		if move == null:
+			move = await ai.choose_move(state, ai_difficulty)  # WorkerThreadPool fallback search
 	if gen != _turn_gen:
 		return   # undone while thinking — the late reply is for a dead position
 	_ai_waiting = false
@@ -1565,6 +1575,82 @@ func _ensure_blunder_engine() -> UciEngine:
 	return eng
 
 
+func _ensure_match_engine() -> UciEngine:
+	if _match_engine != null and _match_engine.is_ready():
+		return _match_engine
+	if _match_engine != null:
+		_match_engine.queue_free()
+		_match_engine = null
+	if _match_engine_failed:
+		return null
+	var path := UciEngine.find_stockfish()
+	if path.is_empty():
+		_match_engine_failed = true
+		return null
+	var eng := UciEngine.new()
+	eng.name = "MatchStockfish"
+	add_child(eng)
+	if not eng.start(path) or not await eng.init(8.0):
+		eng.queue_free()
+		_match_engine_failed = true
+		return null
+	_match_engine = eng
+	return eng
+
+
+func _get_stockfish_opts() -> Dictionary:
+	var opp: Dictionary = Session.opponent if Session.configured else {}
+	var opts := {
+		"multipv": 1,
+		"timeout_s": 15.0,
+	}
+	var skill: int = int(opp.get("skill_level", -1))
+	var elo: int = int(opp.get("elo", 0))
+	var level: String = str(opp.get("level", ""))
+
+	if skill >= 0:
+		opts["skill_level"] = skill
+	if elo > 0:
+		opts["uci_elo"] = elo
+
+	match level:
+		"page", "casual":
+			opts["depth"] = 6
+			opts["movetime_ms"] = 150
+			if not opts.has("skill_level"): opts["skill_level"] = 2
+		"squire", "seasoned":
+			opts["depth"] = 9
+			opts["movetime_ms"] = 250
+			if not opts.has("skill_level"): opts["skill_level"] = 6
+		"knight":
+			opts["depth"] = 12
+			opts["movetime_ms"] = 400
+			if not opts.has("skill_level"): opts["skill_level"] = 12
+		"grandmaster":
+			opts["depth"] = 16
+			opts["movetime_ms"] = 800
+			if not opts.has("skill_level"): opts["skill_level"] = 17
+		"godmode":
+			opts["depth"] = 20
+			opts["movetime_ms"] = 1200
+			if not opts.has("skill_level"): opts["skill_level"] = 20
+		_:
+			match ai_difficulty:
+				ChessAI.Difficulty.EASY:
+					opts["depth"] = 6
+					opts["movetime_ms"] = 150
+					if not opts.has("skill_level"): opts["skill_level"] = 2
+				ChessAI.Difficulty.MEDIUM:
+					opts["depth"] = 9
+					opts["movetime_ms"] = 250
+					if not opts.has("skill_level"): opts["skill_level"] = 6
+				_:
+					opts["depth"] = 16
+					opts["movetime_ms"] = 800
+					if not opts.has("skill_level"): opts["skill_level"] = 17
+	return opts
+
+
 # -- endgame ---------------------------------------------------------------
 
 
@@ -1658,17 +1744,20 @@ func settle_tournament_draw(result: int) -> Dictionary:
 
 func _end_sequence(result: int, player_won: bool) -> void:
 	if result != ChessState.RESULT.CHECKMATE:
-		# A DRAW: no dragon, no ceremony — and, in a tournament, no silent
-		# elimination. The seam decides and supplies its own words.
-		if _in_tournament():
+		# A DRAW: settle by Trial by Fire minigame (stalemate, insufficient, threefold, 50-move)
+		if not Session.is_network():
 			var verdict: Dictionary = await settle_tournament_draw(result)
 			var lines: Variant = verdict.get("lines", [])
 			_draw_bracket_lines.clear()
 			if lines is Array:
 				for l in (lines as Array):
 					_draw_bracket_lines.append(str(l))
-			Session.tournament.report_result(bool(verdict.get("player_advances", false)))
-		_show_match_end(false, RESULT_TEXT.get(result, "The war is over"))
+			var trial_won := bool(verdict.get("player_advances", false))
+			if _in_tournament():
+				Session.tournament.report_result(trial_won)
+			if bool(verdict.get("ran", false)):
+				player_won = trial_won
+		_show_match_end(player_won, RESULT_TEXT.get(result, "The war is over"))
 		return
 	# The mated king falls under the checkmate cinematic's slow orbit.
 	var loser := PieceView.House.FROST if state.turn == player_color \
