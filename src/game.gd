@@ -534,6 +534,14 @@ func _ready() -> void:
 	_update_turn_label()
 	if not game_over and state.turn == player_color and oracle != null and oracle.has_method("ponder"):
 		oracle.ponder(state)
+	if oracle is JediCouncilOpponent:
+		_flash_oracle("✨ \"May the Force be with you!\" — The Jedi Council convenes.", 5.0)
+		if _council_debate_text != null:
+			_council_debate_text.append_text("[color=#e6cc80]══════════════════════════════════════════════════[/color]\n")
+			_council_debate_text.append_text("✨ [color=#38bdf8][b]THE JEDI COUNCIL OF SANCTUM CONVENES[/b][/color]\n")
+			_council_debate_text.append_text("🧙 [color=#a8d888][b]Master Yoda[/b][/color]: [i]“Welcome to the chamber, Padawan. May the Force be with you!”[/i]\n")
+			_council_debate_text.append_text("⚡ [color=#38bdf8][b]Master Qui-Gon[/b][/color]: [i]“Remember: Han Solo is the King, Princess Leia commands the board.”[/i]\n")
+			_council_debate_text.append_text("[color=#e6cc80]══════════════════════════════════════════════════[/color]\n\n")
 	board.square_clicked.connect(_on_square_clicked)
 	board.square_hovered.connect(_on_square_hovered)
 	_lt("net+wiring")

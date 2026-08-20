@@ -90,16 +90,16 @@ var _ponder_gen: int = 0
 var _ambient_banter_active: bool = false
 
 const AMBIENT_CHAMBER_LINES: Array[String] = [
-	"🧙 Master Yoda taps his gimer stick, closing his eyes to sense the living Force...",
-	"⚡ Master Qui-Gon leans forward: \"A bold thrust through the center opens the path, if we dare.\"",
-	"⚔️ Master Windu narrows his eyes: \"Beware the opponent's counter-thrust. Keep your guard high.\"",
-	"💰 Master Mundi calculates: \"That knight trade yields a favorable material ratio of 3.2 to 1.\"",
-	"🏥 Master Cilghal murmurs: \"The king's flank is fragile; we must fortify the perimeter first.\"",
-	"🧙 Yoda chuckles softly: \"Hasty moves, dark shadows bring. Patience, Masters.\"",
-	"⚡ Qui-Gon smiles faintly: \"Feel the living Force flow through the open diagonal.\"",
-	"⚔️ Windu crosses his arms: \"I sense a shatterpoint on their back rank...\"",
-	"💰 Mundi shakes his tall head: \"Illogical to abandon control of the central outposts.\"",
-	"🧙 Yoda: \"Clear the mind. When one door closes, three open files appear.\""
+	"🧙 Master Yoda taps his gimer stick, closing his eyes: \"May the Force be with you, Padawan.\"",
+	"⚡ Master Qui-Gon: \"Princess Leia commands the center ranks; let her laser fire sweep the board!\"",
+	"⚔️ Master Windu: \"Han Solo is vulnerable on the back rank. Never tell him the odds, but guard his king square!\"",
+	"💰 Master Mundi: \"A trade of C-3PO for two Ewok pawns yields a 42% strategic surplus.\"",
+	"🏥 Master Cilghal: \"Chewbacca's rook file is clear — let the Wookiee win!\"",
+	"🧙 Yoda chuckles: \"Han Solo runs slow on foot, yet Princess Leia carries the entire rebellion.\"",
+	"⚡ Qui-Gon: \"Lando's knight leaps over the frontline in an L-shape; feel the living Force!\"",
+	"⚔️ Windu: \"R2-D2 is slicing through the enemy diagonal. Shatterpoint detected on the back rank!\"",
+	"💰 Mundi: \"An Ewok reaching the 8th rank promoting to a second Princess Leia is mathematically glorious.\"",
+	"🧙 Yoda: \"Clear your mind. Trust in the Force, and defend Han Solo you must.\""
 ]
 
 func _start_ambient_banter() -> void:
