@@ -90,17 +90,34 @@ var _ponder_gen: int = 0
 var _ambient_banter_active: bool = false
 
 const AMBIENT_CHAMBER_LINES: Array[String] = [
-	"🧙 Master Yoda taps his gimer stick, closing his eyes: \"May the Force be with you, Padawan.\"",
-	"⚡ Master Qui-Gon: \"Princess Leia commands the center ranks; let her laser fire sweep the board!\"",
-	"⚔️ Master Windu: \"Han Solo is vulnerable on the back rank. Never tell him the odds, but guard his king square!\"",
-	"💰 Master Mundi: \"A trade of C-3PO for two Ewok pawns yields a 42% strategic surplus.\"",
-	"🏥 Master Cilghal: \"Chewbacca's rook file is clear — let the Wookiee win!\"",
-	"🧙 Yoda chuckles: \"Han Solo runs slow on foot, yet Princess Leia carries the entire rebellion.\"",
-	"⚡ Qui-Gon: \"Lando's knight leaps over the frontline in an L-shape; feel the living Force!\"",
-	"⚔️ Windu: \"R2-D2 is slicing through the enemy diagonal. Shatterpoint detected on the back rank!\"",
-	"💰 Mundi: \"An Ewok reaching the 8th rank promoting to a second Princess Leia is mathematically glorious.\"",
-	"🧙 Yoda: \"Clear your mind. Trust in the Force, and defend Han Solo you must.\""
+	"🧙 Yoda: \"Sipped swamp root tea, I did. Saw you hang that pawn, I also did.\"",
+	"⚡ Qui-Gon: \"I didn't calculate the defense. The Force told me to gambit for vibes.\"",
+	"⚔️ Windu: \"Qui-Gon, that is not 'the living Force', that is a hanging knight. Take a seat.\"",
+	"💰 Mundi: \"What about the droid attack on my c4 pawn?!\"",
+	"🤖 C-3PO: \"Sir, the odds of surviving this tactical fork are approximately 3,720 to 1!\"",
+	"🧙 Yoda: \"Slow on foot Han Solo is, yet carry the rebellion Princess Leia does.\"",
+	"⚡ Qui-Gon: \"Now THIS is Podracing on the open d-file!\"",
+	"⚔️ Windu: \"Shatterpoint detected: their kingside defense is held together by scotch tape.\"",
+	"💰 Mundi: \"According to my spreadsheets, trading a rook for a bishop yields a negative quarterly ROI.\"",
+	"🏥 Cilghal: \"The e4 pawn is in critical condition! Administering castling immediately!\"",
+	"🤖 R2-D2: \"*Excited binary beeps, whistle chirps, and electric taser sparks at enemy queen*\"",
+	"🧙 Yoda: \"900 years old I reach, yet never seen such a cursed opening.\"",
+	"⚡ Qui-Gon: \"There's always a bigger fish... and a hanging f7 square.\"",
+	"⚔️ Windu: \"He has control of the center and the senate! Block that pawn!\"",
+	"💰 Mundi: \"An Ewok promoting to a second Princess Leia yields an 800% dividend return.\"",
+	"🧙 Yoda: \"Laughed at your queen blunder, even the ghost of Obi-Wan did.\"",
+	"⚡ Qui-Gon: \"I feel a disturbance in the opening book. Let's play chaos chess.\"",
+	"⚔️ Windu: \"If this gambit backfires, Qui-Gon is cleaning the Temple speeders for a month.\"",
+	"💰 Mundi: \"I didn't grow two brains just to watch my knights get pinned.\"",
+	"🏥 Cilghal: \"Diagnosing the opponent's king with acute open-diagonal vulnerability.\"",
+	"🧙 Yoda: \"Bold move. Foolish, but bold. Hmmm.\"",
+	"⚡ Qui-Gon: \"Chewbacca's rook is revving up the hyperdrive. Clear the runway!\"",
+	"⚔️ Windu: \"Not on my watch. Strike the center with maximum prejudice.\"",
+	"💰 Mundi: \"Fiscal audit complete: Black is up 1.5 pawns in gross domestic territory.\"",
+	"🧙 Yoda: \"Patience, Padawan. Even a lowly pawn may take down an emperor.\""
 ]
+
+var _banter_shuffled: Array[String] = []
 
 func _start_ambient_banter() -> void:
 	_ambient_banter_active = true
@@ -110,19 +127,21 @@ func _stop_ambient_banter() -> void:
 	_ambient_banter_active = false
 
 func _run_ambient_banter_loop() -> void:
-	var idx := randi() % AMBIENT_CHAMBER_LINES.size()
 	while _ambient_banter_active:
+		if _banter_shuffled.is_empty():
+			_banter_shuffled = AMBIENT_CHAMBER_LINES.duplicate()
+			_banter_shuffled.shuffle()
 		var tree := Engine.get_main_loop() as SceneTree
 		if tree != null:
-			await tree.create_timer(3.5).timeout
+			await tree.create_timer(3.2).timeout
 		else:
 			break
 		if not _ambient_banter_active:
 			break
-		var line: String = AMBIENT_CHAMBER_LINES[idx % AMBIENT_CHAMBER_LINES.size()]
-		idx += 1
-		oracle_reason.emit(line)
-		council_debated.emit("Council Chamber", "", line)
+		if not _banter_shuffled.is_empty():
+			var line: String = _banter_shuffled.pop_back()
+			oracle_reason.emit(line)
+			council_debated.emit("Council Chamber", "", line)
 
 var _move_re := RegEx.create_from_string("(?im)^\\s*(?:MOVE|PICK|PLAY|PREFERRED|RECOMMENDED):\\s*([a-h][1-8][a-h][1-8][qrbn]?)")
 var _reason_re := RegEx.create_from_string("(?im)^\\s*(?:REASON|BECAUSE|WISDOM):\\s*(.+)$")
@@ -514,32 +533,28 @@ func _propose_candidate(seat_key: String, state, ascii_board: String, history: S
 	var personality_guide := ""
 	match seat_key:
 		"yoda":
-			personality_guide = "PERSONALITY: Speak in trademark Yoda OSV inverted grammar. Wise, playful, teasing. Express deep strategic vision with Star Wars chess parables."
+			personality_guide = "PERSONALITY: You are a sassy 900-year-old goblin frog sipping swamp root tea. Roast bad moves and deliver quirky reverse-syntax punchlines. Max 1 punchy sentence (<75 chars)."
 		"quigon":
-			personality_guide = "PERSONALITY: Rebellious, passionate maverick of the living force. Challenge dogmatic opening theory! Propose bold piece sacrifices and dynamic tempos."
+			personality_guide = "PERSONALITY: You are a reckless rebel gambler who treats chess like high-stakes Podracing. Propose wild sacrifices for pure vibes. Max 1 punchy sentence (<75 chars)."
 		"mundi":
-			personality_guide = "PERSONALITY: Coldly analytical Cerean logic. Treat chess pieces like an economic ledger. Quote exchange ratios and binary cost-benefit calculations with deadpan wit."
+			personality_guide = "PERSONALITY: You are a deadpan corporate accountant with two brains. Complain about piece ROI, budget deficits, and droid attacks on pawns. Max 1 punchy sentence (<75 chars)."
 		"cilghal":
-			personality_guide = "PERSONALITY: Surgical Mon Calamari master healer. Treat piece coordination like biological health. Diagnose pawn structure weaknesses like chronic symptoms."
+			personality_guide = "PERSONALITY: You are an overly dramatic Jedi trauma surgeon. Treat hanging pawns like medical emergencies. Max 1 punchy sentence (<75 chars)."
 		"windu":
-			personality_guide = "PERSONALITY: Fierce, uncompromising Vaapad warrior. Hunt for tactical shatterpoints, hanging pieces, and lethal counter-strikes."
+			personality_guide = "PERSONALITY: You are a zero-nonsense tactical enforcer. Roast reckless gambits and tell people to take a seat. Max 1 punchy sentence (<75 chars)."
 
 	var sys_prompt := (
 		"You are %s on the Jedi Council of Sanctum.\n" % seat["name"] +
 		"%s\n" % personality_guide +
-		"Your analytical lens is: %s.\n\n" % seat["lens"] +
+		"COMEDIC RULE: Less is more! Be hilarious, crisp, and fresh. NEVER repeat clichés like 'the Force flows through the center' or 'in unity the path is clear'.\n\n" +
 		"Analyze the chess position with Grandmaster depth. You MUST propose promising candidate moves strictly from the legal list.\n" +
-		"Follow this structured thinking process:\n" +
-		"1. Identify the opponent's threats, active pieces, and King safety.\n" +
-		"2. Select your top 2 candidate moves.\n" +
-		"3. Formulate your strategic plan and entertaining, in-character wisdom (max 100 chars).\n\n" +
 		"Respond in this EXACT format:\n" +
-		"ASSESSMENT: <your analysis of the position>\n" +
+		"ASSESSMENT: <1 brief sentence on the position>\n" +
 		"CANDIDATES:\n" +
-		"1. MOVE: <uci> | PLAN: <why this move is strong>\n" +
+		"1. MOVE: <uci> | PLAN: <short tactical reason>\n" +
 		"2. MOVE: <uci> | PLAN: <alternative candidate>\n" +
 		"PREFERRED: <best uci move e.g. e2e4>\n" +
-		"REASON: <1-sentence colorful, in-character quote for this move, max 100 chars>"
+		"REASON: <1 hilarious, punchy in-character quote under 75 chars>"
 	)
 
 	var user_prompt := (
@@ -579,18 +594,17 @@ func _critique_candidates(proposals: Array[Dictionary], state, ascii_board: Stri
 		prop_summary.append("• %s proposed %s: \"%s\"" % [p.get("speaker", "Master"), p.get("preferred_uci", "unknown"), p.get("reason", "")])
 
 	var sys_prompt := (
-		"You are Master Mace Windu, the fierce Tactical Inquisitor of the Jedi Council.\n" +
-		"Your duty is to RUTHLESSLY ROAST, CRITIQUE, and STRESS-TEST candidate moves proposed by your fellow Masters.\n\n" +
-		"BANTER & CRITIQUE GUIDELINES:\n" +
-		"1. Directly address proposing Masters by name with sharp, entertaining banter (e.g. 'Qui-Gon, your romantic gambit hangs a rook' or 'Mundi, your economic calculations ignore an impending checkmate').\n" +
-		"2. Calculate devastating tactical replies (forks, pins, skewers, deflections, mating nets).\n" +
-		"3. Declare whether the candidates are tactical genius or suicidal blunders.\n" +
-		"4. Recommend the single sharpest, most punishing legal move.\n\n" +
+		"You are Master Mace Windu, the blunt, zero-nonsense Tactical Inquisitor of the Jedi Council.\n" +
+		"Your job is to RUTHLESSLY ROAST the candidate moves proposed by your fellow Masters.\n\n" +
+		"COMEDIC & CRITIQUE GUIDELINES:\n" +
+		"1. Directly roast proposing Masters by name with hilarious, deadpan brutality (e.g. 'Qui-Gon, you are out of your mind. Take a seat.' or 'Mundi, your spreadsheet just blundered a queen.').\n" +
+		"2. Less is more! Keep WISDOM under 75 chars.\n" +
+		"3. Recommend the sharpest, most punishing legal move.\n\n" +
 		"Respond in this EXACT format:\n" +
-		"CRITIQUE: <your tactical refutations, roasted candidates, and counter-lines>\n" +
+		"CRITIQUE: <brief tactical roasting of candidates>\n" +
 		"BLUNDER_WARNING: <specific warnings on hanging pieces, or 'No tactical blunders detected'>\n" +
 		"RECOMMENDED: <best legal uci move>\n" +
-		"WISDOM: <1-sentence spicy in-character Windu critique addressing fellow Masters, max 100 chars>"
+		"WISDOM: <1 hilarious, spicy Windu roast under 75 chars>"
 	)
 
 	var user_prompt := (
@@ -634,15 +648,15 @@ func _synthesize_verdict(proposals: Array[Dictionary], critique: Dictionary, sta
 
 	var sys_prompt := (
 		"You are Master Yoda, Grand Master of the Jedi Council of Sanctum.\n" +
-		"You hold final, binding authority over the Council's move.\n\n" +
-		"SYNTHESIS & BANTER GUIDELINES:\n" +
-		"1. Weigh the heated debate between Qui-Gon's daring aggression, Mundi's cold calculations, and Windu's tactical skepticism.\n" +
-		"2. Settle the dispute with playful, supreme Grandmaster wisdom in trademark Yoda phrasing (e.g. 'Fierce is Windu's tongue, but correct he is' or 'Trust Qui-Gon's bold vision we shall!').\n" +
-		"3. Balance grand strategy, piece activity, and King defense to select the single best move.\n\n" +
+		"You settle the Council's heated debate with final authority.\n\n" +
+		"COMEDIC & SYNTHESIS GUIDELINES:\n" +
+		"1. Weigh Qui-Gon's chaos, Mundi's bean-counting, and Windu's roasting.\n" +
+		"2. Deliver a sassy, funny Yoda verdict in inverted OSV syntax settling the dispute.\n" +
+		"3. Less is more! Keep REASON to 1 punchy, funny sentence under 75 chars.\n\n" +
 		"Respond in this EXACT format (with the MOVE token on the LAST line):\n" +
-		"SYNTHESIS: <your grandmaster calculation harmonizing the council's dispute>\n" +
-		"PLAN: <1-sentence strategic direction>\n" +
-		"REASON: <1-sentence colorful Yoda verdict settling the debate, max 100 chars>\n" +
+		"SYNTHESIS: <brief grandmaster synthesis>\n" +
+		"PLAN: <1 short tactical sentence>\n" +
+		"REASON: <1 funny, punchy Yoda quote settling the dispute, max 75 chars>\n" +
 		"MOVE: <uci move e.g. e2e4>"
 	)
 
