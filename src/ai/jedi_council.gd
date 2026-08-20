@@ -21,6 +21,9 @@ signal oracle_stumbled(reason: String)
 signal oracle_reason(text: String)
 signal council_debated(speaker: String, topic: String, vote: String)
 
+const THINKING_TEXT := "The Jedi Council ponders…"
+const FORCED_TEXT := "The Council moves swiftly — a forced move requires no deliberation."
+
 const MODE_JEDI := "jedi_council"
 const MODE_QWEN := "qwen_3_8"
 const MODE_YODA := "yoda_max"

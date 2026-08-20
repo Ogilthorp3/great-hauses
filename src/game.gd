@@ -2073,6 +2073,9 @@ func _on_oracle_stumbled(reason: String) -> void:
 	oracle_stumble_count += 1
 	if spectator != null and is_instance_valid(spectator):
 		spectator.react_blunder()   # the wyrm disapproves (self-rate-limited)
+	if oracle is JediCouncilOpponent:
+		_flash_oracle(reason if not reason.is_empty() else "The Jedi Council of Sanctum is unreachable.", 4.0)
+		return
 	# Counseled saves are strong moves — soften the HUD line for them.
 	var line := Ds4Opponent.HEEDS_TEXT if reason.contains(Ds4Opponent.HEEDS_TEXT) \
 		else Ds4Opponent.STUMBLE_TEXT
@@ -2080,7 +2083,10 @@ func _on_oracle_stumbled(reason: String) -> void:
 
 
 func _on_oracle_retry(_attempt: int) -> void:
-	_flash_oracle("the Oracle reconsiders…", 2.0)
+	if oracle is JediCouncilOpponent:
+		_flash_oracle("The Council re-evaluates candidate lines…", 2.0)
+	else:
+		_flash_oracle("the Oracle reconsiders…", 2.0)
 
 
 func _on_oracle_reason(text: String) -> void:
@@ -2183,10 +2189,11 @@ func _process(_delta: float) -> void:
 			var img := snap_vp.get_texture().get_image()
 			if img:
 				img.save_png("user://screenshot_latest.png")
-	## Oracle thinking shimmer + elapsed seconds counter.
+	## Oracle / Jedi Council thinking shimmer + elapsed seconds counter.
 	if oracle_thinking and _turn_label != null and not game_over:
 		var elapsed := (Time.get_ticks_msec() - _oracle_think_start_ms) / 1000.0
-		_turn_label.text = "%s  %ds" % [Ds4Opponent.THINKING_TEXT, int(elapsed)]
+		var think_text: String = "The Jedi Council ponders…" if (oracle is JediCouncilOpponent) else Ds4Opponent.THINKING_TEXT
+		_turn_label.text = "%s  %ds" % [think_text, int(elapsed)]
 		_turn_label.modulate.a = 0.7 + 0.3 * sin(Time.get_ticks_msec() * 0.001 * TAU * 1.4)
 	if _undo_pending:
 		_try_undo()   # a queued take-back fires at the first safe frame
@@ -2388,10 +2395,13 @@ func _build_hud() -> void:
 		hud.add_child(_net_status)
 
 	if oracle != null:
-		# The Oracle's mode, named under the opponent label.
+		# The Oracle's / Council's mode, named under the opponent label.
 		var mode_lbl := Label.new()
 		mode_lbl.name = "OracleMode"
-		mode_lbl.text = str(Ds4Opponent.MODE_LABELS.get(oracle.mode, oracle.mode))
+		if oracle is JediCouncilOpponent:
+			mode_lbl.text = "🏛️ Sanctum Jedi Council (5-Mind Pure LLM)"
+		else:
+			mode_lbl.text = str(Ds4Opponent.MODE_LABELS.get(oracle.mode, oracle.mode))
 		mode_lbl.add_theme_font_size_override("font_size", 12)
 		mode_lbl.add_theme_color_override("font_color", HUD_GOLD)
 		_outline(mode_lbl, 4)
@@ -2689,7 +2699,7 @@ func _update_turn_label(ai_thinking := false) -> void:
 		if net != null:
 			_turn_label.text = "%s is deciding..." % _rival_display
 		elif oracle != null:
-			_turn_label.text = Ds4Opponent.THINKING_TEXT
+			_turn_label.text = "The Jedi Council ponders…" if (oracle is JediCouncilOpponent) else Ds4Opponent.THINKING_TEXT
 		else:
 			_turn_label.text = "%s is thinking..." % _rival_display
 	elif busy and net != null:
