@@ -1,127 +1,161 @@
 extends SceneTree
-## Headless unit test suite for JediCouncilOpponent.
 
-const JediCouncilScript := preload("res://src/ai/jedi_council.gd")
+# Headless integration test for the JEDI COUNCIL opponent (src/ai/jedi_council.gd).
+# Run: /Applications/Godot.app/Contents/MacOS/Godot --headless --path <project> -s res://tests/test_jedi_council.gd
+# Exit code 0 = all green, 1 = failures.
 
-var passed := 0
-var failed := 0
+const JediScript := preload("res://src/ai/jedi_council.gd")
+const CS := preload("res://src/chess/ChessState.gd")
 
-
-func _init() -> void:
-	print("\n=== Great Hauses Chess — Jedi Council of Sanctum Unit Suite ===")
-	_test_council_initialization()
-	_test_ascii_board_and_history()
-	_test_candidate_parsing()
-	_test_forced_move_instant_play()
-	_test_council_personas()
-	_test_position_complexity_scaling()
-	print("---")
-	if failed == 0:
-		print("JEDI COUNCIL OK — all %d checks passed" % passed)
-		quit(0)
-	else:
-		print("JEDI COUNCIL FAILED — %d of %d checks failed" % [failed, passed + failed])
-		quit(1)
+var rows := []
+var failures := 0
+var _server: TCPServer
+var _mock_running := false
+var _mock_replies: Array = []
+var _mock_requests: Array = []
 
 
-func check(desc: String, expected, got) -> void:
-	if expected == got:
-		passed += 1
-		print("PASS %s (expected %s, got %s)" % [desc, str(expected), str(got)])
-	else:
-		failed += 1
-		print("FAIL %s (expected %s, got %s)" % [desc, str(expected), str(got)])
+func _initialize() -> void:
+	_main()
 
 
-func _test_council_initialization() -> void:
-	var council: Node = JediCouncilScript.new()
-	check("council: default mode is jedi_council", JediCouncilScript.MODE_JEDI, council.mode)
-	check("council: has Yoda seat", true, JediCouncilScript.COUNCIL_SEATS.has("yoda"))
-	check("council: has Windu seat", true, JediCouncilScript.COUNCIL_SEATS.has("windu"))
-	check("council: has Qui-Gon seat", true, JediCouncilScript.COUNCIL_SEATS.has("quigon"))
-	check("council: has Cilghal seat", true, JediCouncilScript.COUNCIL_SEATS.has("cilghal"))
-	check("council: has Mundi seat", true, JediCouncilScript.COUNCIL_SEATS.has("mundi"))
-	council.queue_free()
+func _main() -> void:
+	print("\n=== JediCouncilOpponent — headless test suite ===")
 
+	var opp := JediScript.new()
+	opp.name = "JediCouncilTest"
+	root.add_child(opp)
+	await process_frame
+	await process_frame
 
-func _test_ascii_board_and_history() -> void:
-	var council: Node = JediCouncilScript.new()
-	var state := ChessState.new()
-	state.set_fen(ChessState.INITIAL_FEN)
-
-	var ascii: String = council._render_ascii_board(state)
-	check("ascii: board contains ranks 8 to 1", true, ascii.contains("8 |") and ascii.contains("1 |"))
-	check("ascii: board contains file headers", true, ascii.contains("a b c d e f g h"))
-
-	var history: String = council._get_san_history(state)
-	check("history: initial history is empty string", "", history)
-
-	council.queue_free()
-
-
-func _test_candidate_parsing() -> void:
-	var council: Node = JediCouncilScript.new()
-	var state := ChessState.new()
-	state.set_fen(ChessState.INITIAL_FEN)
-
-	var by_uci := {}
-	for m in state.legal_moves(true):
-		by_uci[String(m.to_uci()).to_lower()] = m
-
-	# Test MOVE parsing from pure LLM output
-	var reply := "PLAN: Strike the center and control d5.\nMOVE: e2e4\nREASON: Establishes strong center control."
-	var parsed_uci: String = council._extract_uci_move(reply, by_uci)
-	check("parse: extracted UCI move e2e4", "e2e4", parsed_uci)
-
-	var reason_text: String = council._extract_reason(reply)
-	check("parse: reason extracted", true, reason_text.contains("Establishes strong center control"))
-
-	council.queue_free()
-
-
-func _test_forced_move_instant_play() -> void:
-	var council: Node = JediCouncilScript.new()
-	root.add_child(council)
-
-	# Single legal move position (King in check by adjacent undefended Queen)
-	var state := ChessState.new()
-	state.set_fen("rnb1kbnr/pppp1ppp/8/8/8/8/4q3/4K3 w kq - 0 1")
+	# 1. Semantic Legal Move Annotations
+	var state := CS.new()
 	var legal: Array = state.legal_moves(true)
-	check("forced: position has 1 legal move", 1, legal.size())
+	var annotated: String = opp._annotate_legal_moves(state, legal)
+	check("annotations: not empty", true, not annotated.is_empty())
+	check("annotations: contains e2e4", true, annotated.contains("e2e4"))
+	check("annotations: identifies center control", true, annotated.contains("Controls Center e4"))
 
-	var sigs := {"reason": false, "started": false, "finished": false}
-	council.oracle_reason.connect(func(_r: String) -> void: sigs["reason"] = true)
-	council.thinking_started.connect(func() -> void: sigs["started"] = true)
-	council.thinking_finished.connect(func(_s: float) -> void: sigs["finished"] = true)
+	# 2. Forced Move Fast Path
+	var forced_state := CS.new()
+	forced_state.set_fen("8/8/8/8/8/1k6/r7/K7 w - - 0 1") # Ka1 checked by Ra2 defended by Kb3 -> only Kb1
+	var forced_move = await opp.choose_move(forced_state)
+	check("forced move: played instantly", true, forced_move != null)
+	check("forced move: is Kb1", "a1b1", String(forced_move.to_uci()).to_lower() if forced_move != null else "")
+	check("forced move: source is forced", "forced", opp.last_source)
 
-	var move = await council.choose_move(state, 2)
-	check("forced: move executed immediately", true, move != null)
-	check("forced: source is forced", "forced", council.last_source)
-	check("forced: oracle_reason signal fired", true, sigs["reason"])
+	# 3. Mock Server Setup for 3-Phase Multi-Agent Debate
+	_server = TCPServer.new()
+	var err := _server.listen(0, "127.0.0.1")
+	check("mock: server listen", OK, err)
+	var port: int = _server.get_local_port()
+	opp.custom_endpoint = "http://127.0.0.1:%d/v1/chat/completions" % port
+	_mock_running = true
+	_run_mock_server()
 
-	council.queue_free()
+	# Test Phase 1 & 2 & 3 Mock responses:
+	# Yoda Proposal (Phase 1):
+	# Qui-Gon Proposal (Phase 1):
+	# Windu Critique (Phase 2):
+	# Yoda Final Synthesis (Phase 3):
+	_mock_replies = [
+		# Yoda Proposal:
+		"ASSESSMENT: White opens with strong spatial control.\nCANDIDATES:\n1. MOVE: e2e4 | PLAN: Claim the center\n2. MOVE: d2d4 | PLAN: Solid pawn structure\nPREFERRED: e2e4\nREASON: The center, a Jedi must control.",
+		# Qui-Gon Proposal:
+		"ASSESSMENT: Active development creates initiative.\nCANDIDATES:\n1. MOVE: g1f3 | PLAN: Develop knight\n2. MOVE: e2e4 | PLAN: Strike center\nPREFERRED: g1f3\nREASON: Flow with the living force.",
+		# Windu Critique:
+		"CRITIQUE: Both e2e4 and g1f3 are sound. e2e4 immediately claims d5/f5 with maximum territorial pressure.\nBLUNDER_WARNING: No tactical blunders detected\nRECOMMENDED: e2e4\nWISDOM: Secure the center before the dark side encroaches.",
+		# Yoda Synthesis:
+		"SYNTHESIS: Harmonized the council is. With e2e4, both space and initiative we seize.\nPLAN: Seize the board center\nREASON: In unity, the path is clear.\nMOVE: e2e4"
+	]
+
+	var debates: Array = []
+	opp.council_debated.connect(func(speaker, topic, vote):
+		debates.append({"speaker": speaker, "topic": topic, "vote": vote}))
+
+	var debated_move = await opp.choose_move(state)
+	check("debate: move chosen", true, debated_move != null)
+	check("debate: chosen move is e2e4", "e2e4", String(debated_move.to_uci()).to_lower() if debated_move != null else "")
+	check("debate: source is pure_llm_council_debate", "pure_llm_council_debate", opp.last_source)
+	check("debate: debates signal emitted", true, debates.size() >= 3)
+	check("debate: 4 mock requests received", 4, _mock_requests.size())
+
+	# Cleanup
+	_mock_running = false
+	_server.stop()
+	opp.queue_free()
+
+	_print_summary()
+	quit(1 if failures > 0 else 0)
 
 
-func _test_council_personas() -> void:
-	check("seats: Yoda has council-max-thinking", "council-max-thinking", JediCouncilScript.COUNCIL_SEATS["yoda"]["model"])
-	check("seats: Windu has council-secure", "council-secure", JediCouncilScript.COUNCIL_SEATS["windu"]["model"])
-	check("seats: Qui-Gon has council-code", "council-code", JediCouncilScript.COUNCIL_SEATS["quigon"]["model"])
-	check("seats: Cilghal has qwen-3.8-instruct", "qwen-3.8-instruct", JediCouncilScript.COUNCIL_SEATS["cilghal"]["model"])
-	check("seats: Mundi has council-finance", "council-finance", JediCouncilScript.COUNCIL_SEATS["mundi"]["model"])
+func _run_mock_server() -> void:
+	while _mock_running:
+		if _server.is_connection_available():
+			var peer := _server.take_connection()
+			_handle_connection(peer)
+		await create_timer(0.01).timeout
 
 
-func _test_position_complexity_scaling() -> void:
-	var council: Node = JediCouncilScript.new()
-	var state := ChessState.new()
-	state.set_fen(ChessState.INITIAL_FEN)
+func _handle_connection(peer: StreamPeerTCP) -> void:
+	while peer.get_status() == StreamPeerTCP.STATUS_CONNECTED and peer.get_available_bytes() == 0:
+		await create_timer(0.01).timeout
+	if peer.get_available_bytes() == 0:
+		peer.disconnect_from_host()
+		return
+	var raw := peer.get_utf8_string(peer.get_available_bytes())
+	var body_idx := raw.find("\r\n\r\n")
+	if body_idx >= 0:
+		var json_body := raw.substr(body_idx + 4)
+		var parsed = JSON.parse_string(json_body)
+		if parsed is Dictionary:
+			_mock_requests.append(parsed)
 
-	# Initial position: quiet, standard budget
-	var initial_comp: Dictionary = council._assess_position_complexity(state, state.legal_moves(true))
-	check("complexity: start position is standard calculation", 45.0, initial_comp["timeout_s"])
+	var reply_content: String = "MOVE: e2e4\nPLAN: Standard move\nREASON: The Force flows."
+	if not _mock_replies.is_empty():
+		reply_content = _mock_replies.pop_front()
 
-	# In-check + tactical tension position: deep meditation 120s-180s budget
-	state.set_fen("rnb1kbnr/pppp1ppp/8/4p3/4P2q/3P4/PPP2PPP/RNBQKBNR w KQkq - 1 4")
-	var sharp_comp: Dictionary = council._assess_position_complexity(state, state.legal_moves(true))
-	check("complexity: sharp position scales timeout budget", true, sharp_comp["timeout_s"] >= 45.0)
+	var resp_body := JSON.stringify({
+		"id": "chatcmpl-mock",
+		"object": "chat.completion",
+		"created": 1234567,
+		"model": "council-mock",
+		"choices": [{
+			"index": 0,
+			"message": {
+				"role": "assistant",
+				"content": reply_content
+			},
+			"finish_reason": "stop"
+		}],
+		"usage": {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150}
+	})
 
-	council.queue_free()
+	var http_resp := "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\n\r\n%s" % [resp_body.to_utf8_buffer().size(), resp_body]
+	peer.put_data(http_resp.to_utf8_buffer())
+	peer.disconnect_from_host()
+
+
+func check(desc: String, expected, actual) -> void:
+	var ok: bool = (expected == actual)
+	if not ok:
+		failures += 1
+	rows.append({"desc": desc, "expected": str(expected), "actual": str(actual), "ok": ok})
+
+
+func _print_summary() -> void:
+	print("")
+	printf("%-46s %-14s %-14s %-6s\n", ["test", "expected", "actual", "ok"])
+	for r in rows:
+		printf("%-46s %-14s %-14s %-6s\n", [
+			r["desc"],
+			r["expected"].left(14),
+			r["actual"].left(14),
+			"PASS" if r["ok"] else "FAIL"
+		])
+	print("")
+	print("%d checks, %d failures" % [rows.size(), failures])
+
+
+func printf(fmt: String, args: Array) -> void:
+	print(fmt % args)

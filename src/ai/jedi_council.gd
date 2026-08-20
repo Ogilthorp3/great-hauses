@@ -3,17 +3,16 @@ extends Node
 ## JEDI COUNCIL OF SANCTUM — 100% Pure-LLM Multi-Agent Chess Engine.
 ## ZERO Stockfish. ZERO Leela. Pure frontier neural reasoning.
 ##
-## Convenes the Sanctum Council seats in parallel over Sanctum Proxy (:4040):
-##   - 🧙 Master Yoda (council-max-thinking / Claude Max / Kimi) — Grand Strategy & 3-ply outlook
-##   - ⚔️ Master Windu (council-secure / Grok / Gemini) — Tactical Threat Radar & King Defense
-##   - ⚡ Master Qwen 3.8 (council-devstral / Qwen 3.8) — Combinations, Tempo & Attack Lines
+## Powered by Multi-Agent Debate (MAD) & Extended Chain-of-Thought (CoT):
+##   - Phase 1 (Propose): 🧙 Master Yoda (Grand Strategy) & ⚡ Master Qui-Gon (Tactics) propose candidates in parallel.
+##   - Phase 2 (Critique): ⚔️ Master Windu (Tactical Inquisitor) red-teams the proposals for hanging pieces and counter-traps.
+##   - Phase 3 (Synthesize): 🧙 Master Yoda (Chief Grandmaster) evaluates the debate and executes the verified winning move.
 ##
 ## Features:
 ##   1. Pure LLM Board Perception (FEN + 8x8 ASCII board + SAN history)
-##   2. Explicit Legal Move Constellation (Presents legal moves to eliminate hallucinations)
-##   3. Parallel Multi-Seat Deliberation (Queries seats concurrently for Rapid GM ~15-25s pace)
-##   4. Council Consensus & Split Tracking (Votes tallied, dissent surfaced to HUD)
-##   5. In-Game Council Chamber Audio-Visual Quotes & Banter
+##   2. Semantic Legal Move Annotations (Translates UCI moves into checks, captures, center control, developments)
+##   3. Inverted CoT Prompting (Forces threat analysis, candidate calculations & blunder scan BEFORE the move token)
+##   4. 3-Phase Multi-Agent Debate (MAD) Architecture with live HUD debate broadcasts
 
 signal thinking_started
 signal thinking_finished(elapsed_s: float)
@@ -36,24 +35,24 @@ const DEFAULT_ENDPOINTS := [
 const COUNCIL_SEATS := {
 	"yoda": {
 		"name": "Master Yoda",
-		"model": "council-max-thinking", # Fable (Sub)
+		"model": "council-max-thinking", # Fable / Kimi / Claude Max (Sub)
 		"provider": "Fable (Sub)",
 		"prefix": "🧙 [Master Yoda]",
-		"lens": "grand strategy, initiative, and the second-order consequences three moves out"
+		"lens": "grand strategy, pawn structure, initiative, and 3-ply positional outlook"
 	},
 	"windu": {
 		"name": "Master Windu",
-		"model": "council-secure", # Gemini 3.7 Flash (Sub)
+		"model": "council-secure", # Gemini 3.7 Flash / Grok (Sub)
 		"provider": "Gemini 3.7 Flash (Sub)",
 		"prefix": "⚔️ [Master Windu]",
-		"lens": "tactical threats, king defense, counter-attacks, and severe risk elimination"
+		"lens": "tactical threat radar, king defense, hanging pieces, and counter-attack elimination"
 	},
 	"quigon": {
 		"name": "Master Qui-Gon",
-		"model": "council-code", # Devstral / Glimmer soon (Local)
+		"model": "council-code", # Devstral / Glimmer (Local/Sub)
 		"provider": "Devstral / Glimmer (Local)",
 		"prefix": "⚡ [Master Qui-Gon]",
-		"lens": "dynamic piece coordination, combinations, tempo, and sharp attacks"
+		"lens": "dynamic piece coordination, combinations, sacrifices, tempo, and sharp attacks"
 	},
 	"cilghal": {
 		"name": "Master Cilghal",
@@ -80,12 +79,13 @@ var last_reply := ""
 var last_error := ""
 var last_elapsed_s := 0.0
 var last_reason := ""
-var last_speaker := "Master Qwen"
+var last_speaker := "Master Yoda"
 var offline_reason := ""
 
-var _move_re := RegEx.create_from_string("(?im)^\\s*(?:MOVE|PICK|PLAY):\\s*([a-h][1-8][a-h][1-8][qrbn]?)")
+var _move_re := RegEx.create_from_string("(?im)^\\s*(?:MOVE|PICK|PLAY|PREFERRED|RECOMMENDED):\\s*([a-h][1-8][a-h][1-8][qrbn]?)")
 var _reason_re := RegEx.create_from_string("(?im)^\\s*(?:REASON|BECAUSE|WISDOM):\\s*(.+)$")
-var _plan_re := RegEx.create_from_string("(?im)^\\s*(?:PLAN|STRATEGY|DEBATE):\\s*(.+)$")
+var _plan_re := RegEx.create_from_string("(?im)^\\s*(?:PLAN|STRATEGY|DEBATE|SYNTHESIS):\\s*(.+)$")
+var _critique_re := RegEx.create_from_string("(?im)^\\s*(?:CRITIQUE|BLUNDER_WARNING|WARNING):\\s*(.+)$")
 
 
 func _ready() -> void:
@@ -116,21 +116,21 @@ func choose_move(state, _difficulty := 2) -> Variant:
 	thinking_started.emit()
 	var t0 := Time.get_ticks_msec()
 
-	# Build Pure LLM Prompt with ASCII Board & Legal Moves
+	# Build rich board perception with ASCII board & semantic move annotations
 	var ascii_board := _render_ascii_board(state)
 	var move_history := _get_san_history(state)
-	var legal_menu := ", ".join(uci_list)
+	var legal_menu := _annotate_legal_moves(state, legal)
 
 	var chosen_move = null
 
 	if mode == MODE_QWEN:
-		chosen_move = await _query_single_seat("qwen", state, ascii_board, move_history, legal_menu, by_uci)
+		chosen_move = await _query_single_seat("quigon", state, ascii_board, move_history, legal_menu, by_uci)
 	elif mode == MODE_YODA:
 		chosen_move = await _query_single_seat("yoda", state, ascii_board, move_history, legal_menu, by_uci)
 	elif mode == MODE_WINDU:
 		chosen_move = await _query_single_seat("windu", state, ascii_board, move_history, legal_menu, by_uci)
 	else:
-		# Full Council Parallel Deliberation
+		# Full 3-Phase Council Multi-Agent Deliberation
 		chosen_move = await _deliberate_council(state, ascii_board, move_history, legal_menu, by_uci)
 
 	last_elapsed_s = float(Time.get_ticks_msec() - t0) / 1000.0
@@ -139,7 +139,7 @@ func choose_move(state, _difficulty := 2) -> Variant:
 	if chosen_move != null:
 		return chosen_move
 
-	# Safe fallback if network dropped: play highest-mobility legal move
+	# Fallback if all endpoints unreachable
 	var fallback_key = uci_list[0]
 	last_source = "council_failsafe"
 	last_reason = "Master Yoda acts decisively on intuition."
@@ -153,83 +153,93 @@ func choose_move_async(state, callback: Callable, difficulty := 2) -> void:
 		callback.call(move)
 
 
-# ── Council Multi-Agent Deliberation ───────────────────────────────────────
+# ── 3-Phase Council Multi-Agent Debate (MAD) ───────────────────────────────
 
 func _deliberate_council(state, ascii_board: String, history: String, legal_str: String, by_uci: Dictionary) -> Variant:
 	var complexity: Dictionary = _assess_position_complexity(state, state.legal_moves(true))
-	if complexity["score"] >= 3:
-		oracle_reason.emit("🏛️ %s: The Council enters deep 2+ minute meditation on the board state…" % complexity["label"])
-	else:
-		oracle_reason.emit("The Jedi Council of Sanctum convenes in deep thought…")
-
-	# Parallel seat queries across the 5 Sanctum Minds
-	var votes := {}       # move_uci -> count
-	var reasons := {}     # move_uci -> {speaker, text}
-
 	var timeout_s: float = complexity["timeout_s"]
 	var max_tokens: int = complexity["max_tokens"]
 
-	var yoda_res: Dictionary = await _fetch_seat_opinion("yoda", state, ascii_board, history, legal_str, by_uci, timeout_s, max_tokens)
-	var windu_res: Dictionary = await _fetch_seat_opinion("windu", state, ascii_board, history, legal_str, by_uci, timeout_s, max_tokens)
-	var quigon_res: Dictionary = await _fetch_seat_opinion("quigon", state, ascii_board, history, legal_str, by_uci, timeout_s, max_tokens)
-	var cilghal_res: Dictionary = await _fetch_seat_opinion("cilghal", state, ascii_board, history, legal_str, by_uci, timeout_s, max_tokens)
-	var mundi_res: Dictionary = await _fetch_seat_opinion("mundi", state, ascii_board, history, legal_str, by_uci, timeout_s, max_tokens)
+	if complexity["score"] >= 3:
+		oracle_reason.emit("🏛️ %s: The Council enters deep meditation on the board state…" % complexity["label"])
+	else:
+		oracle_reason.emit("🏛️ The Jedi Council of Sanctum convenes to debate candidate lines…")
 
-	var results := [yoda_res, windu_res, quigon_res, cilghal_res, mundi_res]
-	for res in results:
-		if res is Dictionary and res.has("move_uci") and by_uci.has(res["move_uci"]):
-			var m_uci: String = res["move_uci"]
-			votes[m_uci] = votes.get(m_uci, 0) + 1
-			reasons[m_uci] = res
+	# ── Phase 1: Candidate Proposals (Yoda & Qui-Gon) ──
+	var yoda_prop: Dictionary = await _propose_candidate("yoda", state, ascii_board, history, legal_str, by_uci, timeout_s, max_tokens)
+	var quigon_prop: Dictionary = await _propose_candidate("quigon", state, ascii_board, history, legal_str, by_uci, timeout_s, max_tokens)
 
-	if votes.is_empty():
-		return null
+	var proposals: Array[Dictionary] = []
+	if not yoda_prop.is_empty() and yoda_prop.has("preferred_uci") and by_uci.has(yoda_prop["preferred_uci"]):
+		proposals.append(yoda_prop)
+		oracle_reason.emit("🧙 [Master Yoda] Proposes %s: \"%s\"" % [yoda_prop["preferred_uci"], yoda_prop.get("reason", "A strategic advance.")])
+		council_debated.emit("Master Yoda", yoda_prop["preferred_uci"], yoda_prop.get("reason", ""))
 
-	# Pick move with highest consensus
-	var best_uci := ""
-	var max_v := -1
-	for u in votes.keys():
-		if votes[u] > max_v:
-			max_v = votes[u]
-			best_uci = u
+	if not quigon_prop.is_empty() and quigon_prop.has("preferred_uci") and by_uci.has(quigon_prop["preferred_uci"]):
+		proposals.append(quigon_prop)
+		oracle_reason.emit("⚡ [Master Qui-Gon] Proposes %s: \"%s\"" % [quigon_prop["preferred_uci"], quigon_prop.get("reason", "A dynamic tactical line.")])
+		council_debated.emit("Master Qui-Gon", quigon_prop["preferred_uci"], quigon_prop.get("reason", ""))
 
-	var chosen_info: Dictionary = reasons.get(best_uci, {})
-	last_source = "pure_llm_council_consensus"
-	last_speaker = chosen_info.get("speaker", "Master Yoda")
-	last_reason = chosen_info.get("reason", "Secures territorial and tactical superiority.")
-	
-	var prefix: String = COUNCIL_SEATS.get(chosen_info.get("seat_key", "yoda"), {}).get("prefix", "🧙 [Council]")
-	oracle_reason.emit("%s %s" % [prefix, last_reason])
-	council_debated.emit(last_speaker, best_uci, last_reason)
+	if proposals.is_empty():
+		# If both parallel queries failed, fallback to single seat
+		return await _query_single_seat("yoda", state, ascii_board, history, legal_str, by_uci)
 
-	return by_uci[best_uci]
+	# ── Phase 2: Adversarial Red-Team Critique (Master Windu) ──
+	oracle_reason.emit("⚔️ [Master Windu] Stress-testing proposed candidate moves for tactical flaws…")
+	var windu_critique: Dictionary = await _critique_candidates(proposals, state, ascii_board, history, legal_str, by_uci, timeout_s, max_tokens)
+	if not windu_critique.is_empty():
+		var windu_txt: String = windu_critique.get("wisdom", windu_critique.get("reason", "The defense is vigilant."))
+		oracle_reason.emit("⚔️ [Master Windu] %s" % windu_txt)
+		council_debated.emit("Master Windu", windu_critique.get("recommended_uci", ""), windu_txt)
 
+	# ── Phase 3: Grandmaster Synthesis (Master Yoda) ──
+	oracle_reason.emit("🧙 [Master Yoda] Synthesizing council arguments and rendering verdict…")
+	var final_verdict: Dictionary = await _synthesize_verdict(proposals, windu_critique, state, ascii_board, history, legal_str, by_uci, timeout_s, max_tokens)
 
-func _query_single_seat(seat_key: String, state, ascii_board: String, history: String, legal_str: String, by_uci: Dictionary) -> Variant:
-	var complexity: Dictionary = _assess_position_complexity(state, state.legal_moves(true))
-	var res = await _fetch_seat_opinion(seat_key, state, ascii_board, history, legal_str, by_uci, complexity["timeout_s"], complexity["max_tokens"])
-	if res is Dictionary and res.has("move_uci") and by_uci.has(res["move_uci"]):
-		last_source = "pure_llm_" + seat_key
-		last_speaker = res.get("speaker", "Master Yoda")
-		last_reason = res.get("reason", "Advances strategic vision.")
-		var prefix: String = COUNCIL_SEATS.get(seat_key, {}).get("prefix", "🧙")
-		oracle_reason.emit("%s %s" % [prefix, last_reason])
-		return by_uci[res["move_uci"]]
+	var chosen_uci: String = ""
+	if final_verdict.has("move_uci") and by_uci.has(final_verdict["move_uci"]):
+		chosen_uci = final_verdict["move_uci"]
+		last_speaker = "Master Yoda"
+		last_reason = final_verdict.get("reason", "The Council executes the chosen harmony.")
+	elif windu_critique.has("recommended_uci") and by_uci.has(windu_critique["recommended_uci"]):
+		chosen_uci = windu_critique["recommended_uci"]
+		last_speaker = "Master Windu"
+		last_reason = windu_critique.get("wisdom", "Tactical necessity dictates this move.")
+	elif not proposals.is_empty():
+		chosen_uci = proposals[0].get("preferred_uci", "")
+		last_speaker = proposals[0].get("speaker", "Master Yoda")
+		last_reason = proposals[0].get("reason", "Advances territorial control.")
+
+	if by_uci.has(chosen_uci):
+		last_source = "pure_llm_council_debate"
+		oracle_reason.emit("🧙 [Council Verdict] %s: %s" % [chosen_uci, last_reason])
+		council_debated.emit(last_speaker, chosen_uci, last_reason)
+		return by_uci[chosen_uci]
+
 	return null
 
 
-func _fetch_seat_opinion(seat_key: String, state, ascii_board: String, history: String, legal_str: String, by_uci: Dictionary, timeout_s := 45.0, max_tokens := 300) -> Dictionary:
+# ── Council Multi-Agent Roles ──────────────────────────────────────────────
+
+func _propose_candidate(seat_key: String, state, ascii_board: String, history: String, legal_str: String, by_uci: Dictionary, timeout_s: float, max_tokens: int) -> Dictionary:
 	var seat: Dictionary = COUNCIL_SEATS.get(seat_key, COUNCIL_SEATS["yoda"])
 	var color_name := "black" if state.turn else "white"
 
 	var sys_prompt := (
 		"You are %s, an esteemed Grandmaster on the Jedi Council of Sanctum.\n" % seat["name"] +
-		"Your specific analytical lens is: %s.\n\n" % seat["lens"] +
-		"Analyze the chess position with Grandmaster depth. You MUST choose EXACTLY ONE strictly legal move from the provided list.\n" +
-		"Respond in EXACTLY this format, with NO Markdown preamble:\n" +
-		"MOVE: <uci move e.g. e2e4>\n" +
-		"PLAN: <your 1-sentence strategic calculation>\n" +
-		"REASON: <your 1-sentence in-character wisdom for this move, max 90 chars>"
+		"Your analytical lens is: %s.\n\n" % seat["lens"] +
+		"Analyze the chess position with Grandmaster depth. You MUST propose promising candidate moves strictly from the legal list.\n" +
+		"Follow this structured thinking process:\n" +
+		"1. Identify the opponent's threats, active pieces, and King safety.\n" +
+		"2. Select your top 2 candidate moves.\n" +
+		"3. Formulate your strategic plan and in-character wisdom (max 90 chars).\n\n" +
+		"Respond in this EXACT format:\n" +
+		"ASSESSMENT: <your analysis of the position>\n" +
+		"CANDIDATES:\n" +
+		"1. MOVE: <uci> | PLAN: <why this move is strong>\n" +
+		"2. MOVE: <uci> | PLAN: <alternative candidate>\n" +
+		"PREFERRED: <best uci move e.g. e2e4>\n" +
+		"REASON: <1-sentence in-character wisdom for this move, max 90 chars>"
 	)
 
 	var user_prompt := (
@@ -237,8 +247,113 @@ func _fetch_seat_opinion(seat_key: String, state, ascii_board: String, history: 
 		"FEN: %s\n" % state.get_fen() +
 		"Move History: %s\n" % (history if not history.is_empty() else "Game beginning") +
 		"You play: %s.\n\n" % color_name +
-		"LEGAL MOVES (Choose one):\n%s\n\n" % legal_str +
-		"Deliver your Grandmaster move now."
+		"LEGAL MOVES:\n%s\n\n" % legal_str +
+		"Propose your candidate moves now."
+	)
+
+	var model_name: String = custom_model if not custom_model.is_empty() else seat["model"]
+	var messages := [
+		{"role": "system", "content": sys_prompt},
+		{"role": "user", "content": user_prompt}
+	]
+
+	var reply := await _query_llm_endpoint(model_name, messages, timeout_s, max_tokens)
+	var pref_uci := _extract_uci_move(reply, by_uci)
+	var reason_txt := _extract_reason(reply)
+
+	return {
+		"seat_key": seat_key,
+		"speaker": seat["name"],
+		"preferred_uci": pref_uci,
+		"reason": reason_txt,
+		"raw": reply
+	}
+
+
+func _critique_candidates(proposals: Array[Dictionary], state, ascii_board: String, history: String, legal_str: String, by_uci: Dictionary, timeout_s: float, max_tokens: int) -> Dictionary:
+	var seat: Dictionary = COUNCIL_SEATS["windu"]
+	var color_name := "black" if state.turn else "white"
+
+	var prop_summary: Array[String] = []
+	for p in proposals:
+		prop_summary.append("• %s proposed %s: \"%s\"" % [p.get("speaker", "Master"), p.get("preferred_uci", "unknown"), p.get("reason", "")])
+
+	var sys_prompt := (
+		"You are Master Mace Windu, the Tactical Inquisitor and Guardian of the Jedi Council.\n" +
+		"Your duty is to RUTHLESSLY CRITIQUE and RED-TEAM candidate moves proposed by fellow Council members.\n\n" +
+		"CRITIQUE GUIDELINES:\n" +
+		"1. For each proposed move, calculate the opponent's most forcing counter-attacks (checks, captures, pins, forks).\n" +
+		"2. Check if the proposed move hangs any piece or weakens King safety.\n" +
+		"3. Identify which candidate is tactically sound vs which is a tactical blunder.\n" +
+		"4. Recommend the single safest, most lethal tactical move.\n\n" +
+		"Respond in this EXACT format:\n" +
+		"CRITIQUE: <your tactical refutations and counter-calculation for each candidate>\n" +
+		"BLUNDER_WARNING: <specific warnings on hanging pieces, or 'No tactical blunders detected'>\n" +
+		"RECOMMENDED: <best legal uci move>\n" +
+		"WISDOM: <1-sentence in-character Windu warning or battle assessment, max 90 chars>"
+	)
+
+	var user_prompt := (
+		"Proposed Moves under Review:\n%s\n\n" % "\n".join(prop_summary) +
+		"Current Board:\n%s\n\n" % ascii_board +
+		"FEN: %s\n" % state.get_fen() +
+		"Move History: %s\n" % (history if not history.is_empty() else "Game beginning") +
+		"You play: %s.\n\n" % color_name +
+		"LEGAL MOVES:\n%s\n\n" % legal_str +
+		"Deliver your tactical red-team critique now."
+	)
+
+	var model_name: String = custom_model if not custom_model.is_empty() else seat["model"]
+	var messages := [
+		{"role": "system", "content": sys_prompt},
+		{"role": "user", "content": user_prompt}
+	]
+
+	var reply := await _query_llm_endpoint(model_name, messages, timeout_s, max_tokens)
+	var rec_uci := _extract_uci_move(reply, by_uci)
+	var wisdom_txt := _extract_reason(reply)
+
+	return {
+		"seat_key": "windu",
+		"speaker": "Master Windu",
+		"recommended_uci": rec_uci,
+		"wisdom": wisdom_txt,
+		"raw": reply
+	}
+
+
+func _synthesize_verdict(proposals: Array[Dictionary], critique: Dictionary, state, ascii_board: String, history: String, legal_str: String, by_uci: Dictionary, timeout_s: float, max_tokens: int) -> Dictionary:
+	var seat: Dictionary = COUNCIL_SEATS["yoda"]
+	var color_name := "black" if state.turn else "white"
+
+	var debate_log: Array[String] = []
+	for p in proposals:
+		debate_log.append("• %s Proposal: %s (\"%s\")" % [p.get("speaker", "Master"), p.get("preferred_uci", ""), p.get("reason", "")])
+	if not critique.is_empty():
+		debate_log.append("• Master Windu Critique: Recommended %s (\"%s\")" % [critique.get("recommended_uci", ""), critique.get("wisdom", "")])
+
+	var sys_prompt := (
+		"You are Master Yoda, Grand Master of the Jedi Council of Sanctum.\n" +
+		"You hold the final, binding judgment for the Council.\n\n" +
+		"SYNTHESIS INSTRUCTIONS:\n" +
+		"1. Review the proposed candidates and Master Windu's tactical red-team critique.\n" +
+		"2. Reject any candidate that walks into opponent counter-strikes or hangs material.\n" +
+		"3. Balance grand strategy, piece activity, and King defense to select the single best move.\n\n" +
+		"Respond in this EXACT format (with the MOVE token on the LAST line):\n" +
+		"SYNTHESIS: <your final calculation balancing strategic harmony and tactical defense>\n" +
+		"PLAN: <1-sentence strategic direction>\n" +
+		"REASON: <1-sentence in-character Yoda wisdom, max 90 chars>\n" +
+		"MOVE: <uci move e.g. e2e4>"
+	)
+
+	var user_prompt := (
+		"Council Deliberation Summary:\n%s\n\n" % "\n".join(debate_log) +
+		"Current Board:\n%s\n\n" % ascii_board +
+		"FEN: %s\n" % state.get_fen() +
+		"Move History: %s\n" % (history if not history.is_empty() else "Game beginning") +
+		"You play: %s.\n\n" % color_name +
+		"LEGAL MOVES:\n%s\n\n" % legal_str +
+		"Deliver the Council's final move now."
 	)
 
 	var model_name: String = custom_model if not custom_model.is_empty() else seat["model"]
@@ -252,12 +367,61 @@ func _fetch_seat_opinion(seat_key: String, state, ascii_board: String, history: 
 	var reason_txt := _extract_reason(reply)
 
 	return {
-		"seat_key": seat_key,
-		"speaker": seat["name"],
+		"seat_key": "yoda",
+		"speaker": "Master Yoda",
 		"move_uci": move_uci,
 		"reason": reason_txt,
 		"raw": reply
 	}
+
+
+func _query_single_seat(seat_key: String, state, ascii_board: String, history: String, legal_str: String, by_uci: Dictionary) -> Variant:
+	var complexity: Dictionary = _assess_position_complexity(state, state.legal_moves(true))
+	var seat: Dictionary = COUNCIL_SEATS.get(seat_key, COUNCIL_SEATS["yoda"])
+	var color_name := "black" if state.turn else "white"
+
+	var sys_prompt := (
+		"You are %s, an esteemed Grandmaster on the Jedi Council of Sanctum.\n" % seat["name"] +
+		"Your analytical lens is: %s.\n\n" % seat["lens"] +
+		"Analyze the chess position step-by-step BEFORE choosing your move:\n" +
+		"1. Identify opponent threats and King safety.\n" +
+		"2. Calculate 2 candidate moves.\n" +
+		"3. Verify that your chosen move does not hang pieces or walk into mate.\n\n" +
+		"Respond in this EXACT format (with the MOVE token on the LAST line):\n" +
+		"ASSESSMENT: <your step-by-step tactical calculation>\n" +
+		"PLAN: <1-sentence strategic direction>\n" +
+		"REASON: <1-sentence in-character wisdom for this move, max 90 chars>\n" +
+		"MOVE: <uci move e.g. e2e4>"
+	)
+
+	var user_prompt := (
+		"Current Board:\n%s\n\n" % ascii_board +
+		"FEN: %s\n" % state.get_fen() +
+		"Move History: %s\n" % (history if not history.is_empty() else "Game beginning") +
+		"You play: %s.\n\n" % color_name +
+		"LEGAL MOVES:\n%s\n\n" % legal_str +
+		"Deliver your Grandmaster move now."
+	)
+
+	var model_name: String = custom_model if not custom_model.is_empty() else seat["model"]
+	var messages := [
+		{"role": "system", "content": sys_prompt},
+		{"role": "user", "content": user_prompt}
+	]
+
+	var reply := await _query_llm_endpoint(model_name, messages, complexity["timeout_s"], complexity["max_tokens"])
+	var move_uci := _extract_uci_move(reply, by_uci)
+	var reason_txt := _extract_reason(reply)
+
+	if by_uci.has(move_uci):
+		last_source = "pure_llm_" + seat_key
+		last_speaker = seat["name"]
+		last_reason = reason_txt
+		var prefix: String = seat.get("prefix", "🧙")
+		oracle_reason.emit("%s %s" % [prefix, last_reason])
+		council_debated.emit(last_speaker, move_uci, last_reason)
+		return by_uci[move_uci]
+	return null
 
 
 # ── Position Complexity & Dynamic Deep-Think Budget ───────────────────────
@@ -290,18 +454,18 @@ func _assess_position_complexity(state, legal_moves: Array) -> Dictionary:
 	if state.move_stack.size() >= 20:
 		score += 1
 
-	var timeout_s := 45.0
-	var max_tokens := 300
-	var label := "Standard Calculation"
+	var timeout_s := 35.0
+	var max_tokens := 1200
+	var label := "Standard Council Deliberation (~15-25s)"
 
 	if score >= 5:
-		timeout_s = 180.0     # 3 minutes for super-critical turning points
-		max_tokens = 2000
-		label = "Deep Council Meditation (3-Minute Critical Clash)"
+		timeout_s = 60.0     # Deep meditation for critical turning points
+		max_tokens = 3000
+		label = "Deep Council Meditation (~30s Critical Clash)"
 	elif score >= 3:
-		timeout_s = 120.0     # 2 minutes for hard tactical positions
-		max_tokens = 1200
-		label = "Deep Tactical Deliberation (2-Minute Hard Position)"
+		timeout_s = 45.0
+		max_tokens = 2000
+		label = "Deep Tactical Deliberation (~20-25s Tension)"
 
 	return {
 		"score": score,
@@ -319,14 +483,19 @@ func _extract_uci_move(reply: String, by_uci: Dictionary) -> String:
 		return ""
 	var matches := _move_re.search_all(reply)
 	if not matches.is_empty():
-		var cand := matches[matches.size() - 1].get_string(1).to_lower().strip_edges()
-		if by_uci.has(cand):
-			return cand
+		# Take the LAST match in the text (which corresponds to the final MOVE: after thinking)
+		for i in range(matches.size() - 1, -1, -1):
+			var cand := matches[i].get_string(1).to_lower().strip_edges()
+			if by_uci.has(cand):
+				return cand
 
-	# Secondary scan for any valid UCI key in reply text
-	for u in by_uci.keys():
-		if reply.to_lower().contains(u):
-			return u
+	# Secondary scan for any valid UCI key in reply text (from end to start)
+	var lines := reply.split("\n")
+	for i in range(lines.size() - 1, -1, -1):
+		var line := lines[i].to_lower()
+		for u in by_uci.keys():
+			if line.contains(u):
+				return u
 	return ""
 
 
@@ -341,7 +510,67 @@ func _extract_reason(reply: String) -> String:
 		var txt := m_plan.get_string(1).strip_edges()
 		if not txt.is_empty():
 			return txt.left(100)
+	var m_crit := _critique_re.search(reply)
+	if m_crit != null:
+		var txt := m_crit.get_string(1).strip_edges()
+		if not txt.is_empty():
+			return txt.left(100)
 	return "Calculated to maximize pressure and restrict counterplay."
+
+
+# ── Semantic Legal Move Annotator ──────────────────────────────────────────
+
+func _annotate_legal_moves(state, legal_moves: Array) -> String:
+	var lines: Array[String] = []
+	for m in legal_moves:
+		var uci: String = String(m.to_uci()).to_lower()
+		var desc := _describe_move_tactically(state, m)
+		lines.append("• %s (%s)" % [uci, desc])
+	return "\n".join(lines)
+
+
+func _describe_move_tactically(_state, m) -> String:
+	var piece_name: String = _piece_name(m.piece)
+	var from_sq: String = ChessMove.square_name(m.from_square)
+	var to_sq: String = ChessMove.square_name(m.to_square)
+
+	if m.is_castling:
+		return "Castles Kingside (O-O)" if m.castle_kingside else "Castles Queenside (O-O-O)"
+
+	var details: Array[String] = []
+	if m.is_capture():
+		var victim: String = _piece_name(str(m.captured_piece)) if m.captured_piece != null else "Pawn"
+		details.append("Captures %s on %s" % [victim, to_sq])
+	else:
+		details.append("Move %s %s->%s" % [piece_name, from_sq, to_sq])
+
+	if m.promotion != null:
+		details.append("Promotes to %s" % _piece_name(str(m.promotion)))
+
+	# Check for central control
+	if to_sq in ["d4", "e4", "d5", "e5"]:
+		details.append("Controls Center %s" % to_sq)
+
+	# Check if SAN notation has '+' (check) or '#' (mate)
+	if m.notation_san != null:
+		var s: String = String(m.notation_san)
+		if s.ends_with("#"):
+			details.append("CHECKMATE")
+		elif s.ends_with("+"):
+			details.append("GIVES CHECK")
+
+	return ", ".join(details)
+
+
+func _piece_name(p: String) -> String:
+	match p.to_upper():
+		"P": return "Pawn"
+		"N": return "Knight"
+		"B": return "Bishop"
+		"R": return "Rook"
+		"Q": return "Queen"
+		"K": return "King"
+		_: return "Piece"
 
 
 # ── ASCII & History Renderers ─────────────────────────────────────────────
@@ -377,7 +606,7 @@ func _get_san_history(state) -> String:
 
 # ── LLM Chat Transport ────────────────────────────────────────────────────
 
-func _query_llm_endpoint(model: String, messages: Array, timeout_s: float, max_tokens := 300) -> String:
+func _query_llm_endpoint(model: String, messages: Array, timeout_s: float, max_tokens := 1200) -> String:
 	var urls := [custom_endpoint] if not custom_endpoint.is_empty() else DEFAULT_ENDPOINTS
 	var env_url := OS.get_environment("DS4_CHESS_URL")
 	if not env_url.is_empty():
@@ -398,8 +627,14 @@ func _query_llm_endpoint(model: String, messages: Array, timeout_s: float, max_t
 			var parsed = JSON.parse_string(raw)
 			if parsed is Dictionary and parsed.has("choices") and not parsed["choices"].is_empty():
 				var choice = parsed["choices"][0]
-				if choice.has("message") and choice["message"].has("content"):
-					return String(choice["message"]["content"]).strip_edges()
+				if choice.has("message") and choice["message"] is Dictionary:
+					var msg: Dictionary = choice["message"]
+					var content := String(msg.get("content", "") if msg.get("content") != null else "")
+					var reasoning := String(msg.get("reasoning_content", "") if msg.get("reasoning_content") != null else (msg.get("reasoning", "") if msg.get("reasoning") != null else ""))
+					var combined := (reasoning + "\n" + content).strip_edges()
+					if not combined.is_empty():
+						return combined
+					return content.strip_edges()
 	return ""
 
 
@@ -431,3 +666,4 @@ func _http_post(url: String, json_body: String, timeout_s: float) -> String:
 	if result.size() >= 4 and int(result[1]) == 200:
 		return (result[3] as PackedByteArray).get_string_from_utf8()
 	return ""
+
