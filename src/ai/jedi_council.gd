@@ -411,11 +411,25 @@ func _deliberate_council(state, ascii_board: String, history: String, legal_str:
 
 	var guard_frames := 0
 	var max_frames := int((timeout_s + 5.0) * 60)
+	var quorum_frame := -1
+
 	while finished_phase1 < 3 and guard_frames < max_frames:
 		guard_frames += 1
-		# If at least 2 proposals have arrived and 3 seconds have passed, proceed smoothly
-		if finished_phase1 >= 2 and guard_frames >= 180:
+		# Carmack Quorum Rule:
+		# If at least 2 proposals have arrived (e.g. Yoda + Qui-Gon), give a 2.5s grace window
+		# (150 frames) for the 3rd model. If the 3rd hasn't arrived, proceed immediately to Windu!
+		if proposals.size() >= 2:
+			if quorum_frame == -1:
+				quorum_frame = guard_frames
+			elif guard_frames - quorum_frame >= 150:
+				_log_council("⚡ [Quorum Triggered] 2/3 Jedi proposed candidates — proceeding to Windu red-team critique.")
+				break
+
+		# If 1 proposal arrived and we have waited > 40s (2400 frames), proceed without stalling
+		if proposals.size() >= 1 and guard_frames >= 2400:
+			_log_council("⚡ [Solo Quorum Exit] Proceeding with %s's line after 40s timeout." % proposals[0].get("speaker", "Master"))
 			break
+
 		if is_inside_tree():
 			await get_tree().process_frame
 		elif Engine.get_main_loop() is SceneTree and (Engine.get_main_loop() as SceneTree).root != null:
@@ -432,7 +446,8 @@ func _deliberate_council(state, ascii_board: String, history: String, legal_str:
 	# ── Phase 2: Adversarial Red-Team Critique (Master Windu) ──
 	council_phase_changed.emit("Phase 2: ⚔️ Master Windu red-teaming candidate lines for traps…")
 	oracle_reason.emit("⚔️ [Master Windu] Stress-testing proposed candidate moves for tactical flaws…")
-	var windu_critique: Dictionary = await _critique_candidates(proposals, state, ascii_board, history, legal_str, by_uci, timeout_s, critique_tokens)
+	var critique_timeout := minf(timeout_s, 45.0)
+	var windu_critique: Dictionary = await _critique_candidates(proposals, state, ascii_board, history, legal_str, by_uci, critique_timeout, critique_tokens)
 	if not windu_critique.is_empty():
 		var windu_txt: String = windu_critique.get("wisdom", windu_critique.get("reason", "The defense is vigilant."))
 		_log_council("⚔️ [Windu Critique] Rec: %s | Warning: \"%s\"" % [windu_critique.get("recommended_uci", ""), windu_txt])
@@ -740,31 +755,31 @@ func _assess_position_complexity(state, legal_moves: Array) -> Dictionary:
 	if ply_count >= 20:
 		score += 1
 
-	var timeout_s := 60.0
-	var proposal_tokens := 700
-	var critique_tokens := 380
+	var timeout_s := 75.0
+	var proposal_tokens := 750
+	var critique_tokens := 400
 	var synth_tokens := 500
-	var label := "Standard Council Deliberation (~15-25s)"
+	var label := "Standard Council Deliberation (~15-30s)"
 
 	# Opening speed-up (Moves 1-6 with no immediate checks/clashes)
 	if ply_count <= 12 and score == 0:
-		timeout_s = 40.0
-		proposal_tokens = 550
-		critique_tokens = 300
+		timeout_s = 65.0
+		proposal_tokens = 600
+		critique_tokens = 320
 		synth_tokens = 400
-		label = "Harmonious Opening Development (~10-15s)"
+		label = "Harmonious Opening Development (~12-20s)"
 	elif score >= 5:
-		timeout_s = 120.0
+		timeout_s = 140.0
 		proposal_tokens = 1500
 		critique_tokens = 600
 		synth_tokens = 800
-		label = "Deep Council Meditation (~40-60s Critical Clash)"
+		label = "Deep Council Meditation (~40-70s Critical Clash)"
 	elif score >= 3:
-		timeout_s = 90.0
+		timeout_s = 100.0
 		proposal_tokens = 1000
 		critique_tokens = 450
 		synth_tokens = 600
-		label = "Deep Tactical Deliberation (~25-35s Tension)"
+		label = "Deep Tactical Deliberation (~25-45s Tension)"
 
 	return {
 		"score": score,
