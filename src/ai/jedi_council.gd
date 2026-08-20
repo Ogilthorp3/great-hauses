@@ -56,6 +56,13 @@ const COUNCIL_SEATS := {
 		"prefix": "⚡ [Master Qui-Gon]",
 		"lens": "dynamic piece coordination, combinations, sacrifices, tempo, and sharp attacks"
 	},
+	"plokoon": {
+		"name": "Master Plo Koon",
+		"model": "council-secure", # Gemini 3.7 Flash / Grok (Sub)
+		"provider": "Gemini 3.7 Flash (Sub)",
+		"prefix": "🔮 [Master Plo Koon]",
+		"lens": "harmonious opening principles, long-range piece coordination, and fluid board control"
+	},
 	"cilghal": {
 		"name": "Master Cilghal",
 		"model": "qwen-3.8-instruct", # Qwen 3.8 (Local)
@@ -83,6 +90,10 @@ var last_elapsed_s := 0.0
 var last_reason := ""
 var last_speaker := "Master Yoda"
 var offline_reason := ""
+
+var _ponder_cache: Dictionary = {}
+var _is_pondering: bool = false
+var _ponder_gen: int = 0
 
 var _move_re := RegEx.create_from_string("(?im)^\\s*(?:MOVE|PICK|PLAY|PREFERRED|RECOMMENDED):\\s*([a-h][1-8][a-h][1-8][qrbn]?)")
 var _reason_re := RegEx.create_from_string("(?im)^\\s*(?:REASON|BECAUSE|WISDOM):\\s*(.+)$")
@@ -171,6 +182,27 @@ func choose_move(state, _difficulty := 2) -> Variant:
 		by_uci[u] = m
 		uci_list.append(u)
 
+	# Invalidate pending background ponder and check cache
+	_ponder_gen += 1
+	_is_pondering = false
+
+	var fen_now: String = str(state.get_fen())
+	if _ponder_cache.has(fen_now):
+		var cached: Dictionary = _ponder_cache[fen_now]
+		_ponder_cache.erase(fen_now)
+		var uci_key: String = cached.get("uci", "")
+		if by_uci.has(uci_key):
+			thinking_started.emit()
+			last_source = cached.get("source", "pure_llm_council_debate_pondered")
+			last_reason = cached.get("reason", "Pre-calculated through Force precognition.")
+			last_speaker = cached.get("speaker", "Master Yoda")
+			_log_council("✨ [PONDER HIT] Pre-computed response executed instantly: %s | \"%s\"" % [uci_key, last_reason])
+			oracle_reason.emit("✨ [Council Precognition] %s: %s" % [uci_key, last_reason])
+			council_phase_changed.emit("✨ Pondered line ratified instantly for %s!" % uci_key)
+			council_debated.emit(last_speaker, uci_key, last_reason)
+			thinking_finished.emit(0.1)
+			return by_uci[uci_key]
+
 	thinking_started.emit()
 	var t0 := Time.get_ticks_msec()
 
@@ -212,12 +244,103 @@ func choose_move_async(state, callback: Callable, difficulty := 2) -> void:
 		callback.call(move)
 
 
+# ── Speculative Pondering Engine (Thinking on Opponent's Turn) ─────────────
+
+func ponder(player_state) -> void:
+	if _is_pondering or player_state == null:
+		return
+	var legal: Array = player_state.legal_moves(true)
+	if legal.is_empty():
+		return
+
+	_ponder_gen += 1
+	var cur_gen := _ponder_gen
+	_is_pondering = true
+	_run_ponder_async(player_state, legal, cur_gen)
+
+
+func _run_ponder_async(player_state, legal: Array, gen: int) -> void:
+	var candidate_moves := _rank_expected_player_moves(player_state, legal)
+	if candidate_moves.is_empty():
+		_is_pondering = false
+		return
+
+	for cand_move in candidate_moves.slice(0, 2):
+		if gen != _ponder_gen:
+			break
+		var sim_state: ChessState = ChessState.new()
+		sim_state.set_fen(player_state.get_fen())
+		sim_state.apply_move(cand_move)
+
+		var sim_fen: String = str(sim_state.get_fen())
+		if _ponder_cache.has(sim_fen):
+			continue
+
+		var sim_legal: Array = sim_state.legal_moves(true)
+		if sim_legal.is_empty():
+			continue
+		var by_uci := {}
+		for m in sim_legal:
+			by_uci[String(m.to_uci()).to_lower()] = m
+
+		var ascii_b := _render_ascii_board(sim_state)
+		var hist := _get_san_history(sim_state)
+		var leg_menu := _annotate_legal_moves(sim_state, sim_legal)
+
+		_log_council("🧠 [Ponder] Starting background deliberation for predicted reply %s (FEN: %s)" % [cand_move.to_uci(), sim_fen])
+		var verdict = await _deliberate_council(sim_state, ascii_b, hist, leg_menu, by_uci)
+		if gen != _ponder_gen:
+			break
+		if verdict != null:
+			var uci_chosen: String = String(verdict.to_uci()).to_lower()
+			_ponder_cache[sim_fen] = {
+				"uci": uci_chosen,
+				"move": verdict,
+				"source": "pure_llm_council_debate_pondered",
+				"reason": last_reason,
+				"speaker": last_speaker
+			}
+			_log_council("🧠 [Ponder Ready] Pre-computed response %s for predicted move %s" % [uci_chosen, cand_move.to_uci()])
+
+	if gen == _ponder_gen:
+		_is_pondering = false
+
+
+func cancel_ponder() -> void:
+	_ponder_gen += 1
+	_is_pondering = false
+
+
+func _rank_expected_player_moves(state, legal: Array) -> Array:
+	var scored := []
+	for m in legal:
+		var uci: String = String(m.to_uci()).to_lower()
+		var score := 0
+		if m.is_capture():
+			score += 50
+		if uci in ["e2e4", "d2d4", "c2c4", "e7e5", "d7d5", "c7c5", "f2f4", "g1f3", "b1c3", "g8f6", "b8c6"]:
+			score += 40
+		if m.is_castle():
+			score += 35
+		if uci.begins_with("b1") or uci.begins_with("g1") or uci.begins_with("b8") or uci.begins_with("g8"):
+			score += 20
+		scored.append({"move": m, "score": score})
+
+	scored.sort_custom(func(a, b): return a["score"] > b["score"])
+	var out := []
+	for s in scored:
+		out.append(s["move"])
+	return out
+
+
 # ── 3-Phase Council Multi-Agent Debate (MAD) ───────────────────────────────
 
 func _deliberate_council(state, ascii_board: String, history: String, legal_str: String, by_uci: Dictionary) -> Variant:
 	var complexity: Dictionary = _assess_position_complexity(state, state.legal_moves(true))
 	var timeout_s: float = complexity["timeout_s"]
-	var max_tokens: int = complexity["max_tokens"]
+	var proposal_tokens: int = complexity["proposal_tokens"]
+	var critique_tokens: int = complexity["critique_tokens"]
+	var synth_tokens: int = complexity["synth_tokens"]
 
 	_log_council("=== COUNCIL DEBATE START (PARALLEL) === FEN: %s" % state.get_fen())
 
@@ -226,8 +349,8 @@ func _deliberate_council(state, ascii_board: String, history: String, legal_str:
 	else:
 		oracle_reason.emit("🏛️ The Jedi Council of Sanctum convenes in parallel debate…")
 
-	# ── Phase 1: Parallel Candidate Proposals (Master Yoda & Master Qui-Gon) ──
-	council_phase_changed.emit("Phase 1: 🧙 Master Yoda & ⚡ Qui-Gon proposing candidate lines…")
+	# ── Phase 1: Parallel Candidate Proposals (Yoda, Qui-Gon, & Plo Koon) ──
+	council_phase_changed.emit("Phase 1: 🧙 Master Yoda, ⚡ Qui-Gon & 🔮 Plo Koon proposing candidate lines…")
 	var proposals: Array[Dictionary] = []
 	var finished_phase1 := 0
 
@@ -238,18 +361,22 @@ func _deliberate_council(state, ascii_board: String, history: String, legal_str:
 			var speaker: String = prop.get("speaker", "Master")
 			var uci: String = prop.get("preferred_uci", "")
 			var reason: String = prop.get("reason", "")
-			var prefix: String = "🧙 [Master Yoda]" if speaker.contains("Yoda") else "⚡ [Master Qui-Gon]"
+			var prefix: String = "🧙 [Master Yoda]" if speaker.contains("Yoda") else ("⚡ [Master Qui-Gon]" if speaker.contains("Qui-Gon") else "🔮 [Master Plo Koon]")
 			_log_council("%s Proposal: %s — \"%s\"" % [prefix, uci, reason])
 			oracle_reason.emit("%s Proposes %s: \"%s\"" % [prefix, uci, reason])
 			council_debated.emit(speaker, uci, reason)
 
-	_propose_candidate_async("yoda", state, ascii_board, history, legal_str, by_uci, timeout_s, max_tokens, handle_prop)
-	_propose_candidate_async("quigon", state, ascii_board, history, legal_str, by_uci, timeout_s, max_tokens, handle_prop)
+	_propose_candidate_async("yoda", state, ascii_board, history, legal_str, by_uci, timeout_s, proposal_tokens, handle_prop)
+	_propose_candidate_async("quigon", state, ascii_board, history, legal_str, by_uci, timeout_s, proposal_tokens, handle_prop)
+	_propose_candidate_async("plokoon", state, ascii_board, history, legal_str, by_uci, timeout_s, proposal_tokens, handle_prop)
 
 	var guard_frames := 0
 	var max_frames := int((timeout_s + 5.0) * 60)
-	while finished_phase1 < 2 and guard_frames < max_frames:
+	while finished_phase1 < 3 and guard_frames < max_frames:
 		guard_frames += 1
+		# If at least 2 proposals have arrived and 3 seconds have passed, proceed smoothly
+		if finished_phase1 >= 2 and guard_frames >= 180:
+			break
 		if is_inside_tree():
 			await get_tree().process_frame
 		elif Engine.get_main_loop() is SceneTree and (Engine.get_main_loop() as SceneTree).root != null:
@@ -265,7 +392,7 @@ func _deliberate_council(state, ascii_board: String, history: String, legal_str:
 	# ── Phase 2: Adversarial Red-Team Critique (Master Windu) ──
 	council_phase_changed.emit("Phase 2: ⚔️ Master Windu red-teaming candidate lines for traps…")
 	oracle_reason.emit("⚔️ [Master Windu] Stress-testing proposed candidate moves for tactical flaws…")
-	var windu_critique: Dictionary = await _critique_candidates(proposals, state, ascii_board, history, legal_str, by_uci, timeout_s, max_tokens)
+	var windu_critique: Dictionary = await _critique_candidates(proposals, state, ascii_board, history, legal_str, by_uci, timeout_s, critique_tokens)
 	if not windu_critique.is_empty():
 		var windu_txt: String = windu_critique.get("wisdom", windu_critique.get("reason", "The defense is vigilant."))
 		_log_council("⚔️ [Windu Critique] Rec: %s | Warning: \"%s\"" % [windu_critique.get("recommended_uci", ""), windu_txt])
@@ -291,7 +418,7 @@ func _deliberate_council(state, ascii_board: String, history: String, legal_str:
 	else:
 		council_phase_changed.emit("Phase 3: 🧙 Master Yoda synthesizing arguments for Grandmaster verdict…")
 		oracle_reason.emit("🧙 [Master Yoda] Synthesizing council arguments and rendering verdict…")
-		var final_verdict: Dictionary = await _synthesize_verdict(proposals, windu_critique, state, ascii_board, history, legal_str, by_uci, timeout_s, max_tokens)
+		var final_verdict: Dictionary = await _synthesize_verdict(proposals, windu_critique, state, ascii_board, history, legal_str, by_uci, timeout_s, synth_tokens)
 		if final_verdict.has("move_uci") and by_uci.has(final_verdict["move_uci"]):
 			chosen_uci = final_verdict["move_uci"]
 			last_speaker = "Master Yoda"
@@ -553,27 +680,44 @@ func _assess_position_complexity(state, legal_moves: Array) -> Dictionary:
 		score += 2
 		reasons.append("Critical endgame piece/pawn race")
 
-	if state.move_stack.size() >= 20:
+	var ply_count: int = state.move_stack.size()
+	if ply_count >= 20:
 		score += 1
 
-	var timeout_s := 90.0
-	var max_tokens := 1500
-	var label := "Standard Council Deliberation (~20-35s)"
+	var timeout_s := 60.0
+	var proposal_tokens := 700
+	var critique_tokens := 380
+	var synth_tokens := 500
+	var label := "Standard Council Deliberation (~15-25s)"
 
-	if score >= 5:
-		timeout_s = 120.0     # Deep meditation for critical turning points
-		max_tokens = 3000
+	# Opening speed-up (Moves 1-6 with no immediate checks/clashes)
+	if ply_count <= 12 and score == 0:
+		timeout_s = 40.0
+		proposal_tokens = 550
+		critique_tokens = 300
+		synth_tokens = 400
+		label = "Harmonious Opening Development (~10-15s)"
+	elif score >= 5:
+		timeout_s = 120.0
+		proposal_tokens = 1500
+		critique_tokens = 600
+		synth_tokens = 800
 		label = "Deep Council Meditation (~40-60s Critical Clash)"
 	elif score >= 3:
-		timeout_s = 105.0
-		max_tokens = 2200
-		label = "Deep Tactical Deliberation (~30-45s Tension)"
+		timeout_s = 90.0
+		proposal_tokens = 1000
+		critique_tokens = 450
+		synth_tokens = 600
+		label = "Deep Tactical Deliberation (~25-35s Tension)"
 
 	return {
 		"score": score,
 		"reasons": reasons,
 		"timeout_s": timeout_s,
-		"max_tokens": max_tokens,
+		"max_tokens": proposal_tokens,
+		"proposal_tokens": proposal_tokens,
+		"critique_tokens": critique_tokens,
+		"synth_tokens": synth_tokens,
 		"label": label
 	}
 

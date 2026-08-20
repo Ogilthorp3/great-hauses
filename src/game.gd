@@ -532,6 +532,8 @@ func _ready() -> void:
 	_lt("turn-moves")
 	_setup_network()    # after the state exists — the host hands it to NetMatch
 	_update_turn_label()
+	if not game_over and state.turn == player_color and oracle != null and oracle.has_method("ponder"):
+		oracle.ponder(state)
 	board.square_clicked.connect(_on_square_clicked)
 	board.square_hovered.connect(_on_square_hovered)
 	_lt("net+wiring")
@@ -1047,6 +1049,8 @@ func _play_turn(move) -> void:
 	busy = false
 	_update_turn_label()
 	_update_undo_button()
+	if not game_over and state.turn == player_color and oracle != null and oracle.has_method("ponder"):
+		oracle.ponder(state)
 
 
 # -- head-to-head turn flow -------------------------------------------------
@@ -1471,10 +1475,14 @@ func _perform_undo() -> void:
 		spectator.rewind_moves(undone)   # ships with dragon_spectator.gd
 	if ledger != null:
 		ledger.rewind_to(state.move_stack.size())
+	if oracle != null and oracle.has_method("cancel_ponder"):
+		oracle.cancel_ponder()
 	_spawn_from_state()     # captured pieces resurrect
 	_refresh_turn_moves()
 	_update_turn_label()
 	_update_undo_button()
+	if not game_over and state.turn == player_color and oracle != null and oracle.has_method("ponder"):
+		oracle.ponder(state)
 
 
 func _update_undo_button() -> void:
