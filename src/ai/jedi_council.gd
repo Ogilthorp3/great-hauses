@@ -99,28 +99,56 @@ func _ready() -> void:
 ## On failure, offline_reason carries the UI reason to disable the Jedi Council in HouseSelect.
 func ping(timeout_s := 3.0) -> bool:
 	offline_reason = ""
-	var urls := [custom_endpoint] if not custom_endpoint.is_empty() else DEFAULT_ENDPOINTS
-	var env_url := OS.get_environment("DS4_CHESS_URL")
-	if not env_url.is_empty():
-		urls.insert(0, env_url)
+	var urls: Array[String] = []
+	if not custom_endpoint.is_empty():
+		urls.append(custom_endpoint)
+	else:
+		var env_url := OS.get_environment("DS4_CHESS_URL")
+		if not env_url.is_empty():
+			urls.append(env_url)
+		for u in DEFAULT_ENDPOINTS:
+			urls.append(u)
 
 	for url in urls:
 		if url.is_empty():
 			continue
-		var health_url: String = url.replace("/chat/completions", "/health") if url.contains("/chat/completions") else (url.rstrip("/") + "/health")
+		var health_url: String = _to_health_url(url)
 		var raw := await _http_get(health_url, timeout_s)
 		if not raw.is_empty():
 			var parsed = JSON.parse_string(raw)
-			if parsed is Dictionary and parsed.get("status") == "healthy":
+			if parsed is Dictionary and (parsed.get("status") == "healthy" or parsed.has("providers") or parsed.has("seats")):
+				_log_council("[PREFLIGHT] Jedi Council probe SUCCESS at %s" % health_url)
 				return true
 		# Secondary probe: check /v1/models
-		var models_url: String = url.replace("/chat/completions", "/models") if url.contains("/chat/completions") else (url.rstrip("/") + "/v1/models")
+		var models_url: String = _to_models_url(url)
 		var r_mod := await _http_get(models_url, timeout_s)
 		if not r_mod.is_empty():
-			return true
+			var parsed_m = JSON.parse_string(r_mod)
+			if parsed_m is Dictionary and (parsed_m.has("data") or parsed_m.has("choices")):
+				_log_council("[PREFLIGHT] Jedi Council probe SUCCESS at %s" % models_url)
+				return true
 
 	offline_reason = "the Council sits in Sanctum (proxy unreachable)"
+	_log_council("[PREFLIGHT] Jedi Council probe FAILED — %s" % offline_reason)
 	return false
+
+
+func _to_health_url(raw: String) -> String:
+	var clean := raw.strip_edges().rstrip("/")
+	for suffix in ["/v1/chat/completions", "/chat/completions", "/v1", "/models"]:
+		if clean.ends_with(suffix):
+			clean = clean.left(clean.length() - suffix.length())
+			break
+	return clean + "/health"
+
+
+func _to_models_url(raw: String) -> String:
+	var clean := raw.strip_edges().rstrip("/")
+	for suffix in ["/v1/chat/completions", "/chat/completions", "/v1/health", "/health"]:
+		if clean.ends_with(suffix):
+			clean = clean.left(clean.length() - suffix.length())
+			break
+	return clean + "/v1/models"
 
 
 func choose_move(state, _difficulty := 2) -> Variant:
@@ -644,10 +672,15 @@ func _get_san_history(state) -> String:
 # ── LLM Chat Transport ────────────────────────────────────────────────────
 
 func _query_llm_endpoint(model: String, messages: Array, timeout_s: float, max_tokens := 1200) -> String:
-	var urls := [custom_endpoint] if not custom_endpoint.is_empty() else DEFAULT_ENDPOINTS
-	var env_url := OS.get_environment("DS4_CHESS_URL")
-	if not env_url.is_empty():
-		urls.insert(0, env_url)
+	var urls: Array[String] = []
+	if not custom_endpoint.is_empty():
+		urls.append(custom_endpoint)
+	else:
+		var env_url := OS.get_environment("DS4_CHESS_URL")
+		if not env_url.is_empty():
+			urls.append(env_url)
+		for u in DEFAULT_ENDPOINTS:
+			urls.append(u)
 
 	for url in urls:
 		if url.is_empty():
