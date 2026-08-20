@@ -56,13 +56,6 @@ const COUNCIL_SEATS := {
 		"prefix": "⚡ [Master Qui-Gon]",
 		"lens": "dynamic piece coordination, combinations, sacrifices, tempo, and sharp attacks"
 	},
-	"plokoon": {
-		"name": "Master Plo Koon",
-		"model": "council-secure", # Gemini 3.7 Flash / Grok (Sub)
-		"provider": "Gemini 3.7 Flash (Sub)",
-		"prefix": "🔮 [Master Plo Koon]",
-		"lens": "harmonious opening principles, long-range piece coordination, and fluid board control"
-	},
 	"cilghal": {
 		"name": "Master Cilghal",
 		"model": "council-mlx", # Qwen 3.8 27B (Local MLX)
@@ -361,14 +354,22 @@ func _deliberate_council(state, ascii_board: String, history: String, legal_str:
 			var speaker: String = prop.get("speaker", "Master")
 			var uci: String = prop.get("preferred_uci", "")
 			var reason: String = prop.get("reason", "")
-			var prefix: String = "🧙 [Master Yoda]" if speaker.contains("Yoda") else ("⚡ [Master Qui-Gon]" if speaker.contains("Qui-Gon") else "🔮 [Master Plo Koon]")
+			var prefix: String = "🧙 [Master Yoda]"
+			if speaker.contains("Qui-Gon"):
+				prefix = "⚡ [Master Qui-Gon]"
+			elif speaker.contains("Mundi"):
+				prefix = "💰 [Master Mundi]"
+			elif speaker.contains("Cilghal"):
+				prefix = "🏥 [Master Cilghal]"
+			elif speaker.contains("Windu"):
+				prefix = "⚔️ [Master Windu]"
 			_log_council("%s Proposal: %s — \"%s\"" % [prefix, uci, reason])
 			oracle_reason.emit("%s Proposes %s: \"%s\"" % [prefix, uci, reason])
 			council_debated.emit(speaker, uci, reason)
 
 	_propose_candidate_async("yoda", state, ascii_board, history, legal_str, by_uci, timeout_s, proposal_tokens, handle_prop)
 	_propose_candidate_async("quigon", state, ascii_board, history, legal_str, by_uci, timeout_s, proposal_tokens, handle_prop)
-	_propose_candidate_async("plokoon", state, ascii_board, history, legal_str, by_uci, timeout_s, proposal_tokens, handle_prop)
+	_propose_candidate_async("mundi", state, ascii_board, history, legal_str, by_uci, timeout_s, proposal_tokens, handle_prop)
 
 	var guard_frames := 0
 	var max_frames := int((timeout_s + 5.0) * 60)
