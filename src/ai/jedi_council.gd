@@ -221,32 +221,44 @@ func _deliberate_council(state, ascii_board: String, history: String, legal_str:
 	var timeout_s: float = complexity["timeout_s"]
 	var max_tokens: int = complexity["max_tokens"]
 
-	_log_council("=== COUNCIL DEBATE START === FEN: %s" % state.get_fen())
+	_log_council("=== COUNCIL DEBATE START (PARALLEL) === FEN: %s" % state.get_fen())
 
 	if complexity["score"] >= 3:
 		oracle_reason.emit("🏛️ %s: The Council enters deep meditation on the board state…" % complexity["label"])
 	else:
-		oracle_reason.emit("🏛️ The Jedi Council of Sanctum convenes to debate candidate lines…")
+		oracle_reason.emit("🏛️ The Jedi Council of Sanctum convenes in parallel debate…")
 
-	# ── Phase 1: Candidate Proposals (Yoda & Qui-Gon) ──
-	var yoda_prop: Dictionary = await _propose_candidate("yoda", state, ascii_board, history, legal_str, by_uci, timeout_s, max_tokens)
-	var quigon_prop: Dictionary = await _propose_candidate("quigon", state, ascii_board, history, legal_str, by_uci, timeout_s, max_tokens)
-
+	# ── Phase 1: Parallel Candidate Proposals (Master Yoda & Master Qui-Gon) ──
 	var proposals: Array[Dictionary] = []
-	if not yoda_prop.is_empty() and yoda_prop.has("preferred_uci") and by_uci.has(yoda_prop["preferred_uci"]):
-		proposals.append(yoda_prop)
-		_log_council("🧙 [Yoda Proposal] %s: \"%s\"" % [yoda_prop["preferred_uci"], yoda_prop.get("reason", "")])
-		oracle_reason.emit("🧙 [Master Yoda] Proposes %s: \"%s\"" % [yoda_prop["preferred_uci"], yoda_prop.get("reason", "A strategic advance.")])
-		council_debated.emit("Master Yoda", yoda_prop["preferred_uci"], yoda_prop.get("reason", ""))
+	var finished_phase1 := 0
 
-	if not quigon_prop.is_empty() and quigon_prop.has("preferred_uci") and by_uci.has(quigon_prop["preferred_uci"]):
-		proposals.append(quigon_prop)
-		_log_council("⚡ [Qui-Gon Proposal] %s: \"%s\"" % [quigon_prop["preferred_uci"], quigon_prop.get("reason", "")])
-		oracle_reason.emit("⚡ [Master Qui-Gon] Proposes %s: \"%s\"" % [quigon_prop["preferred_uci"], quigon_prop.get("reason", "A dynamic tactical line.")])
-		council_debated.emit("Master Qui-Gon", quigon_prop["preferred_uci"], quigon_prop.get("reason", ""))
+	var handle_prop = func(prop: Dictionary) -> void:
+		finished_phase1 += 1
+		if not prop.is_empty() and prop.has("preferred_uci") and by_uci.has(prop["preferred_uci"]):
+			proposals.append(prop)
+			var speaker: String = prop.get("speaker", "Master")
+			var uci: String = prop.get("preferred_uci", "")
+			var reason: String = prop.get("reason", "")
+			var prefix: String = "🧙 [Master Yoda]" if speaker.contains("Yoda") else "⚡ [Master Qui-Gon]"
+			_log_council("%s Proposal: %s — \"%s\"" % [prefix, uci, reason])
+			oracle_reason.emit("%s Proposes %s: \"%s\"" % [prefix, uci, reason])
+			council_debated.emit(speaker, uci, reason)
+
+	_propose_candidate_async("yoda", state, ascii_board, history, legal_str, by_uci, timeout_s, max_tokens, handle_prop)
+	_propose_candidate_async("quigon", state, ascii_board, history, legal_str, by_uci, timeout_s, max_tokens, handle_prop)
+
+	var guard_frames := 0
+	var max_frames := int((timeout_s + 5.0) * 60)
+	while finished_phase1 < 2 and guard_frames < max_frames:
+		guard_frames += 1
+		if is_inside_tree():
+			await get_tree().process_frame
+		elif Engine.get_main_loop() is SceneTree and (Engine.get_main_loop() as SceneTree).root != null:
+			await (Engine.get_main_loop() as SceneTree).process_frame
+		else:
+			await get_tree().create_timer(0.01).timeout
 
 	if proposals.is_empty():
-		# If both parallel queries failed, fallback to single seat
 		_log_council("⚠️ Phase 1 proposals empty — falling back to single seat query")
 		return await _query_single_seat("yoda", state, ascii_board, history, legal_str, by_uci)
 
@@ -260,22 +272,35 @@ func _deliberate_council(state, ascii_board: String, history: String, legal_str:
 		council_debated.emit("Master Windu", windu_critique.get("recommended_uci", ""), windu_txt)
 
 	# ── Phase 3: Grandmaster Synthesis (Master Yoda) ──
-	oracle_reason.emit("🧙 [Master Yoda] Synthesizing council arguments and rendering verdict…")
-	var final_verdict: Dictionary = await _synthesize_verdict(proposals, windu_critique, state, ascii_board, history, legal_str, by_uci, timeout_s, max_tokens)
+	var windu_rec: String = windu_critique.get("recommended_uci", "")
+	var windu_blunder: String = windu_critique.get("blunder_warning", "")
+	var unanimous := false
+	if proposals.size() == 1 and proposals[0]["preferred_uci"] == windu_rec and (windu_blunder.is_empty() or windu_blunder.to_lower().contains("no tactical blunder")):
+		unanimous = true
+	elif proposals.size() >= 2 and proposals[0]["preferred_uci"] == proposals[1]["preferred_uci"] and (windu_rec.is_empty() or windu_rec == proposals[0]["preferred_uci"]):
+		unanimous = true
 
 	var chosen_uci: String = ""
-	if final_verdict.has("move_uci") and by_uci.has(final_verdict["move_uci"]):
-		chosen_uci = final_verdict["move_uci"]
+	if unanimous and by_uci.has(proposals[0]["preferred_uci"]):
+		chosen_uci = proposals[0]["preferred_uci"]
 		last_speaker = "Master Yoda"
-		last_reason = final_verdict.get("reason", "The Council executes the chosen harmony.")
-	elif windu_critique.has("recommended_uci") and by_uci.has(windu_critique["recommended_uci"]):
-		chosen_uci = windu_critique["recommended_uci"]
-		last_speaker = "Master Windu"
-		last_reason = windu_critique.get("wisdom", "Tactical necessity dictates this move.")
-	elif not proposals.is_empty():
-		chosen_uci = proposals[0].get("preferred_uci", "")
-		last_speaker = proposals[0].get("speaker", "Master Yoda")
-		last_reason = proposals[0].get("reason", "Advances territorial control.")
+		last_reason = proposals[0].get("reason", "The Council achieves unified harmony on this line.")
+		_log_council("✨ [Unanimous Ratification] Council in full harmony on %s without dispute" % chosen_uci)
+	else:
+		oracle_reason.emit("🧙 [Master Yoda] Synthesizing council arguments and rendering verdict…")
+		var final_verdict: Dictionary = await _synthesize_verdict(proposals, windu_critique, state, ascii_board, history, legal_str, by_uci, timeout_s, max_tokens)
+		if final_verdict.has("move_uci") and by_uci.has(final_verdict["move_uci"]):
+			chosen_uci = final_verdict["move_uci"]
+			last_speaker = "Master Yoda"
+			last_reason = final_verdict.get("reason", "The Council executes the chosen harmony.")
+		elif windu_critique.has("recommended_uci") and by_uci.has(windu_critique["recommended_uci"]):
+			chosen_uci = windu_critique["recommended_uci"]
+			last_speaker = "Master Windu"
+			last_reason = windu_critique.get("wisdom", "Tactical necessity dictates this move.")
+		elif not proposals.is_empty():
+			chosen_uci = proposals[0].get("preferred_uci", "")
+			last_speaker = proposals[0].get("speaker", "Master Yoda")
+			last_reason = proposals[0].get("reason", "Advances territorial control.")
 
 	if by_uci.has(chosen_uci):
 		last_source = "pure_llm_council_debate"
@@ -285,6 +310,12 @@ func _deliberate_council(state, ascii_board: String, history: String, legal_str:
 		return by_uci[chosen_uci]
 
 	return null
+
+
+func _propose_candidate_async(seat_key: String, state, ascii_board: String, history: String, legal_str: String, by_uci: Dictionary, timeout_s: float, max_tokens: int, on_done: Callable) -> void:
+	var res: Dictionary = await _propose_candidate(seat_key, state, ascii_board, history, legal_str, by_uci, timeout_s, max_tokens)
+	if on_done.is_valid():
+		on_done.call(res)
 
 
 # ── Council Multi-Agent Roles ──────────────────────────────────────────────
