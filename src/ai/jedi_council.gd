@@ -31,9 +31,6 @@ const MODE_WINDU := "windu_secure"
 
 const DEFAULT_ENDPOINTS := [
 	"https://127.0.0.1:4040/v1/chat/completions",
-	"http://127.0.0.1:4040/v1/chat/completions",
-	"http://127.0.0.1:18000/v1/chat/completions",
-	"http://127.0.0.1:11434/v1/chat/completions",
 ]
 
 const COUNCIL_SEATS := {
@@ -553,18 +550,18 @@ func _assess_position_complexity(state, legal_moves: Array) -> Dictionary:
 	if state.move_stack.size() >= 20:
 		score += 1
 
-	var timeout_s := 35.0
-	var max_tokens := 1200
-	var label := "Standard Council Deliberation (~15-25s)"
+	var timeout_s := 90.0
+	var max_tokens := 1500
+	var label := "Standard Council Deliberation (~20-35s)"
 
 	if score >= 5:
-		timeout_s = 60.0     # Deep meditation for critical turning points
+		timeout_s = 120.0     # Deep meditation for critical turning points
 		max_tokens = 3000
-		label = "Deep Council Meditation (~30s Critical Clash)"
+		label = "Deep Council Meditation (~40-60s Critical Clash)"
 	elif score >= 3:
-		timeout_s = 45.0
-		max_tokens = 2000
-		label = "Deep Tactical Deliberation (~20-25s Tension)"
+		timeout_s = 105.0
+		max_tokens = 2200
+		label = "Deep Tactical Deliberation (~30-45s Tension)"
 
 	return {
 		"score": score,
