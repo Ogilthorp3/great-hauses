@@ -2585,32 +2585,32 @@ func _build_hud() -> void:
 	_council_debate_panel = PanelContainer.new()
 	_council_debate_panel.name = "CouncilDebatePanel"
 	_council_debate_panel.visible = false
-	var c_style := StyleBoxFlat.new()
-	c_style.bg_color = Color(0.04, 0.035, 0.05, 0.92)
-	c_style.border_color = HUD_GOLD
-	c_style.set_border_width_all(2)
-	c_style.corner_radius_top_left = 10
-	c_style.corner_radius_top_right = 10
-	c_style.corner_radius_bottom_left = 10
-	c_style.corner_radius_bottom_right = 10
-	c_style.set_content_margin_all(10)
-	_council_debate_panel.add_theme_stylebox_override("panel", c_style)
+	var debate_style := StyleBoxFlat.new()
+	debate_style.bg_color = Color(0.04, 0.035, 0.05, 0.92)
+	debate_style.border_color = HUD_GOLD
+	debate_style.set_border_width_all(2)
+	debate_style.corner_radius_top_left = 10
+	debate_style.corner_radius_top_right = 10
+	debate_style.corner_radius_bottom_left = 10
+	debate_style.corner_radius_bottom_right = 10
+	debate_style.set_content_margin_all(10)
+	_council_debate_panel.add_theme_stylebox_override("panel", debate_style)
 	_council_debate_panel.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
 	_council_debate_panel.offset_left = -460
 	_council_debate_panel.offset_top = -210
 	_council_debate_panel.offset_right = -16
 	_council_debate_panel.offset_bottom = -16
 
-	var c_vbox := VBoxContainer.new()
-	c_vbox.add_theme_constant_override("separation", 4)
-	_council_debate_panel.add_child(c_vbox)
+	var debate_vbox := VBoxContainer.new()
+	debate_vbox.add_theme_constant_override("separation", 4)
+	_council_debate_panel.add_child(debate_vbox)
 
-	var c_header := Label.new()
-	c_header.text = "🏛️ JEDI COUNCIL LIVE DEBATE"
-	c_header.add_theme_font_size_override("font_size", 13)
-	c_header.add_theme_color_override("font_color", HUD_GOLD)
-	_outline(c_header, 4)
-	c_vbox.add_child(c_header)
+	var debate_header := Label.new()
+	debate_header.text = "🏛️ JEDI COUNCIL LIVE DEBATE"
+	debate_header.add_theme_font_size_override("font_size", 13)
+	debate_header.add_theme_color_override("font_color", HUD_GOLD)
+	_outline(debate_header, 4)
+	debate_vbox.add_child(debate_header)
 
 	_council_debate_text = RichTextLabel.new()
 	_council_debate_text.bbcode_enabled = true
@@ -2618,7 +2618,7 @@ func _build_hud() -> void:
 	_council_debate_text.custom_minimum_size = Vector2(430, 140)
 	_council_debate_text.add_theme_font_size_override("normal_font_size", 12)
 	_council_debate_text.add_theme_color_override("default_color", HUD_TEXT)
-	c_vbox.add_child(_council_debate_text)
+	debate_vbox.add_child(_council_debate_text)
 
 	hud.add_child(_council_debate_panel)
 
