@@ -20,6 +20,7 @@ signal retry_attempted(attempt: int)
 signal oracle_stumbled(reason: String)
 signal oracle_reason(text: String)
 signal council_debated(speaker: String, topic: String, vote: String)
+signal council_phase_changed(phase_name: String)
 
 const THINKING_TEXT := "The Jedi Council ponders…"
 const FORCED_TEXT := "The Council moves swiftly — a forced move requires no deliberation."
@@ -226,6 +227,7 @@ func _deliberate_council(state, ascii_board: String, history: String, legal_str:
 		oracle_reason.emit("🏛️ The Jedi Council of Sanctum convenes in parallel debate…")
 
 	# ── Phase 1: Parallel Candidate Proposals (Master Yoda & Master Qui-Gon) ──
+	council_phase_changed.emit("Phase 1: 🧙 Master Yoda & ⚡ Qui-Gon proposing candidate lines…")
 	var proposals: Array[Dictionary] = []
 	var finished_phase1 := 0
 
@@ -257,9 +259,11 @@ func _deliberate_council(state, ascii_board: String, history: String, legal_str:
 
 	if proposals.is_empty():
 		_log_council("⚠️ Phase 1 proposals empty — falling back to single seat query")
+		council_phase_changed.emit("Phase 1 fallback: 🧙 Master Yoda evaluating solo tactical line…")
 		return await _query_single_seat("yoda", state, ascii_board, history, legal_str, by_uci)
 
 	# ── Phase 2: Adversarial Red-Team Critique (Master Windu) ──
+	council_phase_changed.emit("Phase 2: ⚔️ Master Windu red-teaming candidate lines for traps…")
 	oracle_reason.emit("⚔️ [Master Windu] Stress-testing proposed candidate moves for tactical flaws…")
 	var windu_critique: Dictionary = await _critique_candidates(proposals, state, ascii_board, history, legal_str, by_uci, timeout_s, max_tokens)
 	if not windu_critique.is_empty():
@@ -283,7 +287,9 @@ func _deliberate_council(state, ascii_board: String, history: String, legal_str:
 		last_speaker = "Master Yoda"
 		last_reason = proposals[0].get("reason", "The Council achieves unified harmony on this line.")
 		_log_council("✨ [Unanimous Ratification] Council in full harmony on %s without dispute" % chosen_uci)
+		council_phase_changed.emit("✨ Council in unanimous agreement on %s!" % chosen_uci)
 	else:
+		council_phase_changed.emit("Phase 3: 🧙 Master Yoda synthesizing arguments for Grandmaster verdict…")
 		oracle_reason.emit("🧙 [Master Yoda] Synthesizing council arguments and rendering verdict…")
 		var final_verdict: Dictionary = await _synthesize_verdict(proposals, windu_critique, state, ascii_board, history, legal_str, by_uci, timeout_s, max_tokens)
 		if final_verdict.has("move_uci") and by_uci.has(final_verdict["move_uci"]):

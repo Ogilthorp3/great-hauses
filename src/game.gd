@@ -152,6 +152,9 @@ var _move_list: RichTextLabel
 var _oracle_flash: Label
 var _oracle_caption: Label
 var _banter_caption: Label
+var _council_debate_panel: PanelContainer
+var _council_debate_text: RichTextLabel
+var _council_current_phase := "The Jedi Council ponders…"
 ## Generation token for the banter caption: a newer taunt abandons the older
 ## one's fade / yield loop instead of racing it.
 var _banter_token := 0
@@ -475,6 +478,8 @@ func _ready() -> void:
 			oracle = JediCouncilOpponentScript.new()
 			oracle.name = "JediCouncil"
 			oracle.mode = str(Session.opponent.get("council_mode", "jedi_council"))
+			oracle.council_debated.connect(_on_council_debated)
+			oracle.council_phase_changed.connect(_on_council_phase_changed)
 		else:
 			oracle = Ds4Opponent.new()
 			oracle.name = "Oracle"
@@ -2062,11 +2067,46 @@ func _on_oracle_thinking_started() -> void:
 	oracle_thinking = true
 	oracle_think_count += 1
 	_oracle_think_start_ms = Time.get_ticks_msec()
+	_council_current_phase = "The Jedi Council enters meditation…"
+	if _council_debate_text != null:
+		_council_debate_text.clear()
+		_council_debate_text.append_text("[color=#d4af37][b]🏛️ JEDI COUNCIL CHAMBER DEBATES:[/b][/color]\n")
+	if _council_debate_panel != null and oracle is JediCouncilOpponent:
+		_council_debate_panel.visible = true
 
 
 func _on_oracle_thinking_finished(_elapsed_s: float) -> void:
 	oracle_thinking = false
 	_update_turn_label()
+	if _council_debate_panel != null and _council_debate_panel.visible:
+		get_tree().create_timer(12.0).timeout.connect(func() -> void:
+			if is_instance_valid(_council_debate_panel) and not oracle_thinking:
+				_council_debate_panel.visible = false)
+
+
+func _on_council_phase_changed(phase_text: String) -> void:
+	_council_current_phase = phase_text
+	if _council_debate_panel != null and oracle is JediCouncilOpponent:
+		_council_debate_panel.visible = true
+	if _council_debate_text != null:
+		_council_debate_text.append_text("[color=#e6cc80]▶ [b]%s[/b][/color]\n" % phase_text)
+
+
+func _on_council_debated(speaker: String, topic: String, vote: String) -> void:
+	if _council_debate_panel != null and oracle is JediCouncilOpponent:
+		_council_debate_panel.visible = true
+	if _council_debate_text != null:
+		var color := "#a8d888" # Yoda green
+		var icon := "🧙"
+		if speaker.contains("Windu"):
+			color = "#c084fc" # Windu purple
+			icon = "⚔️"
+		elif speaker.contains("Qui-Gon") or speaker.contains("quigon"):
+			color = "#38bdf8" # Qui-Gon cyan
+			icon = "⚡"
+		_council_debate_text.append_text("%s [color=%s][b]%s[/b][/color] proposes [b]%s[/b]:\n   [i]“%s”[/i]\n" % [
+			icon, color, speaker, topic, vote
+		])
 
 
 func _on_oracle_stumbled(reason: String) -> void:
@@ -2192,7 +2232,7 @@ func _process(_delta: float) -> void:
 	## Oracle / Jedi Council thinking shimmer + elapsed seconds counter.
 	if oracle_thinking and _turn_label != null and not game_over:
 		var elapsed := (Time.get_ticks_msec() - _oracle_think_start_ms) / 1000.0
-		var think_text: String = "The Jedi Council ponders…" if (oracle is JediCouncilOpponent) else Ds4Opponent.THINKING_TEXT
+		var think_text: String = _council_current_phase if (oracle is JediCouncilOpponent) else Ds4Opponent.THINKING_TEXT
 		_turn_label.text = "%s  %ds" % [think_text, int(elapsed)]
 		_turn_label.modulate.a = 0.7 + 0.3 * sin(Time.get_ticks_msec() * 0.001 * TAU * 1.4)
 	if _undo_pending:
@@ -2541,13 +2581,54 @@ func _build_hud() -> void:
 	_oracle_caption.offset_bottom = -10
 	hud.add_child(_oracle_caption)
 
+	# Jedi Council Chamber Live Debate Feed
+	_council_debate_panel = PanelContainer.new()
+	_council_debate_panel.name = "CouncilDebatePanel"
+	_council_debate_panel.visible = false
+	var c_style := StyleBoxFlat.new()
+	c_style.bg_color = Color(0.04, 0.035, 0.05, 0.92)
+	c_style.border_color = HUD_GOLD
+	c_style.set_border_width_all(2)
+	c_style.corner_radius_top_left = 10
+	c_style.corner_radius_top_right = 10
+	c_style.corner_radius_bottom_left = 10
+	c_style.corner_radius_bottom_right = 10
+	c_style.set_content_margin_all(10)
+	_council_debate_panel.add_theme_stylebox_override("panel", c_style)
+	_council_debate_panel.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	_council_debate_panel.offset_left = -460
+	_council_debate_panel.offset_top = -210
+	_council_debate_panel.offset_right = -16
+	_council_debate_panel.offset_bottom = -16
+
+	var c_vbox := VBoxContainer.new()
+	c_vbox.add_theme_constant_override("separation", 4)
+	_council_debate_panel.add_child(c_vbox)
+
+	var c_header := Label.new()
+	c_header.text = "🏛️ JEDI COUNCIL LIVE DEBATE"
+	c_header.add_theme_font_size_override("font_size", 13)
+	c_header.add_theme_color_override("font_color", HUD_GOLD)
+	_outline(c_header, 4)
+	c_vbox.add_child(c_header)
+
+	_council_debate_text = RichTextLabel.new()
+	_council_debate_text.bbcode_enabled = true
+	_council_debate_text.scroll_following = true
+	_council_debate_text.custom_minimum_size = Vector2(430, 140)
+	_council_debate_text.add_theme_font_size_override("normal_font_size", 12)
+	_council_debate_text.add_theme_color_override("default_color", HUD_TEXT)
+	c_vbox.add_child(_council_debate_text)
+
+	hud.add_child(_council_debate_panel)
+
 	# THE CHROME REGISTER. The title block ("HAUS X vs HAUS Y" + mottos +
 	# turn line) lay exactly across the dragon's neck and skull in
 	# showcase/10_throne_room.png — the best frame in the game had no readable
 	# dragon head. Everything a cinematic must not have to draw around is
 	# listed here; captions and the victory card are deliberately absent.
 	_hud_chrome.append_array([title, mottos, _turn_label, _casualty_label, ctx,
-		_oracle_flash, _undo_btn, _move_list, _oracle_caption])
+		_oracle_flash, _undo_btn, _move_list, _oracle_caption, _council_debate_panel])
 	if _net_status != null:
 		_hud_chrome.append(_net_status)
 	if oracle != null:
