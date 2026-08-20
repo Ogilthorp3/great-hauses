@@ -27,6 +27,7 @@ const MODE_YODA := "yoda_max"
 const MODE_WINDU := "windu_secure"
 
 const DEFAULT_ENDPOINTS := [
+	"https://127.0.0.1:4040/v1/chat/completions",
 	"http://127.0.0.1:4040/v1/chat/completions",
 	"http://127.0.0.1:18000/v1/chat/completions",
 	"http://127.0.0.1:11434/v1/chat/completions",
@@ -139,7 +140,16 @@ func choose_move(state, _difficulty := 2) -> Variant:
 	if chosen_move != null:
 		return chosen_move
 
-	# Fallback if all endpoints unreachable
+	# Smart tactical fallback if all endpoints unreachable
+	var fallback_ai := ChessAI.new()
+	var best_fallback = fallback_ai.choose_move_sync(state, ChessAI.Difficulty.EASY)
+	if best_fallback != null:
+		last_source = "council_tactical_fallback"
+		last_reason = "Master Yoda acts swiftly on battle intuition."
+		oracle_reason.emit(last_reason)
+		_log_council("[FAILSAFE] Endpoints unreachable — played tactical fallback %s" % String(best_fallback.to_uci()))
+		return best_fallback
+
 	var fallback_key = uci_list[0]
 	last_source = "council_failsafe"
 	last_reason = "Master Yoda acts decisively on intuition."
@@ -160,6 +170,8 @@ func _deliberate_council(state, ascii_board: String, history: String, legal_str:
 	var timeout_s: float = complexity["timeout_s"]
 	var max_tokens: int = complexity["max_tokens"]
 
+	_log_council("=== COUNCIL DEBATE START === FEN: %s" % state.get_fen())
+
 	if complexity["score"] >= 3:
 		oracle_reason.emit("🏛️ %s: The Council enters deep meditation on the board state…" % complexity["label"])
 	else:
@@ -172,16 +184,19 @@ func _deliberate_council(state, ascii_board: String, history: String, legal_str:
 	var proposals: Array[Dictionary] = []
 	if not yoda_prop.is_empty() and yoda_prop.has("preferred_uci") and by_uci.has(yoda_prop["preferred_uci"]):
 		proposals.append(yoda_prop)
+		_log_council("🧙 [Yoda Proposal] %s: \"%s\"" % [yoda_prop["preferred_uci"], yoda_prop.get("reason", "")])
 		oracle_reason.emit("🧙 [Master Yoda] Proposes %s: \"%s\"" % [yoda_prop["preferred_uci"], yoda_prop.get("reason", "A strategic advance.")])
 		council_debated.emit("Master Yoda", yoda_prop["preferred_uci"], yoda_prop.get("reason", ""))
 
 	if not quigon_prop.is_empty() and quigon_prop.has("preferred_uci") and by_uci.has(quigon_prop["preferred_uci"]):
 		proposals.append(quigon_prop)
+		_log_council("⚡ [Qui-Gon Proposal] %s: \"%s\"" % [quigon_prop["preferred_uci"], quigon_prop.get("reason", "")])
 		oracle_reason.emit("⚡ [Master Qui-Gon] Proposes %s: \"%s\"" % [quigon_prop["preferred_uci"], quigon_prop.get("reason", "A dynamic tactical line.")])
 		council_debated.emit("Master Qui-Gon", quigon_prop["preferred_uci"], quigon_prop.get("reason", ""))
 
 	if proposals.is_empty():
 		# If both parallel queries failed, fallback to single seat
+		_log_council("⚠️ Phase 1 proposals empty — falling back to single seat query")
 		return await _query_single_seat("yoda", state, ascii_board, history, legal_str, by_uci)
 
 	# ── Phase 2: Adversarial Red-Team Critique (Master Windu) ──
@@ -189,6 +204,7 @@ func _deliberate_council(state, ascii_board: String, history: String, legal_str:
 	var windu_critique: Dictionary = await _critique_candidates(proposals, state, ascii_board, history, legal_str, by_uci, timeout_s, max_tokens)
 	if not windu_critique.is_empty():
 		var windu_txt: String = windu_critique.get("wisdom", windu_critique.get("reason", "The defense is vigilant."))
+		_log_council("⚔️ [Windu Critique] Rec: %s | Warning: \"%s\"" % [windu_critique.get("recommended_uci", ""), windu_txt])
 		oracle_reason.emit("⚔️ [Master Windu] %s" % windu_txt)
 		council_debated.emit("Master Windu", windu_critique.get("recommended_uci", ""), windu_txt)
 
@@ -212,6 +228,7 @@ func _deliberate_council(state, ascii_board: String, history: String, legal_str:
 
 	if by_uci.has(chosen_uci):
 		last_source = "pure_llm_council_debate"
+		_log_council("🏆 [Verdict] Chosen: %s by %s | \"%s\"" % [chosen_uci, last_speaker, last_reason])
 		oracle_reason.emit("🧙 [Council Verdict] %s: %s" % [chosen_uci, last_reason])
 		council_debated.emit(last_speaker, chosen_uci, last_reason)
 		return by_uci[chosen_uci]
@@ -650,6 +667,7 @@ func _normalize_chat_url(raw: String) -> String:
 func _http_post(url: String, json_body: String, timeout_s: float) -> String:
 	var http := HTTPRequest.new()
 	http.timeout = timeout_s
+	http.set_tls_options(TLSOptions.client_unsafe())
 	if is_inside_tree():
 		add_child(http)
 	elif Engine.get_main_loop() is SceneTree and (Engine.get_main_loop() as SceneTree).root != null:
@@ -659,11 +677,28 @@ func _http_post(url: String, json_body: String, timeout_s: float) -> String:
 	var headers := PackedStringArray(["Content-Type: application/json"])
 	var err := http.request(url, headers, HTTPClient.METHOD_POST, json_body)
 	if err != OK:
+		_log_council("[HTTP ERR] request() failed with %d for %s" % [err, url])
 		http.queue_free()
 		return ""
 	var result: Array = await http.request_completed
 	http.queue_free()
-	if result.size() >= 4 and int(result[1]) == 200:
-		return (result[3] as PackedByteArray).get_string_from_utf8()
+	if result.size() >= 4:
+		var code: int = int(result[1])
+		if code == 200:
+			return (result[3] as PackedByteArray).get_string_from_utf8()
+		else:
+			var err_body := (result[3] as PackedByteArray).get_string_from_utf8().left(200)
+			_log_council("[HTTP %d] on %s: %s" % [code, url, err_body])
 	return ""
+
+
+func _log_council(text: String) -> void:
+	var line := "[%s] %s" % [Time.get_time_string_from_system(), text]
+	print(line)
+	var fa := FileAccess.open("user://council_debate.log", FileAccess.READ_WRITE if FileAccess.file_exists("user://council_debate.log") else FileAccess.WRITE)
+	if fa != null:
+		fa.seek_end()
+		fa.store_line(line)
+		fa.close()
+
 
