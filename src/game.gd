@@ -536,12 +536,18 @@ func _ready() -> void:
 		oracle.ponder(state)
 	if oracle is JediCouncilOpponent:
 		_flash_oracle("✨ \"May the Force be with you!\" — The Jedi Council convenes.", 5.0)
+		if _council_debate_panel != null:
+			_council_debate_panel.visible = true
 		if _council_debate_text != null:
 			_council_debate_text.append_text("[color=#e6cc80]══════════════════════════════════════════════════[/color]\n")
 			_council_debate_text.append_text("✨ [color=#38bdf8][b]THE JEDI COUNCIL OF SANCTUM CONVENES[/b][/color]\n")
 			_council_debate_text.append_text("🧙 [color=#a8d888][b]Master Yoda[/b][/color]: [i]“Welcome to the chamber, Padawan. May the Force be with you!”[/i]\n")
 			_council_debate_text.append_text("⚡ [color=#38bdf8][b]Master Qui-Gon[/b][/color]: [i]“Remember: Han Solo is the King, Princess Leia commands the board.”[/i]\n")
-			_council_debate_text.append_text("[color=#e6cc80]══════════════════════════════════════════════════[/color]\n\n")
+			_council_debate_text.append_text("[color=#e6cc80]══════════════════════════════════════════════════[/color]\n")
+		var orbit_rig := get_node_or_null("CameraRig") as OrbitCamera
+		if orbit_rig != null:
+			orbit_rig.position.x = -1.25
+			orbit_rig.target_distance = 12.8
 	board.square_clicked.connect(_on_square_clicked)
 	board.square_hovered.connect(_on_square_hovered)
 	_lt("net+wiring")
@@ -2084,20 +2090,17 @@ func _on_oracle_thinking_started() -> void:
 	oracle_think_count += 1
 	_oracle_think_start_ms = Time.get_ticks_msec()
 	_council_current_phase = "The Jedi Council enters meditation…"
-	if _council_debate_text != null:
-		_council_debate_text.clear()
-		_council_debate_text.append_text("[color=#d4af37][b]🏛️ JEDI COUNCIL CHAMBER DEBATES:[/b][/color]\n")
 	if _council_debate_panel != null and oracle is JediCouncilOpponent:
 		_council_debate_panel.visible = true
+	if _council_debate_text != null and oracle is JediCouncilOpponent:
+		_council_debate_text.append_text("\n[color=#e6cc80]──────────────── Turn %d ────────────────[/color]\n" % [state.fullmove_number if state != null else oracle_think_count])
 
 
 func _on_oracle_thinking_finished(_elapsed_s: float) -> void:
 	oracle_thinking = false
 	_update_turn_label()
-	if _council_debate_panel != null and _council_debate_panel.visible:
-		get_tree().create_timer(12.0).timeout.connect(func() -> void:
-			if is_instance_valid(_council_debate_panel) and not oracle_thinking:
-				_council_debate_panel.visible = false)
+	if _council_debate_panel != null and oracle is JediCouncilOpponent:
+		_council_debate_panel.visible = true
 
 
 func _on_council_phase_changed(phase_text: String) -> void:
@@ -2612,7 +2615,7 @@ func _build_hud() -> void:
 	_oracle_caption.offset_bottom = -10
 	hud.add_child(_oracle_caption)
 
-	# Jedi Council Chamber Live Debate Feed
+	# Jedi Council Chamber Live Debate Feed (Full-Height Right Sidebar)
 	_council_debate_panel = PanelContainer.new()
 	_council_debate_panel.name = "CouncilDebatePanel"
 	_council_debate_panel.visible = false
@@ -2624,21 +2627,29 @@ func _build_hud() -> void:
 	debate_style.corner_radius_top_right = 10
 	debate_style.corner_radius_bottom_left = 10
 	debate_style.corner_radius_bottom_right = 10
-	debate_style.set_content_margin_all(10)
+	debate_style.set_content_margin_all(14)
 	_council_debate_panel.add_theme_stylebox_override("panel", debate_style)
-	_council_debate_panel.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	_council_debate_panel.offset_left = -460
-	_council_debate_panel.offset_top = -210
+	_council_debate_panel.set_anchors_preset(Control.PRESET_RIGHT_WIDE)
+	_council_debate_panel.anchor_left = 1.0
+	_council_debate_panel.anchor_top = 0.0
+	_council_debate_panel.anchor_right = 1.0
+	_council_debate_panel.anchor_bottom = 1.0
+	_council_debate_panel.offset_left = -390
+	_council_debate_panel.offset_top = 16
 	_council_debate_panel.offset_right = -16
 	_council_debate_panel.offset_bottom = -16
+	_council_debate_panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	_council_debate_panel.grow_vertical = Control.GROW_DIRECTION_BOTH
 
 	var debate_vbox := VBoxContainer.new()
-	debate_vbox.add_theme_constant_override("separation", 4)
+	debate_vbox.add_theme_constant_override("separation", 6)
+	debate_vbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	debate_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_council_debate_panel.add_child(debate_vbox)
 
 	var debate_header := Label.new()
 	debate_header.text = "🏛️ JEDI COUNCIL LIVE DEBATE"
-	debate_header.add_theme_font_size_override("font_size", 13)
+	debate_header.add_theme_font_size_override("font_size", 14)
 	debate_header.add_theme_color_override("font_color", HUD_GOLD)
 	_outline(debate_header, 4)
 	debate_vbox.add_child(debate_header)
@@ -2646,8 +2657,9 @@ func _build_hud() -> void:
 	_council_debate_text = RichTextLabel.new()
 	_council_debate_text.bbcode_enabled = true
 	_council_debate_text.scroll_following = true
-	_council_debate_text.custom_minimum_size = Vector2(430, 140)
-	_council_debate_text.add_theme_font_size_override("normal_font_size", 12)
+	_council_debate_text.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_council_debate_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_council_debate_text.add_theme_font_size_override("normal_font_size", 13)
 	_council_debate_text.add_theme_color_override("default_color", HUD_TEXT)
 	debate_vbox.add_child(_council_debate_text)
 

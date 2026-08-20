@@ -49,6 +49,15 @@ const CAPE := preload("res://assets/custom-props/cape.glb")
 const WATCHTOWER := preload("res://assets/custom-props/watchtower.glb")
 const PENNANT_SHADER := preload("res://src/board/pennant_flutter.gdshader")
 
+# ── Star Wars Signature Props (Jedi Council Mode) ─────────────────────────
+const SW_LEIA_BUNS := preload("res://assets/custom-props/star-wars/leia_buns.glb")
+const SW_HAN_HOLSTER := preload("res://assets/custom-props/star-wars/han_holster_vest.glb")
+const SW_R2D2 := preload("res://assets/custom-props/star-wars/r2d2_droid.glb")
+const SW_C3PO := preload("res://assets/custom-props/star-wars/c3po_head.glb")
+const SW_FALCON_ROOK := preload("res://assets/custom-props/star-wars/falcon_rook.glb")
+const SW_CHEWIE_BANDOLIER := preload("res://assets/custom-props/star-wars/chewie_bandolier.glb")
+const SW_EWOK_HOOD := preload("res://assets/custom-props/star-wars/ewok_hood_spear.glb")
+
 const LOOPED_ANIMS := ["Idle_A", "Idle_B", "Walking_A", "Walking_B", "Walking_C",
 		"Running_A", "Running_B"]
 

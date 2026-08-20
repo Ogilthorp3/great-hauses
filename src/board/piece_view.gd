@@ -2592,6 +2592,7 @@ func _build_character() -> void:
 	# Gear/crest/crown attach AFTER the body pass — each is dressed on its own
 	# role (gear is split, a crest is KIT, a crown is REGALIA and takes no dye).
 	_attach_gear()
+	_attach_star_wars_props()
 	if PieceAssets.wants_crest(piece_type):
 		_attach_crest()
 	if PieceAssets.wants_helm(piece_type):
@@ -2651,6 +2652,19 @@ func _build_knight() -> void:
 	_dress_caparison()
 	# Gear/crest attach AFTER the tints so they keep their own colors.
 	_attach_gear()
+	if _is_star_wars_mode():
+		var skel: Skeleton3D = _rider.find_child("Skeleton3D", true, false) as Skeleton3D
+		if skel != null:
+			var bone_idx := skel.find_bone("chest")
+			if bone_idx != -1:
+				var att := BoneAttachment3D.new()
+				att.name = "ChewieMount"
+				att.bone_name = "chest"
+				skel.add_child(att)
+				var bandolier: Node3D = PieceAssets.SW_CHEWIE_BANDOLIER.instantiate()
+				bandolier.name = "ChewieBandolier"
+				bandolier.position = Vector3(0.0, 0.0, 0.0)
+				att.add_child(bandolier)
 	if PieceAssets.wants_crest(piece_type):
 		_attach_crest()
 	# The mount breathes (procedural sway, desynced); the rider sits STILL
@@ -3036,6 +3050,49 @@ func _attach_tiara() -> void:
 	att.add_child(tiara)
 
 
+func _is_star_wars_mode() -> bool:
+	if Session.configured and (str(Session.opponent.get("kind", "")) == "jedi_council" or str(Session.opponent.get("council_mode", "")) == "jedi_council"):
+		return true
+	if house_id == "jedi" or house_id == "sanctum":
+		return true
+	return false
+
+
+func _attach_star_wars_props() -> void:
+	if not _is_star_wars_mode():
+		return
+	match piece_type:
+		Type.QUEEN:
+			var att := _bone_mount("head", "LeiaBunsMount")
+			if att != null:
+				var buns: Node3D = PieceAssets.SW_LEIA_BUNS.instantiate()
+				buns.name = "LeiaBuns"
+				buns.position = Vector3(0.0, 0.78, 0.0)
+				buns.scale = Vector3.ONE * 1.05
+				att.add_child(buns)
+		Type.KING:
+			var att := _bone_mount("chest", "HanGearMount")
+			if att != null:
+				var gear: Node3D = PieceAssets.SW_HAN_HOLSTER.instantiate()
+				gear.name = "HanGear"
+				gear.position = Vector3(0.0, -0.28, 0.0)
+				att.add_child(gear)
+		Type.BISHOP:
+			var att := _bone_mount("head", "DroidMount")
+			if att != null:
+				var droid: Node3D = PieceAssets.SW_C3PO.instantiate()
+				droid.name = "C3PO"
+				droid.position = Vector3(0.0, 0.72, 0.0)
+				att.add_child(droid)
+		Type.PAWN:
+			var att := _bone_mount("head", "EwokMount")
+			if att != null:
+				var ewok: Node3D = PieceAssets.SW_EWOK_HOOD.instantiate()
+				ewok.name = "EwokHood"
+				ewok.position = Vector3(0.0, 0.75, 0.0)
+				att.add_child(ewok)
+
+
 ## TYPE signature gear (king): the cape, draped from the chest bone.
 ## Neutral cloth in the GLB; tinted here with the house secondary color
 ## (palette flourish only — the cape shape is the same for every house).
@@ -3119,6 +3176,11 @@ func _build_tower() -> void:
 	_dress(_model, ["BannerCloth", "Pennant"], _tint_for("tower"))
 	_dress_banner()
 	_dress_pennant()
+	if _is_star_wars_mode():
+		var falcon: Node3D = PieceAssets.SW_FALCON_ROOK.instantiate()
+		falcon.name = "FalconRook"
+		falcon.position = Vector3(0.0, 0.95, 0.0)
+		_model.add_child(falcon)
 
 
 func _dress_banner() -> void:
