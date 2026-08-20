@@ -53,7 +53,10 @@ var phase := Phase.HOUSE
 var selected_house := ""
 var selected_opponent: Dictionary = {}
 var selected_mode := "tournament"
-var _disabled_opponents: Dictionary = {}
+var _disabled_opponents: Dictionary = {
+	"jedi_council": "The Council sits in Sanctum (probing connection...)",
+	"ds4_oracle": "The Oracle sleeps (probing connection...)"
+}
 var _disabled_modes: Dictionary = {}
 
 var _house_ids: Array[String] = []
@@ -382,6 +385,17 @@ func _set_opp_index(i: int) -> void:
 	_opp_index = i
 	for j in _opp_buttons.size():
 		_style_opp_button(_opp_buttons[j], j == i, _opp_disabled(j))
+	if _opp_confirm_btn != null:
+		var is_dis := _opp_disabled(i)
+		_opp_confirm_btn.disabled = is_dis
+		if is_dis:
+			_opp_confirm_btn.text = "⛔  OPPONENT UNAVAILABLE"
+			if _footer != null:
+				_footer.text = _opp_disabled_reason(i)
+		else:
+			_opp_confirm_btn.text = "⚔️  CONTINUE TO WAR MODE  ▶"
+			if _footer != null:
+				_footer.text = ""
 
 
 func _set_mode_index(i: int) -> void:
@@ -394,10 +408,22 @@ func _style_opp_button(b: Button, active: bool, disabled := false) -> void:
 	var title: String = b.get_meta("label")
 	var desc: String = b.get_meta("desc")
 	if disabled:
-		var ash := Color(0.4, 0.38, 0.35)
+		var ash := Color(0.48, 0.45, 0.42)
 		b.add_theme_color_override("font_color", ash)
-		b.text = "%s  (Offline)\n%s" % [title, desc]
+		b.text = "%s  (Unavailable / Offline)\n%s" % [title, desc]
 		b.tooltip_text = desc
+		var dstyle := StyleBoxFlat.new()
+		dstyle.corner_radius_top_left = 8
+		dstyle.corner_radius_top_right = 8
+		dstyle.corner_radius_bottom_left = 8
+		dstyle.corner_radius_bottom_right = 8
+		dstyle.set_content_margin_all(8)
+		dstyle.bg_color = Color(0.05, 0.05, 0.05, 0.6)
+		dstyle.border_color = Color(0.2, 0.18, 0.16, 0.4)
+		dstyle.set_border_width_all(1)
+		b.add_theme_stylebox_override("normal", dstyle)
+		b.add_theme_stylebox_override("hover", dstyle)
+		b.add_theme_stylebox_override("pressed", dstyle)
 		return
 	
 	b.add_theme_color_override("font_color", GOLD if active else TEXT_WARM)
