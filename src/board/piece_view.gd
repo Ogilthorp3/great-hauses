@@ -3067,22 +3067,24 @@ func _attach_star_wars_props() -> void:
 			if att != null:
 				var buns: Node3D = PieceAssets.SW_LEIA_BUNS.instantiate()
 				buns.name = "LeiaBuns"
-				buns.position = Vector3(0.0, 0.78, 0.0)
-				buns.scale = Vector3.ONE * 1.05
+				buns.position = Vector3(0.0, 0.85, 0.0)
+				buns.scale = Vector3.ONE * 1.45
 				att.add_child(buns)
 		Type.KING:
 			var att := _bone_mount("chest", "HanGearMount")
 			if att != null:
 				var gear: Node3D = PieceAssets.SW_HAN_HOLSTER.instantiate()
 				gear.name = "HanGear"
-				gear.position = Vector3(0.0, -0.28, 0.0)
+				gear.position = Vector3(0.0, -0.30, 0.0)
+				gear.scale = Vector3.ONE * 1.35
 				att.add_child(gear)
 		Type.BISHOP:
 			var att := _bone_mount("head", "DroidMount")
 			if att != null:
 				var droid: Node3D = PieceAssets.SW_C3PO.instantiate()
 				droid.name = "C3PO"
-				droid.position = Vector3(0.0, 0.72, 0.0)
+				droid.position = Vector3(0.0, 0.75, 0.0)
+				droid.scale = Vector3.ONE * 1.35
 				att.add_child(droid)
 		Type.PAWN:
 			var att := _bone_mount("head", "EwokMount")
@@ -3090,6 +3092,7 @@ func _attach_star_wars_props() -> void:
 				var ewok: Node3D = PieceAssets.SW_EWOK_HOOD.instantiate()
 				ewok.name = "EwokHood"
 				ewok.position = Vector3(0.0, 0.75, 0.0)
+				ewok.scale = Vector3.ONE * 1.40
 				att.add_child(ewok)
 
 
@@ -3179,7 +3182,8 @@ func _build_tower() -> void:
 	if _is_star_wars_mode():
 		var falcon: Node3D = PieceAssets.SW_FALCON_ROOK.instantiate()
 		falcon.name = "FalconRook"
-		falcon.position = Vector3(0.0, 0.95, 0.0)
+		falcon.position = Vector3(0.0, 0.98, 0.0)
+		falcon.scale = Vector3.ONE * 1.50
 		_model.add_child(falcon)
 
 

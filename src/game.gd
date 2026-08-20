@@ -1221,8 +1221,21 @@ func _ai_ply() -> void:
 		return   # undone while thinking — the late reply is for a dead position
 	_ai_waiting = false
 	if move == null:
-		_finish_game()
-		return
+		if oracle is JediCouncilOpponent:
+			# The Council had an upstream timeout or network glitch — do not drop or end the match!
+			var legal := state.legal_moves(true)
+			if not legal.is_empty():
+				move = legal[0]
+				for m in legal:
+					if m.is_capture():
+						move = m
+						break
+				_flash_oracle("The Council senses a disturbance in the Force — intuitive defense engaged.", 3.5)
+				if _council_debate_text != null:
+					_council_debate_text.append_text("🧙 [color=#a8d888][b]Master Yoda[/b][/color]: [i]“Disturbance in the Force I sense. Trust the living Force we must.”[/i]\n")
+		if move == null:
+			_finish_game()
+			return
 	await _execute_ply(move)
 
 
@@ -2093,7 +2106,7 @@ func _on_oracle_thinking_started() -> void:
 	if _council_debate_panel != null and oracle is JediCouncilOpponent:
 		_council_debate_panel.visible = true
 	if _council_debate_text != null and oracle is JediCouncilOpponent:
-		_council_debate_text.append_text("\n[color=#e6cc80]──────────────── Turn %d ────────────────[/color]\n" % [state.fullmove_number if state != null else oracle_think_count])
+		_council_debate_text.append_text("\n[color=#e6cc80]──────────────── Turn %d ────────────────[/color]\n" % [state.fullmove_counter if state != null else oracle_think_count])
 
 
 func _on_oracle_thinking_finished(_elapsed_s: float) -> void:

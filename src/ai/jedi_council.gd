@@ -259,7 +259,7 @@ func choose_move(state, _difficulty := 2) -> Variant:
 		return chosen_move
 
 	# When the Council is unreachable, DO NOT fall back to blind moves or ChessAI.
-	# Fail honestly and loudly.
+	# Fail honestly and loudly so the game harness can handle it.
 	last_source = "council_unreachable"
 	last_reason = "The Jedi Council of Sanctum has lost connection to the Force."
 	_log_council("[OFFLINE] Council deliberation failed — no fallback move returned.")
