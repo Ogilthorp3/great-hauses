@@ -51,8 +51,8 @@ const COUNCIL_SEATS := {
 	},
 	"quigon": {
 		"name": "Master Qui-Gon",
-		"model": "council-code", # Devstral / Glimmer (Local/Sub)
-		"provider": "Devstral / Glimmer (Local)",
+		"model": "council-code", # Devstral (Local) -> DeepSeek V4 Flash (OR)
+		"provider": "Devstral (Local)",
 		"prefix": "⚡ [Master Qui-Gon]",
 		"lens": "dynamic piece coordination, combinations, sacrifices, tempo, and sharp attacks"
 	},
