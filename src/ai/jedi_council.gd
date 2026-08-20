@@ -87,6 +87,42 @@ var offline_reason := ""
 var _ponder_cache: Dictionary = {}
 var _is_pondering: bool = false
 var _ponder_gen: int = 0
+var _ambient_banter_active: bool = false
+
+const AMBIENT_CHAMBER_LINES: Array[String] = [
+	"🧙 Master Yoda taps his gimer stick, closing his eyes to sense the living Force...",
+	"⚡ Master Qui-Gon leans forward: \"A bold thrust through the center opens the path, if we dare.\"",
+	"⚔️ Master Windu narrows his eyes: \"Beware the opponent's counter-thrust. Keep your guard high.\"",
+	"💰 Master Mundi calculates: \"That knight trade yields a favorable material ratio of 3.2 to 1.\"",
+	"🏥 Master Cilghal murmurs: \"The king's flank is fragile; we must fortify the perimeter first.\"",
+	"🧙 Yoda chuckles softly: \"Hasty moves, dark shadows bring. Patience, Masters.\"",
+	"⚡ Qui-Gon smiles faintly: \"Feel the living Force flow through the open diagonal.\"",
+	"⚔️ Windu crosses his arms: \"I sense a shatterpoint on their back rank...\"",
+	"💰 Mundi shakes his tall head: \"Illogical to abandon control of the central outposts.\"",
+	"🧙 Yoda: \"Clear the mind. When one door closes, three open files appear.\""
+]
+
+func _start_ambient_banter() -> void:
+	_ambient_banter_active = true
+	_run_ambient_banter_loop()
+
+func _stop_ambient_banter() -> void:
+	_ambient_banter_active = false
+
+func _run_ambient_banter_loop() -> void:
+	var idx := randi() % AMBIENT_CHAMBER_LINES.size()
+	while _ambient_banter_active:
+		var tree := Engine.get_main_loop() as SceneTree
+		if tree != null:
+			await tree.create_timer(3.5).timeout
+		else:
+			break
+		if not _ambient_banter_active:
+			break
+		var line: String = AMBIENT_CHAMBER_LINES[idx % AMBIENT_CHAMBER_LINES.size()]
+		idx += 1
+		oracle_reason.emit(line)
+		council_debated.emit("Council Chamber", "", line)
 
 var _move_re := RegEx.create_from_string("(?im)^\\s*(?:MOVE|PICK|PLAY|PREFERRED|RECOMMENDED):\\s*([a-h][1-8][a-h][1-8][qrbn]?)")
 var _reason_re := RegEx.create_from_string("(?im)^\\s*(?:REASON|BECAUSE|WISDOM):\\s*(.+)$")
@@ -342,8 +378,10 @@ func _deliberate_council(state, ascii_board: String, history: String, legal_str:
 	else:
 		oracle_reason.emit("🏛️ The Jedi Council of Sanctum convenes in parallel debate…")
 
-	# ── Phase 1: Parallel Candidate Proposals (Yoda, Qui-Gon, & Plo Koon) ──
-	council_phase_changed.emit("Phase 1: 🧙 Master Yoda, ⚡ Qui-Gon & 🔮 Plo Koon proposing candidate lines…")
+	_start_ambient_banter()
+
+	# ── Phase 1: Parallel Candidate Proposals (Yoda, Qui-Gon, & Mundi) ──
+	council_phase_changed.emit("Phase 1: 🧙 Master Yoda, ⚡ Qui-Gon & 💰 Ki-Adi-Mundi proposing candidate lines…")
 	var proposals: Array[Dictionary] = []
 	var finished_phase1 := 0
 
@@ -388,6 +426,7 @@ func _deliberate_council(state, ascii_board: String, history: String, legal_str:
 	if proposals.is_empty():
 		_log_council("⚠️ Phase 1 proposals empty — falling back to single seat query")
 		council_phase_changed.emit("Phase 1 fallback: 🧙 Master Yoda evaluating solo tactical line…")
+		_stop_ambient_banter()
 		return await _query_single_seat("yoda", state, ascii_board, history, legal_str, by_uci)
 
 	# ── Phase 2: Adversarial Red-Team Critique (Master Windu) ──
@@ -433,6 +472,8 @@ func _deliberate_council(state, ascii_board: String, history: String, legal_str:
 			last_speaker = proposals[0].get("speaker", "Master Yoda")
 			last_reason = proposals[0].get("reason", "Advances territorial control.")
 
+	_stop_ambient_banter()
+
 	if by_uci.has(chosen_uci):
 		last_source = "pure_llm_council_debate"
 		_log_council("🏆 [Verdict] Chosen: %s by %s | \"%s\"" % [chosen_uci, last_speaker, last_reason])
@@ -455,21 +496,35 @@ func _propose_candidate(seat_key: String, state, ascii_board: String, history: S
 	var seat: Dictionary = COUNCIL_SEATS.get(seat_key, COUNCIL_SEATS["yoda"])
 	var color_name := "black" if state.turn else "white"
 
+	var personality_guide := ""
+	match seat_key:
+		"yoda":
+			personality_guide = "PERSONALITY: Speak in trademark Yoda OSV inverted grammar. Wise, playful, teasing. Express deep strategic vision with Star Wars chess parables."
+		"quigon":
+			personality_guide = "PERSONALITY: Rebellious, passionate maverick of the living force. Challenge dogmatic opening theory! Propose bold piece sacrifices and dynamic tempos."
+		"mundi":
+			personality_guide = "PERSONALITY: Coldly analytical Cerean logic. Treat chess pieces like an economic ledger. Quote exchange ratios and binary cost-benefit calculations with deadpan wit."
+		"cilghal":
+			personality_guide = "PERSONALITY: Surgical Mon Calamari master healer. Treat piece coordination like biological health. Diagnose pawn structure weaknesses like chronic symptoms."
+		"windu":
+			personality_guide = "PERSONALITY: Fierce, uncompromising Vaapad warrior. Hunt for tactical shatterpoints, hanging pieces, and lethal counter-strikes."
+
 	var sys_prompt := (
-		"You are %s, an esteemed Grandmaster on the Jedi Council of Sanctum.\n" % seat["name"] +
+		"You are %s on the Jedi Council of Sanctum.\n" % seat["name"] +
+		"%s\n" % personality_guide +
 		"Your analytical lens is: %s.\n\n" % seat["lens"] +
 		"Analyze the chess position with Grandmaster depth. You MUST propose promising candidate moves strictly from the legal list.\n" +
 		"Follow this structured thinking process:\n" +
 		"1. Identify the opponent's threats, active pieces, and King safety.\n" +
 		"2. Select your top 2 candidate moves.\n" +
-		"3. Formulate your strategic plan and in-character wisdom (max 90 chars).\n\n" +
+		"3. Formulate your strategic plan and entertaining, in-character wisdom (max 100 chars).\n\n" +
 		"Respond in this EXACT format:\n" +
 		"ASSESSMENT: <your analysis of the position>\n" +
 		"CANDIDATES:\n" +
 		"1. MOVE: <uci> | PLAN: <why this move is strong>\n" +
 		"2. MOVE: <uci> | PLAN: <alternative candidate>\n" +
 		"PREFERRED: <best uci move e.g. e2e4>\n" +
-		"REASON: <1-sentence in-character wisdom for this move, max 90 chars>"
+		"REASON: <1-sentence colorful, in-character quote for this move, max 100 chars>"
 	)
 
 	var user_prompt := (
@@ -509,18 +564,18 @@ func _critique_candidates(proposals: Array[Dictionary], state, ascii_board: Stri
 		prop_summary.append("• %s proposed %s: \"%s\"" % [p.get("speaker", "Master"), p.get("preferred_uci", "unknown"), p.get("reason", "")])
 
 	var sys_prompt := (
-		"You are Master Mace Windu, the Tactical Inquisitor and Guardian of the Jedi Council.\n" +
-		"Your duty is to RUTHLESSLY CRITIQUE and RED-TEAM candidate moves proposed by fellow Council members.\n\n" +
-		"CRITIQUE GUIDELINES:\n" +
-		"1. For each proposed move, calculate the opponent's most forcing counter-attacks (checks, captures, pins, forks).\n" +
-		"2. Check if the proposed move hangs any piece or weakens King safety.\n" +
-		"3. Identify which candidate is tactically sound vs which is a tactical blunder.\n" +
-		"4. Recommend the single safest, most lethal tactical move.\n\n" +
+		"You are Master Mace Windu, the fierce Tactical Inquisitor of the Jedi Council.\n" +
+		"Your duty is to RUTHLESSLY ROAST, CRITIQUE, and STRESS-TEST candidate moves proposed by your fellow Masters.\n\n" +
+		"BANTER & CRITIQUE GUIDELINES:\n" +
+		"1. Directly address proposing Masters by name with sharp, entertaining banter (e.g. 'Qui-Gon, your romantic gambit hangs a rook' or 'Mundi, your economic calculations ignore an impending checkmate').\n" +
+		"2. Calculate devastating tactical replies (forks, pins, skewers, deflections, mating nets).\n" +
+		"3. Declare whether the candidates are tactical genius or suicidal blunders.\n" +
+		"4. Recommend the single sharpest, most punishing legal move.\n\n" +
 		"Respond in this EXACT format:\n" +
-		"CRITIQUE: <your tactical refutations and counter-calculation for each candidate>\n" +
+		"CRITIQUE: <your tactical refutations, roasted candidates, and counter-lines>\n" +
 		"BLUNDER_WARNING: <specific warnings on hanging pieces, or 'No tactical blunders detected'>\n" +
 		"RECOMMENDED: <best legal uci move>\n" +
-		"WISDOM: <1-sentence in-character Windu warning or battle assessment, max 90 chars>"
+		"WISDOM: <1-sentence spicy in-character Windu critique addressing fellow Masters, max 100 chars>"
 	)
 
 	var user_prompt := (
@@ -564,15 +619,15 @@ func _synthesize_verdict(proposals: Array[Dictionary], critique: Dictionary, sta
 
 	var sys_prompt := (
 		"You are Master Yoda, Grand Master of the Jedi Council of Sanctum.\n" +
-		"You hold the final, binding judgment for the Council.\n\n" +
-		"SYNTHESIS INSTRUCTIONS:\n" +
-		"1. Review the proposed candidates and Master Windu's tactical red-team critique.\n" +
-		"2. Reject any candidate that walks into opponent counter-strikes or hangs material.\n" +
+		"You hold final, binding authority over the Council's move.\n\n" +
+		"SYNTHESIS & BANTER GUIDELINES:\n" +
+		"1. Weigh the heated debate between Qui-Gon's daring aggression, Mundi's cold calculations, and Windu's tactical skepticism.\n" +
+		"2. Settle the dispute with playful, supreme Grandmaster wisdom in trademark Yoda phrasing (e.g. 'Fierce is Windu's tongue, but correct he is' or 'Trust Qui-Gon's bold vision we shall!').\n" +
 		"3. Balance grand strategy, piece activity, and King defense to select the single best move.\n\n" +
 		"Respond in this EXACT format (with the MOVE token on the LAST line):\n" +
-		"SYNTHESIS: <your final calculation balancing strategic harmony and tactical defense>\n" +
+		"SYNTHESIS: <your grandmaster calculation harmonizing the council's dispute>\n" +
 		"PLAN: <1-sentence strategic direction>\n" +
-		"REASON: <1-sentence in-character Yoda wisdom, max 90 chars>\n" +
+		"REASON: <1-sentence colorful Yoda verdict settling the debate, max 100 chars>\n" +
 		"MOVE: <uci move e.g. e2e4>"
 	)
 

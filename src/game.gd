@@ -2112,9 +2112,24 @@ func _on_council_debated(speaker: String, topic: String, vote: String) -> void:
 		elif speaker.contains("Qui-Gon") or speaker.contains("quigon"):
 			color = "#38bdf8" # Qui-Gon cyan
 			icon = "⚡"
-		_council_debate_text.append_text("%s [color=%s][b]%s[/b][/color] proposes [b]%s[/b]:\n   [i]“%s”[/i]\n" % [
-			icon, color, speaker, topic, vote
-		])
+		elif speaker.contains("Mundi"):
+			color = "#fbbf24" # Mundi gold
+			icon = "💰"
+		elif speaker.contains("Cilghal"):
+			color = "#34d399" # Cilghal emerald
+			icon = "🏥"
+		elif speaker.contains("Verdict") or speaker.contains("Ratification"):
+			color = "#f59e0b" # Verdict amber/gold
+			icon = "🏆"
+
+		if not topic.is_empty():
+			_council_debate_text.append_text("%s [color=%s][b]%s[/b][/color] proposes [b]%s[/b]:\n   [i]“%s”[/i]\n" % [
+				icon, color, speaker, topic, vote
+			])
+		else:
+			_council_debate_text.append_text("%s [color=%s][b]%s[/b][/color]: [i]“%s”[/i]\n" % [
+				icon, color, speaker, vote
+			])
 
 
 func _on_oracle_stumbled(reason: String) -> void:
