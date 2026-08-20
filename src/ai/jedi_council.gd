@@ -72,8 +72,8 @@ const COUNCIL_SEATS := {
 	},
 	"mundi": {
 		"name": "Master Mundi",
-		"model": "council-finance", # Grok 4.6 (Sub)
-		"provider": "Grok 4.6 (Sub)",
+		"model": "council-finance", # Grok 4.6 High (Sub)
+		"provider": "Grok 4.6 High (Sub)",
 		"prefix": "💰 [Master Mundi]",
 		"lens": "material balance, piece exchange economics, and concrete value"
 	}
