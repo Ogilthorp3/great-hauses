@@ -536,7 +536,7 @@ func _cmd_council(args: Array) -> void:
 	log_line("  🧙 [color=#38BDF8][b]Master Yoda:[/b][/color] Fable (Sub) — Grand Strategy & 3-Ply Outlook")
 	log_line("  ⚔️ [color=#F87171][b]Master Windu:[/b][/color] Gemini 3.7 Flash (Sub) — Threat Radar & Security")
 	log_line("  ⚡ [color=#FBBF24][b]Master Qui-Gon:[/b][/color] Devstral / Glimmer (Local) — Attack Lines & Tempo")
-	log_line("  🏥 [color=#34D399][b]Master Cilghal:[/b][/color] Qwen 3.8 (Local) — Pawn Health & Diagnostics")
+	log_line("  🏥 [color=#34D399][b]Master Cilghal:[/b][/color] Qwen 3.8 27B (Local) — Pawn Health & Diagnostics")
 	log_line("  💰 [color=#C084FC][b]Master Mundi:[/b][/color] Grok 4.6 High (Sub) — Exchange Economics & Value")
 	
 	if not args.is_empty():

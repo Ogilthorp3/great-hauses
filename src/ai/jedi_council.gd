@@ -65,8 +65,8 @@ const COUNCIL_SEATS := {
 	},
 	"cilghal": {
 		"name": "Master Cilghal",
-		"model": "qwen-3.8-instruct", # Qwen 3.8 (Local)
-		"provider": "Qwen 3.8 (Local)",
+		"model": "council-mlx", # Qwen 3.8 27B (Local MLX)
+		"provider": "Qwen 3.8 27B (Local)",
 		"prefix": "🏥 [Master Cilghal]",
 		"lens": "pawn structure health, piece harmony, and defensive diagnostics"
 	},
