@@ -86,6 +86,7 @@ func _ready() -> void:
 			_select.net_cancelled.connect(_on_net_cancelled)
 			_select.net_remembered_address(_load_remembered_address())
 		_probe_oracle()
+		_probe_jedi_council()
 		_probe_maester()
 		_disable_offline_unreachable()
 		return
@@ -134,7 +135,9 @@ func _setup_house_select() -> void:
 	_select.net_cancelled.connect(_on_net_cancelled)
 	_select.net_remembered_address(_load_remembered_address())
 	_probe_oracle()
+	_probe_jedi_council()
 	_probe_maester()
+	_disable_offline_unreachable()
 
 
 # ── The test harness does not ship ────────────────────────────────────────
@@ -208,6 +211,20 @@ func _probe_oracle() -> void:
 	var up: bool = await probe.ping(5.0)
 	if is_instance_valid(_select) and _select.is_inside_tree():
 		_select.set_opponent_enabled("ds4_oracle", up,
+			"" if up else probe.offline_reason)
+	probe.queue_free()
+
+
+func _probe_jedi_council() -> void:
+	await _wait_for_e2e_harness()
+	if not is_instance_valid(_select) or not _select.is_inside_tree():
+		return
+	var probe := JediCouncilOpponent.new()
+	probe.name = "JediCouncilProbe"
+	add_child(probe)
+	var up: bool = await probe.ping(4.0)
+	if is_instance_valid(_select) and _select.is_inside_tree():
+		_select.set_opponent_enabled("jedi_council", up,
 			"" if up else probe.offline_reason)
 	probe.queue_free()
 

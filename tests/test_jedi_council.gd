@@ -44,7 +44,17 @@ func _main() -> void:
 	check("forced move: is Kb1", "a1b1", String(forced_move.to_uci()).to_lower() if forced_move != null else "")
 	check("forced move: source is forced", "forced", opp.last_source)
 
-	# 3. Mock Server Setup for 3-Phase Multi-Agent Debate
+	# 3. Ping preflight against dead port -> false (disabled in HouseSelect)
+	var dead := TCPServer.new()
+	dead.listen(0, "127.0.0.1")
+	var dead_port: int = dead.get_local_port()
+	dead.stop()
+	opp.custom_endpoint = "http://127.0.0.1:%d/v1/chat/completions" % dead_port
+	var dead_ping: bool = await opp.ping(1.0)
+	check("ping dead-port: false", false, dead_ping)
+	check("ping dead-port: offline reason set", true, not opp.offline_reason.is_empty())
+
+	# 4. Mock Server Setup for Live Ping & 3-Phase Multi-Agent Debate
 	_server = TCPServer.new()
 	var err := _server.listen(0, "127.0.0.1")
 	check("mock: server listen", OK, err)
@@ -53,11 +63,11 @@ func _main() -> void:
 	_mock_running = true
 	_run_mock_server()
 
-	# Test Phase 1 & 2 & 3 Mock responses:
-	# Yoda Proposal (Phase 1):
-	# Qui-Gon Proposal (Phase 1):
-	# Windu Critique (Phase 2):
-	# Yoda Final Synthesis (Phase 3):
+	# Test ping against mock health endpoint:
+	var live_ping: bool = await opp.ping(2.0)
+	check("ping live-server: true", true, live_ping)
+
+	# 5. 3-Phase Debate
 	_mock_replies = [
 		# Yoda Proposal:
 		"ASSESSMENT: White opens with strong spatial control.\nCANDIDATES:\n1. MOVE: e2e4 | PLAN: Claim the center\n2. MOVE: d2d4 | PLAN: Solid pawn structure\nPREFERRED: e2e4\nREASON: The center, a Jedi must control.",
@@ -79,6 +89,17 @@ func _main() -> void:
 	check("debate: source is pure_llm_council_debate", "pure_llm_council_debate", opp.last_source)
 	check("debate: debates signal emitted", true, debates.size() >= 3)
 	check("debate: 4 mock requests received", 4, _mock_requests.size())
+
+	# 6. NO FALLBACK when offline or broken replies
+	_mock_requests.clear()
+	_mock_replies = ["GARBAGE_NO_MOVE", "GARBAGE_NO_MOVE", "GARBAGE_NO_MOVE"]
+	var stumbles: Array = []
+	opp.oracle_stumbled.connect(func(reason: String): stumbles.append(reason))
+
+	var failed_move = await opp.choose_move(state)
+	check("no fallback: returns null", true, failed_move == null)
+	check("no fallback: source is council_unreachable", "council_unreachable", opp.last_source)
+	check("no fallback: oracle_stumbled fired", true, stumbles.size() > 0)
 
 	# Cleanup
 	_mock_running = false
@@ -110,6 +131,13 @@ func _handle_connection(peer: StreamPeerTCP) -> void:
 		var parsed = JSON.parse_string(json_body)
 		if parsed is Dictionary:
 			_mock_requests.append(parsed)
+
+	if raw.begins_with("GET /health") or raw.begins_with("GET /v1/health") or raw.begins_with("GET /v1/models"):
+		var health_body := JSON.stringify({"status": "healthy"})
+		var http_resp := "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\n\r\n%s" % [health_body.to_utf8_buffer().size(), health_body]
+		peer.put_data(http_resp.to_utf8_buffer())
+		peer.disconnect_from_host()
+		return
 
 	var reply_content: String = "MOVE: e2e4\nPLAN: Standard move\nREASON: The Force flows."
 	if not _mock_replies.is_empty():

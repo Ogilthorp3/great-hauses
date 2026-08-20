@@ -93,7 +93,35 @@ func _ready() -> void:
 	pass
 
 
-# ── Public Parity Interface ───────────────────────────────────────────────
+# ── Preflight & Public Parity Interface ────────────────────────────────────
+
+## Connection preflight: probes Sanctum Proxy endpoints. Returns true when reachable.
+## On failure, offline_reason carries the UI reason to disable the Jedi Council in HouseSelect.
+func ping(timeout_s := 3.0) -> bool:
+	offline_reason = ""
+	var urls := [custom_endpoint] if not custom_endpoint.is_empty() else DEFAULT_ENDPOINTS
+	var env_url := OS.get_environment("DS4_CHESS_URL")
+	if not env_url.is_empty():
+		urls.insert(0, env_url)
+
+	for url in urls:
+		if url.is_empty():
+			continue
+		var health_url: String = url.replace("/chat/completions", "/health") if url.contains("/chat/completions") else (url.rstrip("/") + "/health")
+		var raw := await _http_get(health_url, timeout_s)
+		if not raw.is_empty():
+			var parsed = JSON.parse_string(raw)
+			if parsed is Dictionary and parsed.get("status") == "healthy":
+				return true
+		# Secondary probe: check /v1/models
+		var models_url: String = url.replace("/chat/completions", "/models") if url.contains("/chat/completions") else (url.rstrip("/") + "/v1/models")
+		var r_mod := await _http_get(models_url, timeout_s)
+		if not r_mod.is_empty():
+			return true
+
+	offline_reason = "the Council sits in Sanctum (proxy unreachable)"
+	return false
+
 
 func choose_move(state, _difficulty := 2) -> Variant:
 	var legal: Array = state.legal_moves(true)
@@ -140,21 +168,13 @@ func choose_move(state, _difficulty := 2) -> Variant:
 	if chosen_move != null:
 		return chosen_move
 
-	# Smart tactical fallback if all endpoints unreachable
-	var fallback_ai := ChessAI.new()
-	var best_fallback = fallback_ai.choose_move_sync(state, ChessAI.Difficulty.EASY)
-	if best_fallback != null:
-		last_source = "council_tactical_fallback"
-		last_reason = "Master Yoda acts swiftly on battle intuition."
-		oracle_reason.emit(last_reason)
-		_log_council("[FAILSAFE] Endpoints unreachable — played tactical fallback %s" % String(best_fallback.to_uci()))
-		return best_fallback
-
-	var fallback_key = uci_list[0]
-	last_source = "council_failsafe"
-	last_reason = "Master Yoda acts decisively on intuition."
-	oracle_reason.emit(last_reason)
-	return by_uci[fallback_key]
+	# When the Council is unreachable, DO NOT fall back to blind moves or ChessAI.
+	# Fail honestly and loudly.
+	last_source = "council_unreachable"
+	last_reason = "The Jedi Council of Sanctum has lost connection to the Force."
+	_log_council("[OFFLINE] Council deliberation failed — no fallback move returned.")
+	oracle_stumbled.emit("The Jedi Council of Sanctum is unreachable.")
+	return null
 
 
 func choose_move_async(state, callback: Callable, difficulty := 2) -> void:
@@ -692,6 +712,27 @@ func _http_post(url: String, json_body: String, timeout_s: float) -> String:
 	return ""
 
 
+func _http_get(url: String, timeout_s: float) -> String:
+	var http := HTTPRequest.new()
+	http.timeout = timeout_s
+	http.set_tls_options(TLSOptions.client_unsafe())
+	if is_inside_tree():
+		add_child(http)
+	elif Engine.get_main_loop() is SceneTree and (Engine.get_main_loop() as SceneTree).root != null:
+		(Engine.get_main_loop() as SceneTree).root.add_child(http)
+	else:
+		return ""
+	var err := http.request(url, PackedStringArray(), HTTPClient.METHOD_GET)
+	if err != OK:
+		http.queue_free()
+		return ""
+	var result: Array = await http.request_completed
+	http.queue_free()
+	if result.size() >= 4 and int(result[1]) == 200:
+		return (result[3] as PackedByteArray).get_string_from_utf8()
+	return ""
+
+
 func _log_council(text: String) -> void:
 	var line := "[%s] %s" % [Time.get_time_string_from_system(), text]
 	print(line)
@@ -700,5 +741,6 @@ func _log_council(text: String) -> void:
 		fa.seek_end()
 		fa.store_line(line)
 		fa.close()
+
 
 
