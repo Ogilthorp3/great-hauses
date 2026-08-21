@@ -703,6 +703,10 @@ func play_capture(victim: PieceView) -> void:
 ## still calls; a real capture no longer does (kill audit, 2026-08-17: a
 ## squash-stretching watchtower after a crush read as a rubber toy).
 func _victory_stillness() -> void:
+	if piece_type == Type.KNIGHT:
+		_reseat_rider()
+		await _beat_wall(0.45)
+		return
 	if _anim != null:
 		_anim.play(ANIM_IDLE, 0.5)   # slow blend: the weapon lowers, no cut
 		_anim.speed_scale = 0.45     # breath, not fidget
@@ -1663,10 +1667,9 @@ func _reseat_rider() -> void:
 	var tree := get_tree()
 	if tree != null:
 		await tree.create_timer(0.35).timeout
-	if _anim == null or not is_inside_tree():
-		return
-	_anim.pause()
-	_apply_seat_pose()
+	if _anim != null:
+		_anim.pause()
+		_apply_seat_pose()
 
 
 ## The static seat, calibrated against measured bone positions (rider-local,
