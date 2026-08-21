@@ -2591,17 +2591,20 @@ func _build_character() -> void:
 		_dress_mitre()   # AFTER the body tint — it repaints the hat's surfaces
 	# Gear/crest/crown attach AFTER the body pass — each is dressed on its own
 	# role (gear is split, a crest is KIT, a crown is REGALIA and takes no dye).
-	_attach_gear()
-	_attach_star_wars_props()
-	if PieceAssets.wants_crest(piece_type):
-		_attach_crest()
-	if PieceAssets.wants_helm(piece_type):
-		_attach_helm()
-	if piece_type == Type.KING:
-		_attach_crown()
-		_attach_cape()
-	elif piece_type == Type.QUEEN:
-		_attach_tiara()
+	if _is_star_wars_mode():
+		_attach_star_wars_props()
+		_clean_star_wars_meshes()
+	else:
+		_attach_gear()
+		if PieceAssets.wants_crest(piece_type):
+			_attach_crest()
+		if PieceAssets.wants_helm(piece_type):
+			_attach_helm()
+		if piece_type == Type.KING:
+			_attach_crown()
+			_attach_cape()
+		elif piece_type == Type.QUEEN:
+			_attach_tiara()
 	_anim.play(ANIM_IDLE)
 	# Desynchronize the armies' idles.
 	_anim.seek(randf() * PieceAssets.anim_length(ANIM_IDLE))
@@ -2650,8 +2653,6 @@ func _build_knight() -> void:
 	_dress(_rider)
 	_dress(_horse)
 	_dress_caparison()
-	# Gear/crest attach AFTER the tints so they keep their own colors.
-	_attach_gear()
 	if _is_star_wars_mode():
 		var skel: Skeleton3D = _rider.find_child("Skeleton3D", true, false) as Skeleton3D
 		if skel != null:
@@ -2664,9 +2665,14 @@ func _build_knight() -> void:
 				var bandolier: Node3D = PieceAssets.SW_CHEWIE_BANDOLIER.instantiate()
 				bandolier.name = "ChewieBandolier"
 				bandolier.position = Vector3(0.0, 0.0, 0.0)
+				bandolier.scale = Vector3.ONE * 1.6
 				att.add_child(bandolier)
-	if PieceAssets.wants_crest(piece_type):
-		_attach_crest()
+		_clean_star_wars_meshes()
+	else:
+		# Gear/crest attach AFTER the tints so they keep their own colors.
+		_attach_gear()
+		if PieceAssets.wants_crest(piece_type):
+			_attach_crest()
 	# The mount breathes (procedural sway, desynced); the rider sits STILL
 	# — his player parks on a neutral frame and the seat pose bends him in.
 	_start_idle_sway()
@@ -3067,33 +3073,45 @@ func _attach_star_wars_props() -> void:
 			if att != null:
 				var buns: Node3D = PieceAssets.SW_LEIA_BUNS.instantiate()
 				buns.name = "LeiaBuns"
-				buns.position = Vector3(0.0, 0.85, 0.0)
-				buns.scale = Vector3.ONE * 1.45
+				buns.position = Vector3(0.0, 0.82, 0.0)
+				buns.scale = Vector3.ONE * 1.85
 				att.add_child(buns)
 		Type.KING:
 			var att := _bone_mount("chest", "HanGearMount")
 			if att != null:
 				var gear: Node3D = PieceAssets.SW_HAN_HOLSTER.instantiate()
 				gear.name = "HanGear"
-				gear.position = Vector3(0.0, -0.30, 0.0)
-				gear.scale = Vector3.ONE * 1.35
+				gear.position = Vector3(0.0, -0.28, 0.0)
+				gear.scale = Vector3.ONE * 1.60
 				att.add_child(gear)
 		Type.BISHOP:
 			var att := _bone_mount("head", "DroidMount")
 			if att != null:
 				var droid: Node3D = PieceAssets.SW_C3PO.instantiate()
 				droid.name = "C3PO"
-				droid.position = Vector3(0.0, 0.75, 0.0)
-				droid.scale = Vector3.ONE * 1.35
+				droid.position = Vector3(0.0, 0.78, 0.0)
+				droid.scale = Vector3.ONE * 1.70
 				att.add_child(droid)
 		Type.PAWN:
 			var att := _bone_mount("head", "EwokMount")
 			if att != null:
 				var ewok: Node3D = PieceAssets.SW_EWOK_HOOD.instantiate()
 				ewok.name = "EwokHood"
-				ewok.position = Vector3(0.0, 0.75, 0.0)
-				ewok.scale = Vector3.ONE * 1.40
+				ewok.position = Vector3(0.0, 0.78, 0.0)
+				ewok.scale = Vector3.ONE * 1.85
 				att.add_child(ewok)
+
+
+func _clean_star_wars_meshes() -> void:
+	var host: Node3D = _rider if _rider != null else _model
+	if host == null:
+		return
+	for mi: MeshInstance3D in host.find_children("*", "MeshInstance3D", true, false):
+		var n: String = mi.name
+		if n in ["RogueHooded_Mask", "RogueHooded_Cape", "Ranger_Cape", "Ranger_Quiver",
+				"Mage_Hat", "Mage_Cape", "Knight_Helmet", "Knight_HelmetVisor",
+				"Knight_Cape", "Barbarian_BearHat"]:
+			mi.visible = false
 
 
 ## TYPE signature gear (king): the cape, draped from the chest bone.

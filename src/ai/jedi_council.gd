@@ -368,7 +368,7 @@ func _rank_expected_player_moves(state, legal: Array) -> Array:
 			score += 50
 		if uci in ["e2e4", "d2d4", "c2c4", "e7e5", "d7d5", "c7c5", "f2f4", "g1f3", "b1c3", "g8f6", "b8c6"]:
 			score += 40
-		if m.is_castle():
+		if m.is_castling:
 			score += 35
 		if uci.begins_with("b1") or uci.begins_with("g1") or uci.begins_with("b8") or uci.begins_with("g8"):
 			score += 20
