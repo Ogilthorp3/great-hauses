@@ -173,6 +173,10 @@ func handle_key_input(event: InputEventKey, host: Node) -> bool:
 				_key_buffer = ""
 				trigger_zelda_secret(host, "TRIFORCE SECRET!")
 				return true
+			elif _key_buffer.ends_with("got") or _key_buffer.ends_with("thrones"):
+				_key_buffer = ""
+				trigger_got_secret(host)
+				return true
 			elif _key_buffer.ends_with("cucco"):
 				_key_buffer = ""
 				trigger_cucco_attack(host)
@@ -213,6 +217,28 @@ func handle_piece_clicked(piece_type: int, is_player_king: bool, host: Node) -> 
 		if _king_click_times.size() >= 3:
 			_king_click_times.clear()
 			trigger_master_sword(host)
+
+
+## Trigger Game of Thrones Easter Egg: renames houses to GoT names & authentic mottos
+func trigger_got_secret(host: Node) -> void:
+	var active := HouseRegistry.toggle_got_mode()
+	if host != null and host.is_inside_tree():
+		play_sound(host, get_fanfare_stream(), 0.95, 3.0)
+		if active:
+			_show_retro_banner(host, "⚔️ GAME OF THRONES MODE UNLOCKED 👑", "Winter is Coming • Hear Me Roar • Fire and Blood")
+		else:
+			_show_retro_banner(host, "🏰 GREAT HAUSES RESTORED", "The realm returns to its original heraldry.")
+
+	# If in HouseSelect, refresh UI
+	if host is HouseSelect or (host != null and host.get_parent() is HouseSelect):
+		var hs: HouseSelect = host if host is HouseSelect else host.get_parent()
+		hs._update_preview()
+		if hs._pledge_banner != null and hs._pledge_banner.visible:
+			var hid: String = hs._house_ids[hs._ring_index] if not hs._house_ids.is_empty() else ""
+			var h := HouseRegistry.get_house(hid)
+			var motto_label: Label = hs._pledge_banner.get_node_or_null("VBox/PledgeMotto")
+			if motto_label != null:
+				motto_label.text = "“%s”" % str(h.get("motto", ""))
 
 
 ## Trigger Secret Chime & Haus Hyrule Unlock

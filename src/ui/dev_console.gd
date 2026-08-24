@@ -113,6 +113,7 @@ func _build_ui() -> void:
 	_add_quick_btn("🌋 Ashfall", "dragon ashfall")
 	_add_quick_btn("🗡️ Master Sword", "easter sword")
 	_add_quick_btn("🐔 Cucco Storm", "easter cucco")
+	_add_quick_btn("👑 GOT Mode", "easter got")
 	_add_quick_btn("✨ HoloChess", "holochess")
 	_add_quick_btn("🎮 Trial By Fire", "trial")
 	_add_quick_btn("👑 GM Eval", "eval")
@@ -491,6 +492,9 @@ func _cmd_easter(args: Array) -> void:
 			"zelda", "hyrule":
 				ee.unlock_hyrule_house()
 				log_line("[color=#10B981]Haus Hyrule unlocked in Hall of Banners![/color]")
+			"got", "thrones":
+				ee.trigger_got_secret(_game_ref)
+				log_line("[color=#EBC85A]👑 Game of Thrones mode: %s[/color]" % ("ON" if HouseRegistry.is_got_mode() else "OFF"))
 
 
 func _cmd_fen(args: Array) -> void:

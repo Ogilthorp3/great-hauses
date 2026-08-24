@@ -45,6 +45,97 @@ static var _installed: Array[String] = []
 static var _reports: Array = []        # every pack's load report, good or bad
 static var _loaded := false
 
+static var _got_mode := false
+static var _original_houses := {}
+
+const GOT_HOUSES := {
+	"winterfang": {
+		"name": "House Stark",
+		"seat": "Winterfell",
+		"motto": "Winter is Coming"
+	},
+	"goldclaw": {
+		"name": "House Lannister",
+		"seat": "Casterly Rock",
+		"motto": "Hear Me Roar!"
+	},
+	"hartcrown": {
+		"name": "House Baratheon",
+		"seat": "Storm's End",
+		"motto": "Ours is the Fury"
+	},
+	"ashwyrm": {
+		"name": "House Targaryen",
+		"seat": "Dragonstone",
+		"motto": "Fire and Blood"
+	},
+	"tidegrip": {
+		"name": "House Greyjoy",
+		"seat": "Pyke",
+		"motto": "We Do Not Sow"
+	},
+	"thornvale": {
+		"name": "House Tyrell",
+		"seat": "Highgarden",
+		"motto": "Growing Strong"
+	},
+	"duskfire": {
+		"name": "House Martell",
+		"seat": "Sunspear",
+		"motto": "Unbowed, Unbent, Unbroken"
+	},
+	"swiftcrest": {
+		"name": "House Arryn",
+		"seat": "The Eyrie",
+		"motto": "As High as Honor"
+	},
+	"silverbrook": {
+		"name": "House Tully",
+		"seat": "Riverrun",
+		"motto": "Family, Duty, Honor"
+	}
+}
+
+
+static func is_got_mode() -> bool:
+	return _got_mode
+
+
+static func set_got_mode(active: bool) -> void:
+	_ensure_loaded()
+	if _got_mode == active:
+		return
+	_got_mode = active
+	_apply_got_mode()
+
+
+static func toggle_got_mode() -> bool:
+	_ensure_loaded()
+	_got_mode = not _got_mode
+	_apply_got_mode()
+	return _got_mode
+
+
+static func _apply_got_mode() -> void:
+	if _original_houses.is_empty():
+		for hid in _by_id:
+			_original_houses[hid] = {
+				"name": _by_id[hid].get("name", ""),
+				"seat": _by_id[hid].get("seat", ""),
+				"motto": _by_id[hid].get("motto", "")
+			}
+	for hid in GOT_HOUSES:
+		if _by_id.has(hid):
+			if _got_mode:
+				_by_id[hid]["name"] = GOT_HOUSES[hid]["name"]
+				_by_id[hid]["seat"] = GOT_HOUSES[hid]["seat"]
+				_by_id[hid]["motto"] = GOT_HOUSES[hid]["motto"]
+			else:
+				if _original_houses.has(hid):
+					_by_id[hid]["name"] = _original_houses[hid]["name"]
+					_by_id[hid]["seat"] = _original_houses[hid]["seat"]
+					_by_id[hid]["motto"] = _original_houses[hid]["motto"]
+
 
 static func _ensure_loaded() -> void:
 	if _loaded:

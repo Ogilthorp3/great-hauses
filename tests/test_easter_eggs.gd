@@ -15,6 +15,7 @@ func _main() -> void:
 	print("=== Great Hauses — Zelda Easter Eggs Unit Suite ===")
 	_test_audio_synthesis()
 	_test_secret_key_matching()
+	_test_got_easter_egg()
 	_test_king_triple_click()
 	_test_rage_click_cucco()
 	_test_procedural_props()
@@ -65,6 +66,81 @@ func _test_secret_key_matching() -> void:
 			triggered = true
 
 	check("keys: 'zelda' sequence triggers easter egg", true, triggered)
+	dummy.free()
+	egg.free()
+
+
+func _test_got_easter_egg() -> void:
+	var egg := ZeldaEasterEggsScript.new()
+	var dummy := Node.new()
+
+	HouseRegistry.set_got_mode(false)
+	var winterfang_base := HouseRegistry.get_house("winterfang")
+	check("got: winterfang original name", "Haus Winterfang", winterfang_base.get("name", ""))
+	check("got: winterfang original motto", "The wolf remembers.", winterfang_base.get("motto", ""))
+
+	var triggered := false
+	for ch in "got":
+		var ev := InputEventKey.new()
+		ev.pressed = true
+		ev.unicode = ch.unicode_at(0)
+		if egg.handle_key_input(ev, dummy):
+			triggered = true
+
+	check("keys: 'got' sequence triggers easter egg", true, triggered)
+	check("got: mode active after typing got", true, HouseRegistry.is_got_mode())
+
+	var stark := HouseRegistry.get_house("winterfang")
+	check("got: winterfang renamed to House Stark", "House Stark", stark.get("name", ""))
+	check("got: winterfang seat is Winterfell", "Winterfell", stark.get("seat", ""))
+	check("got: winterfang motto is Winter is Coming", "Winter is Coming", stark.get("motto", ""))
+
+	var lannister := HouseRegistry.get_house("goldclaw")
+	check("got: goldclaw renamed to House Lannister", "House Lannister", lannister.get("name", ""))
+	check("got: goldclaw motto is Hear Me Roar!", "Hear Me Roar!", lannister.get("motto", ""))
+
+	var targaryen := HouseRegistry.get_house("ashwyrm")
+	check("got: ashwyrm renamed to House Targaryen", "House Targaryen", targaryen.get("name", ""))
+	check("got: ashwyrm motto is Fire and Blood", "Fire and Blood", targaryen.get("motto", ""))
+
+	var greyjoy := HouseRegistry.get_house("tidegrip")
+	check("got: tidegrip renamed to House Greyjoy", "House Greyjoy", greyjoy.get("name", ""))
+	check("got: tidegrip motto is We Do Not Sow", "We Do Not Sow", greyjoy.get("motto", ""))
+
+	var baratheon := HouseRegistry.get_house("hartcrown")
+	check("got: hartcrown renamed to House Baratheon", "House Baratheon", baratheon.get("name", ""))
+	check("got: hartcrown motto is Ours is the Fury", "Ours is the Fury", baratheon.get("motto", ""))
+
+	var tyrell := HouseRegistry.get_house("thornvale")
+	check("got: thornvale renamed to House Tyrell", "House Tyrell", tyrell.get("name", ""))
+	check("got: thornvale motto is Growing Strong", "Growing Strong", tyrell.get("motto", ""))
+
+	var martell := HouseRegistry.get_house("duskfire")
+	check("got: duskfire renamed to House Martell", "House Martell", martell.get("name", ""))
+	check("got: duskfire motto is Unbowed, Unbent, Unbroken", "Unbowed, Unbent, Unbroken", martell.get("motto", ""))
+
+	var arryn := HouseRegistry.get_house("swiftcrest")
+	check("got: swiftcrest renamed to House Arryn", "House Arryn", arryn.get("name", ""))
+	check("got: swiftcrest motto is As High as Honor", "As High as Honor", arryn.get("motto", ""))
+
+	var tully := HouseRegistry.get_house("silverbrook")
+	check("got: silverbrook renamed to House Tully", "House Tully", tully.get("name", ""))
+	check("got: silverbrook motto is Family, Duty, Honor", "Family, Duty, Honor", tully.get("motto", ""))
+
+	# Second "got" toggles back
+	triggered = false
+	for ch in "got":
+		var ev := InputEventKey.new()
+		ev.pressed = true
+		ev.unicode = ch.unicode_at(0)
+		if egg.handle_key_input(ev, dummy):
+			triggered = true
+
+	check("keys: second 'got' toggles back", true, triggered)
+	check("got: mode inactive after toggle", false, HouseRegistry.is_got_mode())
+	var restored := HouseRegistry.get_house("winterfang")
+	check("got: restored original name", "Haus Winterfang", restored.get("name", ""))
+
 	dummy.free()
 	egg.free()
 
