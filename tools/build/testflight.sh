@@ -155,20 +155,13 @@ PLIST
   exit 0
 fi
 
+GODOT="${GODOT:-/Applications/Godot.app/Contents/MacOS/Godot}"
+
 # ── preflight, because every one of these failures is silent-ish ───────────
 say "preflight"
 
 if ! xcodebuild -version >/dev/null 2>&1; then
   echo "FAIL: no Xcode command line tools" >&2; exit 1
-fi
-
-# The platform, not the SDK. This is the check that would have saved an hour.
-if ! xcodebuild -showdestinations -project "$DIST/GreatHauses.xcodeproj" \
-      -scheme GreatHauses 2>/dev/null | grep -q "platform:iOS"; then
-  if [ -d "$DIST/GreatHauses.xcodeproj" ]; then
-    echo "WARN: no eligible iOS destination — is the iOS platform installed?" >&2
-    echo "      xcodebuild -downloadPlatform iOS      # 8.5 GB" >&2
-  fi
 fi
 
 if ! security find-identity -v -p codesigning | grep -q "$TEAM"; then
@@ -191,11 +184,11 @@ fi
 mkdir -p "$DIST"
 say "exporting preset '$PRESET' ($CONFIG) -> $DIST"
 if [ "$CONFIG" = "release" ]; then
-  godot --headless --path "$ROOT" --export-release "$PRESET" \
-    "$DIST/GreatHauses.xcodeproj"
+  "$GODOT" --headless --path "$ROOT" --export-release "$PRESET" \
+    "$DIST/Great Hauses Chess.xcodeproj"
 else
-  godot --headless --path "$ROOT" --export-debug "$PRESET" \
-    "$DIST/GreatHauses.xcodeproj"
+  "$GODOT" --headless --path "$ROOT" --export-debug "$PRESET" \
+    "$DIST/Great Hauses Chess.xcodeproj"
 fi
 
 IPA="$(/usr/bin/find "$DIST" -name '*.ipa' -maxdepth 2 -print -quit 2>/dev/null || true)"
