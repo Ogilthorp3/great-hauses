@@ -33,9 +33,9 @@ TEMPLATE_ROOT="$HOME/Library/Application Support/Godot/export_templates"
 WIN_PRESET="Windows Desktop"
 MAC_PRESET="macOS"
 VISIONOS_PRESET="visionOS"
-WIN_OUT_NAME="GreatHauses.exe"
-MAC_OUT_NAME="GreatHauses.app"
-VISIONOS_OUT_NAME="GreatHauses.xcodeproj"
+WIN_OUT_NAME="Great Hauses Chess.exe"
+MAC_OUT_NAME="Great Hauses Chess.app"
+VISIONOS_OUT_NAME="Great Hauses Chess.xcodeproj"
 
 RC=0
 note() { printf '[build] %s\n' "$*"; }
@@ -298,9 +298,9 @@ build_macos() {
   fi
   note "macos build verified (booted clean)"
   if [ -d "/Applications" ] && [ -w "/Applications" ]; then
-    note "syncing to /Applications/GreatHauses.app"
-    rm -rf "/Applications/GreatHauses.app"
-    cp -R "$target" "/Applications/GreatHauses.app"
+    note "syncing to /Applications/Great Hauses Chess.app"
+    rm -rf "/Applications/GreatHauses.app" "/Applications/Great Hauses Chess.app"
+    cp -R "$target" "/Applications/Great Hauses Chess.app"
   fi
   return 0
 }

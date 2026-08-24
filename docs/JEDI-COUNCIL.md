@@ -59,4 +59,4 @@ When playing against the Council (`_is_star_wars_mode()`), base medieval accesso
 - **Engine Test Suite:** `res://tests/run_tests.gd` (79/79 PASS)
 - **Costumes & Animation Gate:** `res://tests/test_costumes.gd` (857/857 PASS)
 - **Council Deliberation & Quorum Gate:** `res://tests/test_jedi_council.gd` (21/21 PASS)
-- **Artifact Output:** Universal macOS Mach-O Binary synced to `/Applications/GreatHauses.app`.
+- **Artifact Output:** Universal macOS Mach-O Binary synced to `/Applications/Great Hauses Chess.app`.

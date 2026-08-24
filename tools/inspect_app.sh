@@ -8,8 +8,8 @@ pkill -f "Great Hauses" 2>/dev/null || true
 pkill -f "Godot" 2>/dev/null || true
 sleep 0.5
 
-echo "[inspect] Launching /Applications/GreatHauses.app..."
-open -a "/Applications/GreatHauses.app"
+echo "[inspect] Launching /Applications/Great Hauses Chess.app..."
+open -a "/Applications/Great Hauses Chess.app"
 
 for i in {1..8}; do
     sleep 0.6
