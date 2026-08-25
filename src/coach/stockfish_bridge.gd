@@ -3,18 +3,13 @@ extends RefCounted
 ## StockfishBridge — Connects Stockfish 18 with NNUE Neural Networks
 ## to Great Hauses for 3600+ Grandmaster-level analysis and move recommendations.
 
-const STOCKFISH_PATHS := [
-	"/opt/homebrew/bin/stockfish",
-	"/usr/local/bin/stockfish",
-	"/usr/bin/stockfish",
-	"stockfish"
-]
+const UciEngineScript := preload("res://src/ai/uci_engine.gd")
 
 static var _cached_bin_path := ""
 static var _checked_bin := false
 
 
-## Find Stockfish 18 binary on the system
+## Find Stockfish binary on the system (delegates to UciEngine's multi-tier platform search)
 static func get_stockfish_path() -> String:
 	if _checked_bin:
 		return _cached_bin_path
@@ -23,29 +18,14 @@ static func get_stockfish_path() -> String:
 	if not platform_can_spawn():
 		_cached_bin_path = ""
 		return _cached_bin_path
-	for p in STOCKFISH_PATHS:
-		if FileAccess.file_exists(p):
-			_cached_bin_path = p
-			return _cached_bin_path
 
-	# Try 'which stockfish'
-	var out: Array = []
-	var rc := OS.execute("which", ["stockfish"], out)
-	if rc == 0 and not out.is_empty():
-		var found_path := str(out[0]).strip_edges()
-		if not found_path.is_empty() and FileAccess.file_exists(found_path):
-			_cached_bin_path = found_path
-			return _cached_bin_path
-
-	_cached_bin_path = ""
-	return ""
+	_cached_bin_path = UciEngineScript.find_stockfish()
+	return _cached_bin_path
 
 
 ## PLATFORMS THAT CANNOT FORK. iOS forbids spawning a child process outright
 ## (App Store review rejects it and the sandbox blocks it), and Web has no
-## process model at all. Asking is the FIRST question, before any filesystem
-## probe or `which`, so the existing degradation path — a greyed-out Grand
-## Maester rather than a crash — is what the player meets on an iPad.
+## process model at all.
 static func platform_can_spawn() -> bool:
 	return not (OS.has_feature("ios") or OS.has_feature("web"))
 
@@ -55,7 +35,7 @@ static func is_available() -> bool:
 	return not get_stockfish_path().is_empty()
 
 
-## Run deep Stockfish 18 NNUE analysis on a given FEN position
+## Run deep Stockfish 18 NNUE analysis on a given FEN position using native Godot pipes
 static func analyze_fen(fen: String, movetime_ms: int = 150) -> Dictionary:
 	var result := {
 		"available": false,
@@ -73,51 +53,60 @@ static func analyze_fen(fen: String, movetime_ms: int = 150) -> Dictionary:
 	if sf_path.is_empty():
 		return result
 
+	# Execute Stockfish directly via native OS pipes — NO Python, NO shell wrapper
+	var info := OS.execute_with_pipe(sf_path, [])
+	if info.is_empty() or not info.has("stdio"):
+		return result
+
+	var pipe: FileAccess = info["stdio"]
+	var pid: int = int(info.get("pid", -1))
+	if pipe == null or not pipe.is_open():
+		return result
+
 	result["available"] = true
 	result["engine"] = "Stockfish 18 NNUE (3600+ Elo)"
 
-	# Construct python / shell one-shot wrapper to interact cleanly with UCI
-	var py_script := """import subprocess, time, sys
-sf = '%s'
-fen = '%s'
-p = subprocess.Popen([sf], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
-p.stdin.write('uci\\nisready\\nposition fen ' + fen + '\\ngo movetime %d\\n')
-p.stdin.flush()
-time.sleep(%.3f)
-p.stdin.write('quit\\n')
-p.stdin.flush()
-out, _ = p.communicate()
-print(out)
-""" % [sf_path, fen, movetime_ms, float(movetime_ms) / 1000.0 + 0.1]
+	pipe.store_string("uci\nisready\nposition fen %s\ngo movetime %d\n" % [fen, movetime_ms])
+	pipe.flush()
 
-	var output: Array = []
-	var rc := OS.execute("python3", ["-c", py_script], output)
-	if rc != 0 or output.is_empty():
-		return result
+	var deadline := Time.get_ticks_msec() + movetime_ms + 1200
+	var text := ""
 
-	var text := str(output[0])
+	while Time.get_ticks_msec() < deadline:
+		if pipe.is_open() and pipe.get_error() == OK:
+			var line := pipe.get_line().strip_edges()
+			if line.is_empty():
+				OS.delay_msec(2)
+				continue
+			text += line + "\n"
+			if line.begins_with("info ") and "score " in line:
+				var tokens := line.split(" ")
+				for i in range(tokens.size()):
+					if tokens[i] == "cp" and i + 1 < tokens.size():
+						result["eval_cp"] = float(tokens[i + 1]) / 100.0
+					elif tokens[i] == "mate" and i + 1 < tokens.size():
+						result["mate_in"] = int(tokens[i + 1])
+					elif tokens[i] == "pv":
+						result["pv"] = tokens.slice(i + 1)
+			elif line.begins_with("bestmove "):
+				var parts := line.split(" ")
+				if parts.size() >= 2:
+					var uci_move := parts[1]
+					result["bestmove_uci"] = uci_move
+					if uci_move.length() >= 4:
+						result["from_sq"] = _uci_to_sq(uci_move.substr(0, 2))
+						result["to_sq"] = _uci_to_sq(uci_move.substr(2, 2))
+				break
+		else:
+			break
+
 	result["raw_info"] = text
-
-	for line in text.split("\n"):
-		line = line.strip_edges()
-		if line.begins_with("info ") and "score " in line:
-			# Parse centipawns or mate
-			var tokens := line.split(" ")
-			for i in range(tokens.size()):
-				if tokens[i] == "cp" and i + 1 < tokens.size():
-					result["eval_cp"] = float(tokens[i + 1]) / 100.0
-				elif tokens[i] == "mate" and i + 1 < tokens.size():
-					result["mate_in"] = int(tokens[i + 1])
-				elif tokens[i] == "pv":
-					result["pv"] = tokens.slice(i + 1)
-		elif line.begins_with("bestmove "):
-			var parts := line.split(" ")
-			if parts.size() >= 2:
-				var uci_move := parts[1]
-				result["bestmove_uci"] = uci_move
-				if uci_move.length() >= 4:
-					result["from_sq"] = _uci_to_sq(uci_move.substr(0, 2))
-					result["to_sq"] = _uci_to_sq(uci_move.substr(2, 2))
+	if pipe.is_open():
+		pipe.store_string("quit\n")
+		pipe.flush()
+		pipe.close()
+	if pid > 0 and OS.is_process_running(pid):
+		OS.kill(pid)
 
 	return result
 

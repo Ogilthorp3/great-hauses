@@ -116,7 +116,7 @@ static func find_stockfish() -> String:
 ## THIS platform's player should put the binary.
 static func install_hint() -> String:
 	if OS.has_feature("windows"):
-		return "put stockfish.exe next to GreatHauses.exe"
+		return "put stockfish.exe next to Great Hauses Chess.exe"
 	if OS.has_feature("macos"):
 		return "brew install stockfish"
 	return "install stockfish from your package manager"
