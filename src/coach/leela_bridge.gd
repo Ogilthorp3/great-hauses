@@ -22,13 +22,35 @@ static func binary_name() -> String:
 ## Directories searched before PATH, in order.
 static func sidecar_dirs() -> Array[String]:
 	var exe_dir := OS.get_executable_path().get_base_dir()
-	var dirs: Array[String] = [exe_dir, exe_dir.path_join("lc0")]
+	var dirs: Array[String] = [
+		exe_dir,
+		exe_dir.path_join("lc0")
+	]
 	if OS.has_feature("macos"):
-		var outside := exe_dir.get_base_dir().get_base_dir().get_base_dir()
+		var contents_dir := exe_dir.get_base_dir()
+		dirs.append(contents_dir.path_join("Resources"))
+		dirs.append(contents_dir.path_join("Resources").path_join("lc0"))
+		dirs.append(exe_dir.path_join("lc0"))
+		var outside := contents_dir.get_base_dir()
 		if not outside.is_empty():
 			dirs.append(outside)
 			dirs.append(outside.path_join("lc0"))
 	return dirs
+
+
+static func _find_weights(lc0_path: String) -> String:
+	var base := lc0_path.get_base_dir()
+	for fname in ["791556.pb.gz", "42850.pb.gz", "weights.pb.gz", "weights.bin", "weights.onnx"]:
+		var w := base.path_join(fname)
+		if FileAccess.file_exists(w):
+			return w
+	if OS.has_feature("macos"):
+		var res_dir := lc0_path.get_base_dir().get_base_dir().path_join("Resources")
+		for fname in ["791556.pb.gz", "42850.pb.gz", "weights.pb.gz", "weights.bin", "weights.onnx"]:
+			var w := res_dir.path_join(fname)
+			if FileAccess.file_exists(w):
+				return w
+	return ""
 
 
 ## Scan the PATH environment variable directly without spawning subprocesses
@@ -112,8 +134,13 @@ static func analyze_fen(fen: String, max_nodes: int = 80) -> Dictionary:
 	if lc0_path.is_empty():
 		return result
 
-	# Execute Leela directly via native OS pipes — NO Python, NO shell wrapper
-	var info := OS.execute_with_pipe(lc0_path, [])
+	# Execute Leela directly via native OS pipes with weights if found
+	var args: Array[String] = []
+	var weights := _find_weights(lc0_path)
+	if not weights.is_empty():
+		args.append("--weights=" + weights)
+
+	var info := OS.execute_with_pipe(lc0_path, args)
 	if info.is_empty() or not info.has("stdio"):
 		return result
 

@@ -259,6 +259,11 @@ build_windows() {
     note "bundling stockfish.exe alongside $WIN_OUT_NAME"
     cp "$PROJ/tools/engines/windows/stockfish.exe" "$OUT/windows/stockfish.exe"
   fi
+  if [ -d "$PROJ/tools/engines/windows/lc0" ]; then
+    note "bundling lc0/ (Leela Chess Zero DirectML) alongside $WIN_OUT_NAME"
+    rm -rf "$OUT/windows/lc0"
+    cp -R "$PROJ/tools/engines/windows/lc0" "$OUT/windows/lc0"
+  fi
   note "windows build verified"
   return 0
 }
@@ -278,13 +283,19 @@ build_macos() {
     note "bundling universal stockfish binary inside $MAC_OUT_NAME (Contents/MacOS/stockfish)"
     cp "$PROJ/tools/engines/macos/stockfish" "$target/Contents/MacOS/stockfish"
     chmod +x "$target/Contents/MacOS/stockfish"
-    if command -v codesign >/dev/null 2>&1; then
-      codesign --force --deep --sign - "$target" 2>/dev/null || true
-    fi
+  fi
+  if [ -d "$PROJ/tools/engines/macos/lc0" ]; then
+    note "bundling lc0/ (Leela Chess Zero Metal) inside $MAC_OUT_NAME (Contents/MacOS/lc0/)"
+    rm -rf "$target/Contents/MacOS/lc0"
+    cp -R "$PROJ/tools/engines/macos/lc0" "$target/Contents/MacOS/lc0"
+    chmod +x "$target/Contents/MacOS/lc0/lc0"
+  fi
+  if command -v codesign >/dev/null 2>&1; then
+    codesign --force --deep --sign - "$target" 2>/dev/null || true
   fi
 
   local bin
-  bin="$(ls "$target/Contents/MacOS/" | grep -v stockfish | head -1)"
+  bin="$(ls "$target/Contents/MacOS/" | grep -v stockfish | grep -v lc0 | head -1)"
   note "file(1): $(file -b "$target/Contents/MacOS/$bin")"
 
   note "verifying pck contents"
