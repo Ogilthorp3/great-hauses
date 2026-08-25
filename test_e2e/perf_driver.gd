@@ -804,9 +804,9 @@ func _run() -> void:
 			func(): return int(sel.get("phase")) == 1, "crest"):
 		_fail("hall-house", "crest clicks never advanced")
 		return
-	var opp := _find_button(sel, "Casual")
+	var opp := _find_button(sel, "Page")
 	if opp == null:
-		_fail("hall-opponent", "no 'Casual' opponent button")
+		_fail("hall-opponent", "no 'Page' opponent button")
 		return
 	if not await _click_until(opp, func(): return int(sel.get("phase")) == 2, "opponent"):
 		_fail("hall-opponent", "opponent clicks never advanced")
@@ -1104,7 +1104,7 @@ func _run_load() -> void:
 				func(): return int(sel.get("phase")) == 1, "crest"):
 			_fail("load-house", "crest clicks never advanced")
 			return
-		var opp := _find_button(sel, "Casual")
+		var opp := _find_button(sel, "Page")
 		if opp == null or not await _click_until(opp,
 				func(): return int(sel.get("phase")) == 2, "opponent"):
 			_fail("load-opponent", "opponent clicks never advanced")

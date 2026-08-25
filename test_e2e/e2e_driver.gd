@@ -709,6 +709,27 @@ func _click_at(canvas_pos: Vector2) -> void:
 func _click_control(c: Control) -> void:
 	await _click_at(c.get_global_rect().get_center())
 
+func _wheel_at(canvas_pos: Vector2, ticks: int) -> void:
+	## Scroll wheel through the real input pipeline — a ScrollContainer child
+	## below the fold only takes clicks after the list is scrolled to it.
+	var wpos := _to_window * canvas_pos
+	for i in ticks:
+		var down := InputEventMouseButton.new()
+		down.button_index = MOUSE_BUTTON_WHEEL_DOWN
+		down.pressed = true
+		down.factor = 1.0
+		down.position = wpos
+		down.global_position = wpos
+		Input.parse_input_event(down)
+		var up := InputEventMouseButton.new()
+		up.button_index = MOUSE_BUTTON_WHEEL_DOWN
+		up.pressed = false
+		up.position = wpos
+		up.global_position = wpos
+		Input.parse_input_event(up)
+		await get_tree().process_frame
+	await get_tree().process_frame
+
 func _press_key(keycode: Key) -> void:
 	## One key tap through the real input pipeline (parse_input_event).
 	var down := InputEventKey.new()
@@ -1097,7 +1118,7 @@ func _assert_sync(game: Node, step: String, allow_missing_king := false) -> bool
 
 # ── Scenario: boot ─────────────────────────────────────────────────────────
 func _scenario_boot() -> void:
-	if not await _navigate_select(DEFAULT_HOUSE, "Casual", "Single Match"):
+	if not await _navigate_select(DEFAULT_HOUSE, "Page", "Single Match"):
 		return
 	var game := await _boot_game(32)
 	if game == null:
@@ -1189,7 +1210,7 @@ func _assert_hover_glyphs(game: Node) -> bool:
 ## saved. The PICTURE is the check — conventions can be self-consistently
 ## wrong, a labeled photograph cannot.
 func _scenario_orientation() -> void:
-	if not await _navigate_select(DEFAULT_HOUSE, "Casual", "Single Match"):
+	if not await _navigate_select(DEFAULT_HOUSE, "Page", "Single Match"):
 		return
 	var game := await _boot_game(32)
 	if game == null:
@@ -1223,7 +1244,7 @@ func _scenario_orientation() -> void:
 ## mirrored convention could pass them self-consistently (the 2026-08-08
 ## scar: 20/20 green while the user saw a wrong board).
 func _scenario_board_truth() -> void:
-	if not await _navigate_select(DEFAULT_HOUSE, "Casual", "Single Match"):
+	if not await _navigate_select(DEFAULT_HOUSE, "Page", "Single Match"):
 		return
 	var game := await _boot_game(32)
 	if game == null:
@@ -1342,7 +1363,7 @@ const KING_E1_VISUAL := ["f1", "f2", "g1"]
 const QUEEN_D1_VISUAL := ["c1", "b1", "c2", "b3", "a4"]
 
 func _scenario_board_moves() -> void:
-	if not await _navigate_select(DEFAULT_HOUSE, "Casual", "Single Match"):
+	if not await _navigate_select(DEFAULT_HOUSE, "Page", "Single Match"):
 		return
 	var game := await _boot_game(0)
 	if game == null:
@@ -1405,7 +1426,7 @@ func _same_squares(a: Array[Vector2i], b: Array[Vector2i]) -> bool:
 
 # ── Scenario: move ─────────────────────────────────────────────────────────
 func _scenario_move() -> void:
-	if not await _navigate_select(DEFAULT_HOUSE, "Casual", "Single Match"):
+	if not await _navigate_select(DEFAULT_HOUSE, "Page", "Single Match"):
 		return
 	var game := await _boot_game(32)
 	if game == null:
@@ -1491,7 +1512,7 @@ func _settle(game: Node, step: String) -> bool:
 
 # ── Scenario: castle ───────────────────────────────────────────────────────
 func _scenario_castle() -> void:
-	if not await _navigate_select(DEFAULT_HOUSE, "Casual", "Single Match"):
+	if not await _navigate_select(DEFAULT_HOUSE, "Page", "Single Match"):
 		return
 	var game := await _ready_for_scripted_move("castle")
 	if game == null:
@@ -1555,7 +1576,7 @@ func _scenario_castle() -> void:
 ## are empty. This is the classic mirror tell: only a correct mapping removes
 ## the pawn one square BEHIND the diagonal landing.
 func _scenario_enpassant() -> void:
-	if not await _navigate_select(DEFAULT_HOUSE, "Casual", "Single Match"):
+	if not await _navigate_select(DEFAULT_HOUSE, "Page", "Single Match"):
 		return
 	var game := await _ready_for_scripted_move("ep")
 	if game == null:
@@ -1630,7 +1651,7 @@ func _scenario_enpassant() -> void:
 ## the arrow keys, and finally by pressing Esc to prove the silent default is
 ## still the queen. tests/test_promotion.gd asserts the same chess headless.
 func _scenario_promote() -> void:
-	if not await _navigate_select(DEFAULT_HOUSE, "Casual", "Single Match"):
+	if not await _navigate_select(DEFAULT_HOUSE, "Page", "Single Match"):
 		return
 	var game := await _ready_for_scripted_move("promote")
 	if game == null:
@@ -1953,7 +1974,7 @@ func _undo_back_to_pawn(game: Node, start_fen: String, label: String) -> bool:
 ## duel: assert-heavy capture via clicks (the slow-mo duel plays untouched).
 ## showcase: same duel plus beauty screenshots and a 45 s zero-error soak.
 func _scenario_duel(showcase: bool) -> void:
-	if not await _navigate_select(DEFAULT_HOUSE, "Casual", "Single Match"):
+	if not await _navigate_select(DEFAULT_HOUSE, "Page", "Single Match"):
 		return
 	var game := await _boot_game(0)   # custom FEN — piece count varies
 	if game == null:
@@ -2134,7 +2155,7 @@ func _showcase_throne_room(game: Node) -> void:
 
 # ── Scenario: slowmo (duel director activation + skip contract) ────────────
 func _scenario_slowmo() -> void:
-	if not await _navigate_select(DEFAULT_HOUSE, "Casual", "Single Match"):
+	if not await _navigate_select(DEFAULT_HOUSE, "Page", "Single Match"):
 		return
 	var game := await _boot_game(0)
 	if game == null:
@@ -2282,7 +2303,7 @@ const FRAME_GATE_STILL := 0.04    ## world units of camera travel per frame
 const FRAME_GATE_STILL_FRAMES := 2
 
 func _scenario_kills() -> void:
-	if not await _navigate_select(DEFAULT_HOUSE, "Casual", "Single Match"):
+	if not await _navigate_select(DEFAULT_HOUSE, "Page", "Single Match"):
 		return
 	var game := await _boot_game(0)
 	if game == null:
@@ -2576,7 +2597,7 @@ func _spawn_duellist(game: Node, piece_type: int, side: int, house_id: String,
 
 # ── Scenario: tournament (3 scripted mates to the throne) ──────────────────
 func _scenario_tournament() -> void:
-	if not await _navigate_select("goldclaw", "Casual", "Begin Tournament"):
+	if not await _navigate_select("goldclaw", "Page", "Begin Tournament"):
 		return
 	var prev_rival := ""
 	var prev_banner := Color.BLACK
@@ -2741,7 +2762,7 @@ func _scenario_trial(mode: String) -> void:
 	# maps 1:1 onto KingAi.Difficulty), and a Seasoned king hunts boons and
 	# retreats — which is what makes the power-up beat happen on its own rather
 	# than being staged by the test.
-	if not await _navigate_select("goldclaw", "Seasoned", "Begin Tournament"):
+	if not await _navigate_select("goldclaw", "Squire", "Begin Tournament"):
 		return
 	var game := await _boot_game(0)
 	if game == null:
@@ -3848,6 +3869,11 @@ func _scenario_net_hall() -> void:
 	if friend_btn == null:
 		await _fail("hall-friend-entry", "no 'Play a Friend' entry in the opponent panel")
 		return
+	# The friend entry is the LAST tile of the OppScroll list and sits below
+	# the fold — scroll to the bottom first or the clicks land on the clip.
+	var opp_scroll: Control = sel.find_child("OppScroll", true, false)
+	if opp_scroll != null:
+		await _wheel_at(opp_scroll.get_global_rect().get_center(), 16)
 	# Phase.NET is 4 (appended last so HOUSE/OPPONENT/MODE/DONE keep their ids).
 	if not await _click_until(friend_btn,
 			func(): return int(sel.get("phase")) == 4, "play-a-friend"):
@@ -4118,7 +4144,7 @@ func _scenario_music() -> void:
 		await _fail("music-unmute", "second M did not unmute the Music bus")
 		return
 	_pass("music-mute-toggle (M, bus-verified)")
-	if not await _navigate_select(DEFAULT_HOUSE, "Casual", "Single Match"):
+	if not await _navigate_select(DEFAULT_HOUSE, "Page", "Single Match"):
 		return
 	var game := await _boot_game(0)
 	if game == null:
@@ -4185,7 +4211,7 @@ func _scenario_music() -> void:
 var _banter_skips: Array = []   # [beat, why] pairs recorded off banter_skipped
 
 func _scenario_banter() -> void:
-	if not await _navigate_select(DEFAULT_HOUSE, "Casual", "Single Match"):
+	if not await _navigate_select(DEFAULT_HOUSE, "Page", "Single Match"):
 		return
 	var game := await _boot_game(0)
 	if game == null:
@@ -4284,7 +4310,7 @@ func _banter_skipped(why: String) -> bool:
 ## spawn/perch, notice_move feed, duel-cam reaction gate, ASHFALL chain,
 ## time_scale + view hygiene, victory flow.
 func _scenario_dragon_live() -> void:
-	if not await _navigate_select(DEFAULT_HOUSE, "Casual", "Single Match"):
+	if not await _navigate_select(DEFAULT_HOUSE, "Page", "Single Match"):
 		return
 	var game := await _boot_game(0)
 	if game == null:
@@ -4492,7 +4518,7 @@ func _dragon_losers_purged(game: Node) -> bool:
 
 # ── Scenario: fullgame (two-rook ladder mate, Gate D) ──────────────────────
 func _scenario_fullgame() -> void:
-	if not await _navigate_select(DEFAULT_HOUSE, "Casual", "Single Match"):
+	if not await _navigate_select(DEFAULT_HOUSE, "Page", "Single Match"):
 		return
 	var game := await _boot_game(0)
 	if game == null:
