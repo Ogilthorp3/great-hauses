@@ -177,10 +177,6 @@ if [ "$UPLOAD" = "1" ] && [ ! -f "$KEY" ]; then
 fi
 
 # ── export ────────────────────────────────────────────────────────────────
-# Godot's iOS exporter does the whole Apple dance itself: it writes the
-# Xcode project, then runs `xcodebuild archive` and `exportArchive`. So a
-# successful export leaves a signed .ipa and there is nothing further to
-# assemble by hand.
 mkdir -p "$DIST"
 say "exporting preset '$PRESET' ($CONFIG) -> $DIST"
 if [ "$CONFIG" = "release" ]; then
@@ -191,6 +187,76 @@ else
     "$DIST/Great Hauses Chess.xcodeproj"
 fi
 
+# ── inject embedded Stockfish 18 NNUE (In-Process Apple Silicon Engine) ────
+say "injecting embedded in-process Stockfish 18 NNUE into Xcode project"
+cp "$ROOT/tools/embedded_stockfish/src/StockfishServer.h" "$DIST/Great Hauses Chess/StockfishServer.h"
+cp "$ROOT/tools/embedded_stockfish/src/StockfishServer.mm" "$DIST/Great Hauses Chess/StockfishServer.mm"
+cp "$ROOT/tools/embedded_stockfish/include/SFEngine.h" "$DIST/Great Hauses Chess/SFEngine.h"
+cp "$ROOT/tools/embedded_stockfish/lib/libSFEngine-iOS.a" "$DIST/Great Hauses Chess/libSFEngine-iOS.a"
+
+cat << 'EOF' > "$DIST/Great Hauses Chess/dummy.mm"
+/**************************************************************************/
+/*  dummy.mm — Embedded In-Process Stockfish UCI Bootstrap                */
+/**************************************************************************/
+
+#import "StockfishServer.mm"
+
+void godot_apple_embedded_plugins_initialize() {
+    start_embedded_stockfish_server(8765);
+}
+
+void godot_apple_embedded_plugins_deinitialize() {
+    stop_embedded_stockfish_server();
+}
+EOF
+[ -f "$DIST/Great Hauses Chess/dummy.cpp" ] && rm -f "$DIST/Great Hauses Chess/dummy.cpp"
+
+python3 -c '
+path = "'"$DIST"'/Great Hauses Chess.xcodeproj/project.pbxproj"
+with open(path, "r") as f:
+    content = f.read()
+
+content = content.replace("dummy.cpp", "dummy.mm")
+content = content.replace("sourcecode.cpp.cpp", "sourcecode.cpp.objcpp")
+
+lib_path = "'"$ROOT"'/tools/embedded_stockfish/lib/libSFEngine-iOS.a"
+flag = f"OTHER_LDFLAGS = \"$(LD_CLASSIC_$(XCODE_VERSION_ACTUAL)) -lc++ {lib_path}\";"
+if "libSFEngine-iOS.a" not in content:
+    content = content.replace("OTHER_LDFLAGS = \"$(LD_CLASSIC_$(XCODE_VERSION_ACTUAL))  \";", flag)
+
+with open(path, "w") as f:
+    f.write(content)
+'
+
+say "building and archiving Xcode project with embedded Stockfish 18 NNUE"
+xcodebuild -project "$DIST/Great Hauses Chess.xcodeproj" \
+  -scheme "Great Hauses Chess" \
+  -configuration Release \
+  -destination "generic/platform=iOS" \
+  archive -archivePath "$DIST/Great Hauses Chess.xcarchive" -quiet
+
+cat > "$DIST/ExportOptions.plist" << 'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>method</key>
+	<string>app-store-connect</string>
+	<key>teamID</key>
+	<string>GJ994MN2YF</string>
+	<key>uploadSymbols</key>
+	<true/>
+	<key>compileBitcode</key>
+	<false/>
+</dict>
+</plist>
+PLIST
+
+xcodebuild -exportArchive \
+  -archivePath "$DIST/Great Hauses Chess.xcarchive" \
+  -exportPath "$DIST" \
+  -exportOptionsPlist "$DIST/ExportOptions.plist" -quiet
+
 IPA="$(/usr/bin/find "$DIST" -name '*.ipa' -maxdepth 2 -print -quit 2>/dev/null || true)"
 if [ -z "$IPA" ]; then
   echo "FAIL: export finished but produced no .ipa under $DIST" >&2
@@ -199,6 +265,7 @@ fi
 say "built: $IPA ($(du -h "$IPA" | cut -f1))"
 
 # ── upload ────────────────────────────────────────────────────────────────
+
 if [ "$UPLOAD" != "1" ]; then
   say "not uploading (pass --upload). Bundle: $BUNDLE_ID"
   exit 0
