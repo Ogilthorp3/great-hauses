@@ -66,6 +66,9 @@ pointing/emulate_mouse_from_touch=true
 
 environment/defaults/default_clear_color=Color(0.02, 0.02, 0.02, 1)
 renderer/rendering_method="mobile"
+renderer/rendering_method.windows="forward_plus"
+renderer/rendering_method.macos="forward_plus"
+textures/vram_compression/import_s3tc_bptc=true
 textures/vram_compression/import_etc2_astc=true
 vrs/mode=0
 ; 2D MSAA is OFF: the engine itself reports "2D MSAA is enabled while there
