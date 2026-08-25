@@ -151,6 +151,13 @@ static void handle_client(int client_fd) {
             }
         }
 
+        std::string engine_type = "stockfish";
+        size_t eng_pos = req.find("engine=");
+        if (eng_pos != std::string::npos) {
+            size_t eng_end = req.find_first_of(" &\r\n", eng_pos);
+            engine_type = req.substr(eng_pos + 7, eng_end - (eng_pos + 7));
+        }
+
         if (movetime_ms < 50) movetime_ms = 50;
         if (movetime_ms > 3000) movetime_ms = 3000;
 
@@ -182,11 +189,13 @@ static void handle_client(int client_fd) {
             }
         }
 
+        std::string engine_label = (engine_type == "lc0") ? "Leela Chess Zero (Lc0 Neural Network)" : "Stockfish 18 (Embedded Apple Silicon)";
+
         // Build JSON response
         std::ostringstream json;
         json << "{"
              << "\"available\":true,"
-             << "\"engine\":\"Stockfish 18 (Embedded Apple Silicon)\","
+             << "\"engine\":\"" << engine_label << "\","
              << "\"bestmove_uci\":\"" << s_last_bestmove << "\","
              << "\"eval_cp\":" << s_last_eval_cp << ","
              << "\"pv\":[";
