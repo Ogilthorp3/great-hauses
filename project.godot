@@ -93,3 +93,6 @@ anti_aliasing/quality/screen_space_aa=1
 ; gate and cannot render a stereo frame. tools/build/assert_visionos_preset.py
 ; asserts this key so a future removal fails the build instead of the headset.
 shaders/enabled=true
+shaders/enabled.windows=false
+shaders/enabled.macos=false
+
