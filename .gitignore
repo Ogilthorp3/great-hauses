@@ -6,3 +6,4 @@ test_e2e/artifacts/
 __pycache__/
 *.pyc
 artifacts/
+tools/engines/

@@ -255,6 +255,10 @@ build_windows() {
   python3 "$SCRIPT_DIR/pck_list.py" "$target" --count-only "${PCK_ARGS[@]}" || {
     fail "pck content assertions failed for $target"; return 1; }
   verify_freshness "$target" || return 1
+  if [ -f "$PROJ/tools/engines/windows/stockfish.exe" ]; then
+    note "bundling stockfish.exe alongside $WIN_OUT_NAME"
+    cp "$PROJ/tools/engines/windows/stockfish.exe" "$OUT/windows/stockfish.exe"
+  fi
   note "windows build verified"
   return 0
 }
@@ -270,8 +274,17 @@ build_macos() {
   if [ $rc -ne 0 ]; then fail "macos export exited $rc (see $OUT/macos/export.log)"; return 1; fi
   if [ ! -d "$target" ]; then fail "macos export produced no .app bundle"; return 1; fi
 
+  if [ -f "$PROJ/tools/engines/macos/stockfish" ]; then
+    note "bundling universal stockfish binary inside $MAC_OUT_NAME (Contents/MacOS/stockfish)"
+    cp "$PROJ/tools/engines/macos/stockfish" "$target/Contents/MacOS/stockfish"
+    chmod +x "$target/Contents/MacOS/stockfish"
+    if command -v codesign >/dev/null 2>&1; then
+      codesign --force --deep --sign - "$target" 2>/dev/null || true
+    fi
+  fi
+
   local bin
-  bin="$(ls "$target/Contents/MacOS/" | head -1)"
+  bin="$(ls "$target/Contents/MacOS/" | grep -v stockfish | head -1)"
   note "file(1): $(file -b "$target/Contents/MacOS/$bin")"
 
   note "verifying pck contents"

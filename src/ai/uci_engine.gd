@@ -56,8 +56,12 @@ static func sidecar_dirs() -> Array[String]:
 	var exe_dir := OS.get_executable_path().get_base_dir()
 	var dirs: Array[String] = [exe_dir, exe_dir.path_join("stockfish")]
 	if OS.has_feature("macos"):
-		# <dir>/Great Hauses.app/Contents/MacOS/<bin> -> <dir>
-		var outside := exe_dir.get_base_dir().get_base_dir().get_base_dir()
+		# Inside bundle: Contents/MacOS/ (exe_dir), Contents/Resources/
+		var contents_dir := exe_dir.get_base_dir()
+		dirs.append(contents_dir.path_join("Resources"))
+		dirs.append(contents_dir.path_join("Resources").path_join("stockfish"))
+		# Outside bundle: <dir>/Great Hauses Chess.app -> <dir>
+		var outside := contents_dir.get_base_dir()
 		if not outside.is_empty():
 			dirs.append(outside)
 			dirs.append(outside.path_join("stockfish"))
