@@ -304,14 +304,29 @@ func _execute_command(line: String) -> void:
 			_cmd_timescale(args)
 		"undo":
 			_cmd_undo()
+		"diag", "log", "sysinfo", "report":
+			_cmd_diag()
 		"quit", "exit":
 			toggle_console()
 		_:
 			log_line("[color=#EF4444]Unknown command '%s'. Type [b]help[/b] for available commands.[/color]" % cmd)
 
 
+func _cmd_diag() -> void:
+	if has_node("/root/Diag"):
+		var diag = get_node("/root/Diag")
+		diag.open_log_folder()
+		diag.copy_log_to_clipboard()
+		log_line("[color=#10B981]📋 Diagnostic report generated and copied to clipboard![/color]")
+		log_line("[color=#60A5FA]Opened log folder: %s[/color]" % OS.get_user_data_dir())
+		log_line("[color=#EBC85A]Log files written to:[/color]")
+		log_line("  1. %s/greathauses_diagnostic.log" % OS.get_user_data_dir())
+		log_line("  2. %s/greathauses_diagnostic.log" % OS.get_executable_path().get_base_dir())
+
+
 func _cmd_help(args: Array) -> void:
 	log_line("[color=#EBC85A][b]Available Great Hauses Chess Commands:[/b][/color]")
+	log_line("  [b]diag[/b]               - Generate, copy to clipboard & open diagnostic log (F2)")
 	log_line("  [b]houses[/b]             - List all 10 registered Great Hauses and details")
 	log_line("  [b]haus <id>[/b]         - Switch active haus (e.g. winterfang, goldclaw, hyrule)")
 	log_line("  [b]pieces [haus][/b]     - Inspect all 3D piece models and attachments")

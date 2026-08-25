@@ -45,6 +45,8 @@ var _e2e_harness: Node = null
 
 
 func _ready() -> void:
+	if has_node("/root/Diag"):
+		get_node("/root/Diag").log_event("BOOT", "Main scene initialized on %s (renderer: %s)" % [OS.get_name(), ProjectSettings.get_setting("rendering/renderer/rendering_method", "default")])
 	RenderingServer.set_default_clear_color(Color(0.02, 0.02, 0.02, 1.0))
 	_install_e2e_harness()   # FIRST: everything below may be under test
 	# visionOS: stand up XR (phase 1) BEFORE any scene is added

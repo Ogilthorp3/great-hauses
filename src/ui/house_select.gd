@@ -1310,3 +1310,19 @@ func _build_footer() -> void:
 	_footer.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	_footer.position.y = -36
 	add_child(_footer)
+
+	var diag_btn := Button.new()
+	diag_btn.name = "DiagLogBtn"
+	diag_btn.text = "📋 F2: Diagnostic Log"
+	diag_btn.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	diag_btn.offset_right = -20
+	diag_btn.offset_bottom = -14
+	diag_btn.add_theme_font_size_override("font_size", 12)
+	diag_btn.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7, 0.8))
+	diag_btn.focus_mode = Control.FOCUS_NONE
+	diag_btn.pressed.connect(func() -> void:
+		if has_node("/root/Diag"):
+			get_node("/root/Diag").open_log_folder()
+			get_node("/root/Diag").copy_log_to_clipboard()
+	)
+	add_child(diag_btn)

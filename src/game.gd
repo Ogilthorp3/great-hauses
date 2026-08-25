@@ -340,6 +340,8 @@ func _enter_tree() -> void:
 
 
 func _ready() -> void:
+	if has_node("/root/Diag"):
+		get_node("/root/Diag").log_event("GAME", "Game root initialized (Player: %s, Rival: %s, Mode: %s)" % [player_house_id, rival_house_id, Session.mode if Session.configured else "unconfigured"])
 	_perf_trace = Engine.has_meta("perf_trace")
 	_perf_t0 = _perf_init_us
 	_perf_step_us = _perf_init_us

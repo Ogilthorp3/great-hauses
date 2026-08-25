@@ -18,11 +18,18 @@ boot_splash/show_image.visionos=false
 
 [autoload]
 
+Diag="*res://src/diag/diagnostic_logger.gd"
 PieceAssets="*res://src/board/piece_assets.gd"
 Music="*res://src/audio/music_manager.gd"
 ; E2EDriver is NOT an autoload: the harness must not ship (see
 ; src/main.gd::_install_e2e_harness). It is registered at runtime, only for a
 ; --e2e launch, and release exports exclude test_e2e/** entirely.
+
+[debug]
+
+file_logging/enable_file_logging=true
+file_logging/log_path="user://logs/godot.log"
+file_logging/max_log_files=5
 
 [display]
 
