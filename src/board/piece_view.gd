@@ -563,7 +563,7 @@ func _set_ring_shown(shown: bool) -> void:
 # -- movement --------------------------------------------------------------
 
 
-func move_to(world_pos: Vector3, walk_time: float = 0.4) -> void:
+func move_to(world_pos: Vector3, walk_time: float = 0.18) -> void:
 	## Walk (the tower glides with a slight bob) to a world position.
 	## Await it; emits move_finished when the piece arrives.
 	var start := position
@@ -582,7 +582,7 @@ func move_to(world_pos: Vector3, walk_time: float = 0.4) -> void:
 		return
 	await _face(Vector3(dir.x, 0.0, dir.z))
 	if piece_type != Type.KNIGHT and _anim != null:
-		_anim.play(ANIM_WALK, 0.2)
+		_anim.play(ANIM_WALK, 0.1)
 	var tw := create_tween()
 	if piece_type == Type.ROOK:
 		# Static tower: glide with a subtle bob, no walk cycle to play.
@@ -612,7 +612,7 @@ func move_to(world_pos: Vector3, walk_time: float = 0.4) -> void:
 		if _model != null:
 			_model.rotation.x = 0.0
 	elif _anim != null:
-		_anim.play(ANIM_IDLE, 0.25)
+		_anim.play(ANIM_IDLE, 0.15)
 	_face_home()
 	move_finished.emit()
 
@@ -705,12 +705,12 @@ func play_capture(victim: PieceView) -> void:
 func _victory_stillness() -> void:
 	if piece_type == Type.KNIGHT:
 		_reseat_rider()
-		await _beat_wall(0.45)
+		await _beat_wall(0.12)
 		return
 	if _anim != null:
-		_anim.play(ANIM_IDLE, 0.5)   # slow blend: the weapon lowers, no cut
-		_anim.speed_scale = 0.45     # breath, not fidget
-	await _beat_wall(0.45)
+		_anim.play(ANIM_IDLE, 0.2)
+		_anim.speed_scale = 0.8
+	await _beat_wall(0.12)
 	if _anim != null:
 		_anim.speed_scale = 1.0
 
@@ -1615,7 +1615,7 @@ func _face(dir: Vector3) -> void:
 	if absf(wrapf(target_yaw - rotation.y, -PI, PI)) < 0.05:
 		return
 	var tw := create_tween()
-	tw.tween_property(self, "rotation:y", target_yaw, 0.14).set_trans(Tween.TRANS_SINE)
+	tw.tween_property(self, "rotation:y", target_yaw, 0.06).set_trans(Tween.TRANS_SINE)
 	await tw.finished
 
 
@@ -1623,7 +1623,7 @@ func _face_home() -> void:
 	if piece_type == Type.ROOK:
 		return
 	var tw := create_tween()
-	tw.tween_property(self, "rotation:y", _home_yaw, 0.18).set_trans(Tween.TRANS_SINE)
+	tw.tween_property(self, "rotation:y", _home_yaw, 0.08).set_trans(Tween.TRANS_SINE)
 
 
 ## NOTE the old `_horse_step` (a 0.2-unit step-in under the rider's Throw) and

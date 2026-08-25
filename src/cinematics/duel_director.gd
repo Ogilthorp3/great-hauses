@@ -55,25 +55,25 @@ const PIECE_NAMES: Array[String] = ["pawn", "rook", "knight", "bishop", "queen",
 const HOUSE_KEYS: Array[String] = ["FROST", "EMBER"]
 
 # Wall-clock durations (seconds). Exported so tests can shrink them.
-@export var swoop_wall := 0.55          ## orbit cam -> low duel angle
-@export var return_wall := 0.5          ## duel angle -> back to orbit cam
-@export var duel_ramp_down_wall := 0.4  ## time 1.0 -> duel_slow_scale
-@export var duel_slow_hold_wall := 1.1  ## dwell at full slow-mo (the strike beat)
-@export var duel_ramp_up_wall := 0.7    ## time back up to 1.0 (death plays out)
-@export var duel_tail_wall := 1.2       ## hold when no strike callable is given
-@export var duel_slow_scale := 0.18
-@export var promo_wall := 2.2           ## promotion flourish hold
+@export var swoop_wall := 0.22          ## orbit cam -> low duel angle
+@export var return_wall := 0.18          ## duel angle -> back to orbit cam
+@export var duel_ramp_down_wall := 0.12  ## time 1.0 -> duel_slow_scale
+@export var duel_slow_hold_wall := 0.35  ## dwell at full slow-mo (the strike beat)
+@export var duel_ramp_up_wall := 0.20    ## time back up to 1.0 (death plays out)
+@export var duel_tail_wall := 0.35       ## hold when no strike callable is given
+@export var duel_slow_scale := 0.35
+@export var promo_wall := 0.75           ## promotion flourish hold
 @export var promo_slow_scale := 0.6
-@export var checkmate_slow_scale := 0.15
-@export var checkmate_hold_wall := 3.0
-@export var checkmate_orbit_speed := 0.35   ## rad/s around the dying king
-@export var championship_glide_wall := 1.5  ## glide into the throne frame
-@export var championship_hold_wall := 3.2   ## hold on the tableau, panel up
+@export var checkmate_slow_scale := 0.25
+@export var checkmate_hold_wall := 1.4
+@export var checkmate_orbit_speed := 0.45   ## rad/s around the dying king
+@export var championship_glide_wall := 0.8  ## glide into the throne frame
+@export var championship_hold_wall := 1.6   ## hold on the tableau, panel up
 @export var championship_fov := 58.0
 ## Camera offset from the throne focus for the championship frame — a low 3/4
 ## hero angle from the board side that keeps dais, throne and dragon in shot.
 @export var championship_cam_offset := Vector3(1.9, 0.1, -7.2)
-@export var failsafe_wall_sec := 8.0    ## force-restore if a sequence overruns
+@export var failsafe_wall_sec := 6.0    ## force-restore if a sequence overruns
 @export var handheld_amp := 0.035       ## handheld noise amplitude (world units)
 ## THE BLOW LANDS IN THE LENS. A kill whose only witness is the victim's own
 ## animation reads as a man deciding to lie down — every rank's strike now
@@ -82,11 +82,11 @@ const HOUSE_KEYS: Array[String] = ["FROST", "EMBER"]
 ## (the victim's `death_style` goes non-empty on the first line of die()).
 ## Folded into the framing fit, so a kick can never shake a fighter out of shot.
 @export var impact_shake_mult := 3.2    ## x handheld_amp at the moment of death
-@export var impact_shake_wall := 0.45   ## wall seconds before it settles back
+@export var impact_shake_wall := 0.20   ## wall seconds before it settles back
 @export var duel_fov := 42.0
-@export var face_off_wall := 0.22       ## combatants turn to meet (ease-out)
-@export var face_rest_wall := 0.25      ## survivor eases back to his rest yaw
-@export var tableau_caption_beat := 1.25  ## championship caption beat length
+@export var face_off_wall := 0.08       ## combatants turn to meet (ease-out)
+@export var face_rest_wall := 0.10      ## survivor eases back to his rest yaw
+@export var tableau_caption_beat := 0.85  ## championship caption beat length
 
 var _active := false
 var _kind := ""

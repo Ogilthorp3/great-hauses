@@ -1298,7 +1298,7 @@ func _render_move_list() -> void:
 
 
 func _walk_time(from_pos: Vector3, to_pos: Vector3) -> float:
-	return clampf(from_pos.distance_to(to_pos) * 0.3, 0.3, 1.1)
+	return clampf(from_pos.distance_to(to_pos) * 0.045, 0.12, 0.22)
 
 
 func _duel_meta(mover_is_ember: bool) -> Dictionary:
@@ -1325,7 +1325,7 @@ func _animate_move(move, mover_is_ember: bool, moment_info: Dictionary = {}) -> 
 			views.erase(r_from)
 			var r_to := sq_of(move.rook_to)
 			views[r_to] = rook
-			rook.move_to(board.square_to_world(r_to), 0.9)  # glides while the king walks
+			rook.move_to(board.square_to_world(r_to), 0.18)  # snappy glide with king
 	if move.is_capture():
 		var victim: PieceView = views.get(sq_of(move.captured_square))
 		if victim != null:

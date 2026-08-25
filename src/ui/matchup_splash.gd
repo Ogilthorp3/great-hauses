@@ -377,14 +377,19 @@ func _play_intro_animation() -> void:
 		_vs_label.pivot_offset = Vector2(80, 40)
 		_vs_label.scale = Vector2.ONE * 2.8
 		var tw_vs := create_tween()
-		tw_vs.tween_property(_vs_label, "scale", Vector2.ONE, 0.45).set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
+		tw_vs.tween_property(_vs_label, "scale", Vector2.ONE, 0.25).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+
+
+func _gui_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed:
+		_proceed_to_game()
 
 
 func _process(delta: float) -> void:
 	if not _is_loading:
 		return
 	_elapsed += delta
-	var progress := clampf(_elapsed / 6.2, 0.0, 1.0)
+	var progress := clampf(_elapsed / 1.8, 0.0, 1.0)
 	if _meter_bar != null:
 		_meter_bar.value = progress * 100.0
 
@@ -393,7 +398,7 @@ func _process(delta: float) -> void:
 		var pulse := 1.0 + 0.08 * sin(_elapsed * 12.0)
 		_vs_label.scale = Vector2(pulse, pulse)
 
-	if _elapsed >= 7.0:
+	if _elapsed >= 2.2:
 		_proceed_to_game()
 
 
