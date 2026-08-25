@@ -290,9 +290,6 @@ build_macos() {
     cp -R "$PROJ/tools/engines/macos/lc0" "$target/Contents/MacOS/lc0"
     chmod +x "$target/Contents/MacOS/lc0/lc0"
   fi
-  if command -v codesign >/dev/null 2>&1; then
-    codesign --force --deep --sign - "$target" 2>/dev/null || true
-  fi
 
   local bin
   bin="$(ls "$target/Contents/MacOS/" | grep -v stockfish | grep -v lc0 | head -1)"
@@ -321,6 +318,32 @@ build_macos() {
     return 1
   fi
   note "macos build verified (booted clean)"
+
+  # ── Sign LAST, and PROVE it. THE v0.3.5 SCAR (2026-08-25): signing ran
+  # before this boot test, the booted app wrote greathauses_diagnostic.log
+  # into Contents/MacOS, the seal broke, and `|| true` swallowed every
+  # complaint — the zip shipped failing `codesign --verify`, which on a
+  # friend's Mac reads as "app is damaged", with the build machine's own
+  # diagnostic report inside the bundle. Order is the fix: nothing may touch
+  # the bundle after the seal, and verification is a HARD gate.
+  if ! command -v codesign >/dev/null 2>&1; then
+    fail "codesign not available — cannot seal the macOS bundle"; return 1
+  fi
+  rm -f "$target/Contents/MacOS/greathauses_diagnostic.log"   # belt + braces
+  if [ -f "$target/Contents/MacOS/stockfish" ]; then
+    codesign --force --sign - "$target/Contents/MacOS/stockfish" \
+      >"$OUT/macos/codesign.log" 2>&1 || { fail "codesign failed on nested stockfish (see codesign.log)"; return 1; }
+  fi
+  if [ -f "$target/Contents/MacOS/lc0/lc0" ]; then
+    codesign --force --sign - "$target/Contents/MacOS/lc0/lc0" \
+      >>"$OUT/macos/codesign.log" 2>&1 || { fail "codesign failed on nested lc0 (see codesign.log)"; return 1; }
+  fi
+  codesign --force --deep --sign - "$target" >>"$OUT/macos/codesign.log" 2>&1 \
+    || { fail "codesign failed on the bundle (see codesign.log)"; return 1; }
+  codesign --verify --deep --strict "$target" >>"$OUT/macos/codesign.log" 2>&1 \
+    || { fail "codesign --verify --deep --strict REFUSED the bundle (see codesign.log) — do not ship this"; return 1; }
+  note "codesign : ad-hoc seal applied and verified (--deep --strict)"
+
   if [ -d "/Applications" ] && [ -w "/Applications" ]; then
     note "syncing to /Applications/Great Hauses Chess.app"
     rm -rf "/Applications/GreatHauses.app" "/Applications/Great Hauses Chess.app"

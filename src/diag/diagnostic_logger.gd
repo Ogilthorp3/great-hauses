@@ -48,12 +48,17 @@ func _unhandled_input(event: InputEvent) -> void:
 func _init_log_files() -> void:
 	# 1. user:// path (always writable)
 	_log_file_user = FileAccess.open(LOG_USER_PATH, FileAccess.WRITE)
-	
-	# 2. Local directory next to the executable (Windows convenient)
-	var exe_dir := OS.get_executable_path().get_base_dir()
-	if not exe_dir.is_empty():
-		_local_path = exe_dir.path_join("greathauses_diagnostic.log")
-		_log_file_local = FileAccess.open(_local_path, FileAccess.WRITE)
+
+	# 2. A copy next to the executable — WINDOWS ONLY. Everywhere else "next
+	# to the executable" is INSIDE a signed bundle (the shipped .app, or
+	# Godot.app on dev runs): writing there breaks the code seal, which
+	# Gatekeeper reads as tampering — the v0.3.5 zip shipped the build
+	# machine's own report inside the .app because of this line.
+	if OS.has_feature("windows"):
+		var exe_dir := OS.get_executable_path().get_base_dir()
+		if not exe_dir.is_empty():
+			_local_path = exe_dir.path_join("greathauses_diagnostic.log")
+			_log_file_local = FileAccess.open(_local_path, FileAccess.WRITE)
 
 
 func _write_line(line: String) -> void:
