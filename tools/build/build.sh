@@ -285,10 +285,16 @@ build_macos() {
     chmod +x "$target/Contents/MacOS/stockfish"
   fi
   if [ -d "$PROJ/tools/engines/macos/lc0" ]; then
-    note "bundling lc0/ (Leela Chess Zero Metal) inside $MAC_OUT_NAME (Contents/MacOS/lc0/)"
-    rm -rf "$target/Contents/MacOS/lc0"
-    cp -R "$PROJ/tools/engines/macos/lc0" "$target/Contents/MacOS/lc0"
-    chmod +x "$target/Contents/MacOS/lc0/lc0"
+    # Resources, NOT MacOS: data files (the .pb.gz nets) under Contents/MacOS
+    # can only be sealed via xattr signatures, which die in any zip round trip
+    # — the extracted app then fails `codesign --verify` on a friend's Mac.
+    # Under Resources they are hashed into _CodeSignature/CodeResources, a
+    # real file that survives transit. LeelaBridge.sidecar_dirs() already
+    # searches Contents/Resources/lc0 and finds the weights beside the binary.
+    note "bundling lc0/ (Leela Chess Zero Metal) inside $MAC_OUT_NAME (Contents/Resources/lc0/)"
+    rm -rf "$target/Contents/MacOS/lc0" "$target/Contents/Resources/lc0"
+    cp -R "$PROJ/tools/engines/macos/lc0" "$target/Contents/Resources/lc0"
+    chmod +x "$target/Contents/Resources/lc0/lc0"
   fi
 
   local bin
@@ -334,8 +340,8 @@ build_macos() {
     codesign --force --sign - "$target/Contents/MacOS/stockfish" \
       >"$OUT/macos/codesign.log" 2>&1 || { fail "codesign failed on nested stockfish (see codesign.log)"; return 1; }
   fi
-  if [ -f "$target/Contents/MacOS/lc0/lc0" ]; then
-    codesign --force --sign - "$target/Contents/MacOS/lc0/lc0" \
+  if [ -f "$target/Contents/Resources/lc0/lc0" ]; then
+    codesign --force --sign - "$target/Contents/Resources/lc0/lc0" \
       >>"$OUT/macos/codesign.log" 2>&1 || { fail "codesign failed on nested lc0 (see codesign.log)"; return 1; }
   fi
   codesign --force --deep --sign - "$target" >>"$OUT/macos/codesign.log" 2>&1 \

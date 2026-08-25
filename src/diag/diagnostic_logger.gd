@@ -174,6 +174,9 @@ func _check_chess_engines() -> void:
 		base_dir.path_join("lc0/lc0.exe"),
 		base_dir.path_join("lc0.exe"),
 		base_dir.path_join("lc0/lc0"),
+		# macOS bundle: lc0 ships under Contents/Resources/lc0 (data files
+		# there survive the code seal through a zip; MacOS/ would not).
+		base_dir.get_base_dir().path_join("Resources/lc0/lc0"),
 		base_dir.path_join("Contents/MacOS/lc0/lc0"),
 		ProjectSettings.globalize_path("res://tools/engines/windows/lc0/lc0.exe"),
 		ProjectSettings.globalize_path("res://tools/engines/macos/lc0/lc0"),
