@@ -75,6 +75,7 @@ static func _analyze_native_pipe(sf_path: String, fen: String, movetime_ms: int)
 		"pv": [],
 		"raw_info": ""
 	}
+	var info := OS.execute_with_pipe(sf_path, [])
 	if info.is_empty() or not info.has("stdio"):
 		return result
 

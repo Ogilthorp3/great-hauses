@@ -411,19 +411,25 @@ func _ready() -> void:
 		if xr_cam:
 			xr_cam.current = false
 
-	# Snapshot SubViewport for visual test tooling
-	var snap_vp := SubViewport.new()
-	snap_vp.name = "SnapViewport"
-	snap_vp.size = Vector2i(1280, 720)
-	snap_vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	snap_vp.use_xr = false
-	var snap_cam := Camera3D.new()
-	snap_cam.name = "SnapCamera"
-	snap_cam.fov = 50.0
-	snap_cam.near = 0.1
-	snap_cam.far = 100.0
-	snap_vp.add_child(snap_cam)
-	add_child(snap_vp)
+	# Snapshot SubViewport for visual test tooling (tools/visionos/snap.py).
+	# XR-only: sharing the main World3D at UPDATE_ALWAYS, on desktop this was
+	# a complete SECOND scene render every frame — and its every-30-frames
+	# get_image()+save_png readback a recurring ~130 ms worst-frame hitch
+	# (perf gate 2026-08-25: settled board 1324 draws/882k prims vs the 900/
+	# 520k ceilings; both back under with the viewport gated off).
+	if XRSession.is_immersive():
+		var snap_vp := SubViewport.new()
+		snap_vp.name = "SnapViewport"
+		snap_vp.size = Vector2i(1280, 720)
+		snap_vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+		snap_vp.use_xr = false
+		var snap_cam := Camera3D.new()
+		snap_cam.name = "SnapCamera"
+		snap_cam.fov = 50.0
+		snap_cam.near = 0.1
+		snap_cam.far = 100.0
+		snap_vp.add_child(snap_cam)
+		add_child(snap_vp)
 	var fen := ""
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--difficulty="):
@@ -852,7 +858,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				return
 		elif event.keycode == KEY_C:
 			if _coach_overlay != null:
-				_coach_overlay.toggle_coach()
+				if _coach_overlay.toggle_coach():
+					_refresh_turn_moves()
 				get_viewport().set_input_as_handled()
 				return
 		elif event.keycode == KEY_T:
@@ -1378,7 +1385,11 @@ func _refresh_turn_moves() -> void:
 	_turn_moves = state.legal_moves(true)
 	if board:
 		board.set_occupied_squares(views.keys())
-	if state != null and state.turn == player_color and _coach_overlay != null:
+	# Coach analysis forks Stockfish + Lc0 and reads their pipes on the MAIN
+	# thread (up to ~3.3 s a ply) — it may only run while the coach panel is
+	# actually open, never for the hidden-by-default overlay.
+	if state != null and state.turn == player_color and _coach_overlay != null \
+			and _coach_overlay.is_coach_active:
 		var uci_history: Array = []
 		if "move_stack" in state and state.move_stack != null:
 			for m in state.move_stack:

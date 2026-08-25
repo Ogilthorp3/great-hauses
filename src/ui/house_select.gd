@@ -396,6 +396,12 @@ func _set_opp_index(i: int) -> void:
 			_opp_confirm_btn.text = "⚔️  CONTINUE TO WAR MODE  ▶"
 			if _footer != null:
 				_footer.text = ""
+	# Keyboard/tap selection must never land on a tile the scroll has clipped
+	# out of view (the list is taller than its ScrollContainer).
+	if _opp_panel != null and i >= 0 and i < _opp_buttons.size():
+		var scroll: ScrollContainer = _opp_panel.find_child("OppScroll", true, false)
+		if scroll != null:
+			scroll.ensure_control_visible(_opp_buttons[i])
 
 
 func _set_mode_index(i: int) -> void:
@@ -1112,8 +1118,8 @@ func _build_net_panel() -> void:
 	_net_join_box.add_child(addr_label)
 
 	_net_address = LineEdit.new()
-	_net_address.name = "AddressInput"
-	_net_address.placeholder_text = "192.168.1.50:4242"
+	_net_address.name = "NetAddress"
+	_net_address.placeholder_text = "192.168.1.50:7777"
 	_net_address.alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_net_address.custom_minimum_size = Vector2(280, 36)
 	_net_address.add_theme_font_size_override("font_size", 16)
@@ -1121,7 +1127,7 @@ func _build_net_panel() -> void:
 	_net_join_box.add_child(_net_button("Ride Out", _net_join_submit))
 
 	_net_firewall_label = Label.new()
-	_net_firewall_label.name = "NetFirewall"
+	_net_firewall_label.name = "NetFirewallNote"
 	_net_firewall_label.text = "If macOS asks to allow incoming connections, click Allow."
 	_net_firewall_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_net_firewall_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -1147,7 +1153,7 @@ func _build_net_panel() -> void:
 	root.add_child(_net_copy_btn)
 
 	_net_copy_note = Label.new()
-	_net_copy_note.name = "NetCopyNote"
+	_net_copy_note.name = "NetCopied"
 	_net_copy_note.text = "Address copied to clipboard."
 	_net_copy_note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_net_copy_note.add_theme_font_size_override("font_size", 13)
@@ -1262,6 +1268,14 @@ func _net_join_submit() -> void:
 	if addr.is_empty():
 		_net_status_label.text = "Please enter an address."
 		return
+	# A pasted share line carries commentary ("· same Wi-Fi — try this one
+	# first"); parse it and ECHO the understood address back into the field,
+	# so a later failure reads as unreachable, never as a typo (README step 3).
+	var parsed: Array = NetProtocol.parse_address(addr)
+	var host := str(parsed[0])
+	if not host.is_empty():
+		addr = ("[%s]:%d" if host.contains(":") else "%s:%d") % [host, int(parsed[1])]
+		_net_address.text = addr
 	_net_busy = true
 	_net_status_label.text = "Riding out to %s…" % addr
 	net_join_requested.emit(addr)
@@ -1273,6 +1287,8 @@ func _net_on_copy_pressed() -> void:
 	DisplayServer.clipboard_set(_net_primary)
 	net_copied_count += 1
 	net_last_copied = _net_primary
+	# A clipboard write is invisible — the note must SAY what was copied.
+	_net_copy_note.text = "Copied — %s" % _net_primary
 	_net_copy_note.visible = true
 
 
@@ -1280,6 +1296,9 @@ func net_share_lines(lines: Array, primary_addr: String) -> void:
 	_net_primary = primary_addr
 	_net_share_label.text = "\n".join(lines)
 	_net_share_label.visible = true
+	# The OS firewall prompt appears the moment the socket opens — warn the
+	# host here or Cancel-on-the-prompt later looks exactly like a bad address.
+	_net_firewall_label.visible = true
 	_net_copy_btn.visible = not _net_primary.is_empty()
 	_net_copy_note.visible = false
 
@@ -1310,6 +1329,19 @@ func _build_footer() -> void:
 	_footer.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	_footer.position.y = -36
 	add_child(_footer)
+
+	# CC BY 4.0 obliges the attribution to appear in-game (assets/music/
+	# CREDITS.md) — this label is that surface; the music e2e asserts it.
+	var credits := Label.new()
+	credits.name = "MusicCredits"
+	credits.text = MusicCredits.CREDITS_SHORT
+	credits.add_theme_font_size_override("font_size", 11)
+	credits.add_theme_color_override("font_color", Color(TEXT_DIM, 0.75))
+	credits.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	credits.offset_left = 20
+	credits.offset_top = -30
+	credits.offset_bottom = -12
+	add_child(credits)
 
 	var diag_btn := Button.new()
 	diag_btn.name = "DiagLogBtn"
